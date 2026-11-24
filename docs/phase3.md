@@ -54,3 +54,39 @@ Engine requirements:
   nearest key from `unknown_keys` too (the form lists all, unranked).
 - `beam` (guns), `blast`, `mine`, `travel_snd` (bullets) are untyped in the schemas, so the form edits them as raw JSON. Requirement:
   typed schemas for them.
+
+## P3. Mod project shell
+
+Works (headless):
+
+- Open a mod folder or make one (`mod.json` only: `id` and `name` from the folder, `version` 0.1.0, `format` 1, `game_version` =
+  `ENGINE_VERSION`; an existing `mod.json` is never overwritten). `mod.json` is edited through the P2 form (the "Mod" tab).
+- Each project builds its own overlay (`authoring::overlay_into`) in its own scratch folder, rebuilt after a save or a reload.
+- Documents keep what the mod's file says (`own`), what it is laid over (`base`: the `extends` parent or the import's file) and what the
+  game will see (`edited`, read back through `read_merged`). A retail file the mod does not have opens on the import's version.
+- Undo/redo is a command stack of `Edit`s across documents (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y); a failing edit changes nothing;
+  consecutive sets of one field (typing, dragging) are one step.
+- Save as diff (`project::diff`): an `extends` file holds only the changed keys, with `set` pointers when only some array elements
+  changed and that is shorter; a merged-path file (`guns.json`, `bullets.json`, ...) holds only the changed entries and keys; any other
+  file is written whole. Keys the mod's own file already has stay (in their order), hand-written `set` entries stay. A clean document is
+  never written, nor one whose new content equals the file in meaning. Every expected result is checked against the engine's own
+  overlay: laying the written file over its base with `overlay_into` + `read_merged` gives back exactly what was edited.
+- Code-first: open files are stamped (length, time, content hash) and polled about once a second. A file changed outside the editor
+  reloads when it has no unsaved edits and says so; with unsaved edits it is a conflict with "Reload from disk" / "Keep my edits" (the
+  latter re-applies this session's edits over the new file, so keys a script added are kept). The editor's own writes are not seen as
+  outside changes.
+- Layer view from the engine's `ModReport` (overridden, merged, extends, added, textures, skipped with the reason) plus unsaved files.
+- Problems panel fed by `authoring::check_mod` on a background thread (on open, after each save, on "Check"); errors first, the
+  suggestion as "did you mean"; a click sets `Focus { file, path }`, which the ship and weapon editors (P4) open.
+
+Not verified here: the panels and dialogs in a window, overlay rebuild time on a full import, `extends` parents from a real import.
+
+Engine requirements:
+
+- The path rule (merged / extends / replaced) and the merged-path list are restated in `project::merge_kind` (PROVISIONAL; the engine's
+  `modding::MERGED` is not part of `authoring`). Requirement: `authoring::merge_rule(rel)`.
+- A mod file cannot remove a key the file below it has; the editor warns on save and keeps the key. Requirement: a removal form for
+  `extends` files (or say it is not wanted).
+- The parent of an `extends` file is found by restating the rule (another ship's or map's file at depth 3, else a sibling
+  `<parent>.json`), and `ModEntry` does not say which parent each `extends` file used. Requirement: the parent path per file in the
+  report, or `authoring::read_parent(root, rel)`.

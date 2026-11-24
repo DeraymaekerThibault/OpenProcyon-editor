@@ -9,4 +9,6 @@ pub mod map_view;
 pub mod mission;
 pub mod mission_panel;
 pub mod overlay;
+pub mod project;
+pub mod project_panel;
 pub mod schema_form;

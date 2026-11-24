@@ -1,7 +1,7 @@
 //! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
-use openprocyon_editor::{map_view, mission_panel};
+use openprocyon_editor::{map_view, mission_panel, project_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
@@ -44,6 +44,8 @@ fn main() {
         .insert_resource(find_assets())
         .init_resource::<mission_panel::State>()
         .init_resource::<map_view::State>()
+        .init_resource::<project_panel::State>()
+        .init_resource::<project_panel::Focus>()
         .init_resource::<Tab>()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
@@ -51,6 +53,7 @@ fn main() {
             commands.spawn(Camera2d);
         })
         .add_systems(EguiPrimaryContextPass, panel)
+        .add_systems(Update, project_panel::poll_system)
         .run();
 }
 
@@ -58,15 +61,25 @@ fn main() {
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     #[default]
+    Project,
     Mission,
     Map,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 2] = [(Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+    const ALL: [(Tab, &'static str); 3] = [(Tab::Project, "Mod"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
 }
 
-fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut tab: ResMut<Tab>, mut mission: ResMut<mission_panel::State>, mut map: ResMut<map_view::State>) -> Result {
+fn panel(
+    mut contexts: EguiContexts,
+    assets: Res<Assets>,
+    mut tab: ResMut<Tab>,
+    mut mission: ResMut<mission_panel::State>,
+    mut map: ResMut<map_view::State>,
+    mut project: ResMut<project_panel::State>,
+    mut focus: ResMut<project_panel::Focus>,
+) -> Result {
+    project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
     let ctx = contexts.ctx_mut()?;
     let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(ctx.viewport_rect()));
     egui::Panel::left("side").resizable(true).show(&mut root, |ui| {
@@ -85,8 +98,13 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut tab: ResMut<Tab>, 
                 ui.hyperlink(IMPORT_HELP)
             }
         };
+        project_panel::side(ui, &mut project, assets.dir.as_deref().filter(|d| d.is_dir()));
     });
-    egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| mission_panel::problems(ui, &mission));
+    egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| {
+        project_panel::problems_panel(ui, &mut project, &mut focus);
+        ui.separator();
+        egui::CollapsingHeader::new("Mission problems (spike)").default_open(false).show(ui, |ui| mission_panel::problems(ui, &mission));
+    });
     egui::Panel::top("tabs").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             for (t, label) in Tab::ALL {
@@ -96,6 +114,7 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut tab: ResMut<Tab>, 
     });
     egui::CentralPanel::default().show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| match *tab {
+            Tab::Project => project_panel::tab(ui, &mut project),
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
         });
