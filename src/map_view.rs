@@ -57,7 +57,7 @@ pub fn save(out: &Path, id: &str, map: &Value) -> Result<PathBuf, String> {
 
 /// A dragged coordinate as the f32's shortest decimal (`-369.23077`), not the widened f64 (`-369.23077392578125`).
 /// The engine reads positions as f32 anyway, so nothing is lost.
-fn short(v: f32) -> Value {
+pub fn short(v: f32) -> Value {
     json!(v.to_string().parse::<f64>().unwrap_or(v as f64))
 }
 

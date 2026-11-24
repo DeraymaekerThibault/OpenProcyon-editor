@@ -10,3 +10,4 @@ pub mod mission;
 pub mod mission_panel;
 pub mod overlay;
 pub mod schema_form;
+pub mod ship_view;
