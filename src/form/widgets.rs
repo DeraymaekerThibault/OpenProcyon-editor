@@ -84,7 +84,10 @@ pub fn show_typed(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx,
         }
     });
     let mut st = St { ctx, doc, unknown, out: vec![], typed: 0, drawn: vec![false; ctx.findings.len()], fresh, id };
-    ui.push_id(id, |ui| {
+    // An explicit id (not `push_id`): egui derives the ids of the widgets inside from the parent's widget count, so a button that appears
+    // above the form (the first edit makes "Revert file" show up) would give every box a new id and the box being typed in would
+    // lose focus and its text state.
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
         if root.is_compound() {
             st.notes(ui, "");
             st.body(ui, &root, "");
@@ -592,6 +595,55 @@ mod tests {
 
     fn schema(name: &str) -> Value {
         openprocyon::authoring::schemas().into_iter().find(|(n, _)| *n == name).unwrap().1
+    }
+
+    /// One frame at `t` with `events`; `above` draws that many buttons before the form, the way the panel's buttons come and go.
+    fn run(egui_ctx: &egui::Context, doc: &Value, base: &Value, above: usize, events: Vec<egui::Event>) -> (Vec<Edit>, Vec<(String, egui::Pos2, egui::Vec2)>) {
+        let schema = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let ctx = FormCtx { base: Some(base), findings: &[], focus: None, hidden: &[] };
+        let mut out = vec![];
+        let mut full = egui_ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            for i in 0..above {
+                let _ = ui.button(format!("above {i}"));
+            }
+            out = show(ui, &schema, doc, &ctx, egui::Id::new("ship form"));
+        });
+        full.textures_delta.clear();
+        let mut texts = vec![];
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Pos2, egui::Vec2)>) {
+            match shape {
+                egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos, t.galley.size())),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        full.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        (out, texts)
+    }
+
+    #[test]
+    fn a_button_appearing_above_the_form_does_not_take_focus_from_the_box_being_typed_in() {
+        let base = json!({"race": "Navy", "points": 10});
+        let doc = json!({"race": "Navy", "points": 10});
+        let egui_ctx = egui::Context::default();
+        let (_, texts) = run(&egui_ctx, &doc, &base, 0, vec![]);
+        let (_, texts2) = run(&egui_ctx, &doc, &base, 0, vec![]);
+        assert_eq!(texts.len(), texts2.len());
+        let (_, pos, size) = texts2.iter().find(|(t, _, _)| t == "points").cloned().expect("a points label");
+        let click = egui::pos2(pos.x + size.x + 8.0 + 10.0, pos.y + size.y / 2.0);
+        let button = |pressed| egui::Event::PointerButton { pos: click, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        run(&egui_ctx, &doc, &base, 0, vec![egui::Event::PointerMoved(click), button(true)]);
+        run(&egui_ctx, &doc, &base, 0, vec![button(false)]);
+        run(&egui_ctx, &doc, &base, 0, vec![]);
+        let focused = egui_ctx.memory(|m| m.focused()).expect("the click put the number box in edit mode");
+        assert!(egui_ctx.read_response(focused).is_some(), "the focused box exists");
+        // the first edit makes a button appear above the form: the same box is still there, still focused
+        for above in [1, 2, 0, 3] {
+            run(&egui_ctx, &doc, &base, above, vec![]);
+            run(&egui_ctx, &doc, &base, above, vec![]);
+            assert_eq!(egui_ctx.memory(|m| m.focused()), Some(focused), "{above} buttons above");
+            assert!(egui_ctx.read_response(focused).is_some(), "{above} buttons above: the box kept its id");
+        }
     }
 
     #[test]
