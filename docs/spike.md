@@ -27,24 +27,58 @@ compare against a web stack before Phase 3. Record what was found under each ite
 - [ ] **2. Load one imported map through the engine's loaders.**
 
   Findings:
+  - Not attempted in this session: must be run on a machine with an import (needs the player's imported assets).
 
 - [ ] **3. Move one island with the mouse and save `map.json`.**
 
   Findings:
+  - Not attempted in this session: must be run on a machine with an import (needs the player's imported assets).
 
-- [ ] **4. Edit one rule through a form generated from `openprocyon --dump-rule-schema`.**
+- [x] **4. Edit one rule through a form generated from `openprocyon --dump-rule-schema`.**
 
   Findings:
+  - Works. The schema is taken in-process: `openprocyon::rules::schema::to_json()` is public at v0.2.0 (`pub mod schema` in the private
+    `mod eval`, re-exported through `rules::*`), the same value `--dump-rule-schema` prints, no assets needed. `schema_form.rs`
+    builds a Type picker plus one widget per field kind: `bool` checkbox writing "TRUE"/"FALSE", `number` DragValue with `range`,
+    `enum` ComboBox, `text` edit, every other kind a ComboBox of the mission's defined names. Tested: schema loads, booleans are
+    strings, new items carry required defaults, names are collected from the fixture. The egui widgets themselves are compiled
+    but not seen: no display here.
+  - Gaps for the `authoring` API: (a) `rules::check::Defs` (what a mission defines, per kind) is private; only `known_names`
+    (groups) is public. The editor re-reads the names from the files' layout (`Names::collect`, PROVISIONAL), and flags, timers
+    and counters through the schema's kinds. Needs `defined_names(mission, map, media) -> per-kind sorted lists`.
+    (b) The schema JSON loses nothing, but `soft` and `used` are not acted on by the form; `Kind::ConditionList`/`Condition`
+    (`OP Any Of`, `OP Not`) have no widget yet. (c) Rule-level keys (`name`, `Run Once`, `Is Active`, `conditions`, `actions`) are
+    not in the schema; the editor hard-codes them, and the files hold JSON booleans there, unlike the Type fields.
+    The schema should describe the rule envelope too.
 
-- [ ] **5. Save `map.json` and `mission.json` in the engine's JSON layout** (indent 2, number lists on one line, final newline;
+- [x] **5. Save `map.json` and `mission.json` in the engine's JSON layout** (indent 2, number lists on one line, final newline;
   see `tools/jsonio.py` in the engine).
 
   Findings:
+  - Works. `jsonfmt.rs` ports `tools/jsonio.py` (indent 2, number lists on one line, `ensure_ascii` escapes, key order kept via
+    serde_json `preserve_order`, final newline). The Python tool wrote the committed expectations in `tests/fixtures/gates/` and
+    `edge/` once; the unit tests check the Rust writer is byte-identical on the gate-ambush files and a synthetic edge file, and
+    that read-then-write is stable.
+  - Known difference (PROVISIONAL): number text is serde_json's; exponent forms differ from Python (`1e-5` vs `1e-05`). No
+    engine file has such numbers. Requirement: the `authoring` API should own the one writer so tools cannot drift.
 
-- [ ] **6. Show `--check-mission` findings inline.**
+- [x] **6. Show `--check-mission` findings inline.**
 
   Findings:
+  - Works. `rules::check::check(mission, map, media)` and `Problem { level, rule, at, field, message }` are public at v0.2.0 and run
+    in-process; the panel lists them and marks the field a problem names (red label plus the message). Tested: the worked
+    example has no errors; renaming a volume to "Gate Aera" gives an error on field "Volume Name" suggesting "Gate Area".
+  - Gap: a `Problem` has no structured location. The editor finds the condition or action by parsing `at`
+    ("action #5 'Start Timer'") and the rule by name (PROVISIONAL, depends on wording). Requirement: findings with rule index,
+    list (conditions/actions), item index and field, plus the suggested replacement as data (it is only inside `message`).
+    Also `Level`/`Problem` have no serde, so a JSON export for other tools needs the same gap closed.
 
 - [ ] **7. Launch the game with `--mod <folder> --map <id>` on the result.**
 
   Findings:
+  - Module written and unit-tested for argument building (`--mod <folder> --map <id>`), the binary lookup
+    (`PROCYON_GAME_BIN`, else `openprocyon` on PATH) and that a missing binary is an `Err`, not a panic. The UI spawns it with
+    `Command::spawn` and polls `try_wait`, so it never blocks. NOT verified: no game binary or assets exist in this container, so
+    nothing was launched and the item stays unticked; the window was not opened either (no display, and no GPU for a headless run).
+  - Gap: the game offers no way to ask which engine version it is, nor `--check-mod`; Phase 1 should add both. `rfd` folder
+    dialogs block the UI thread while open (acceptable in the spike).

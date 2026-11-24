@@ -1,6 +1,13 @@
 //! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
+mod checks;
+mod jsonfmt;
+mod launch;
+mod mission;
+mod mission_panel;
+mod schema_form;
+
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use openprocyon::setup::{Imported, imported};
@@ -30,6 +37,7 @@ fn find_assets() -> Assets {
 fn main() {
     App::new()
         .insert_resource(find_assets())
+        .init_resource::<mission_panel::State>()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, |mut commands: Commands| {
@@ -39,7 +47,7 @@ fn main() {
         .run();
 }
 
-fn panel(mut contexts: EguiContexts, assets: Res<Assets>) -> Result {
+fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mission_panel::State>) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(ctx.viewport_rect()));
     egui::Panel::left("side").resizable(true).show(&mut root, |ui| {
@@ -58,6 +66,10 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>) -> Result {
                 ui.hyperlink(IMPORT_HELP)
             }
         };
+    });
+    egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| mission_panel::problems(ui, &mission));
+    egui::CentralPanel::default().show(&mut root, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| mission_panel::show(ui, &mut mission));
     });
     Ok(())
 }

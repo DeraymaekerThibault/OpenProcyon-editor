@@ -16,6 +16,7 @@ openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", tag 
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 bevy_egui = "0.43"
 rfd = "0.17"
+serde_json = { version = "1", features = ["preserve_order"] } # same as the engine
 
 # Copied from the engine: dependencies optimised, our own code quick to rebuild.
 [profile.dev]
