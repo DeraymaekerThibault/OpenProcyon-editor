@@ -267,7 +267,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     if ship_id_of(&focus.rel).is_some() && st.take_focus(focus) {
         *focus = Focus::default();
     }
-    let schema = st.schema.get_or_insert_with(|| project_panel::schema_named("ship.schema.json")).clone();
+    let schema = st.schema.get_or_insert_with(|| form_schema(project_panel::schema_named("ship.schema.json"))).clone();
     let (root, entry, unsaved): (Option<PathBuf>, Option<ModEntry>, Vec<String>) = match &ps.project {
         Some(p) => (Some(p.root.clone()), p.entry().cloned(), p.dirty_rels()),
         None => (import.map(Path::to_path_buf), None, vec![]),
@@ -442,6 +442,16 @@ fn new_ship_ui(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State,
 /// Prefixes the pointer of `edit`, relative to a ship's part, with `/<escaped key>` (shared with the weapons tab's entries).
 pub fn prefixed(key: &str, edit: &crate::edit::Edit) -> crate::edit::Edit {
     crate::edit::Edit { pointer: format!("/{}{}", escape(key), edit.pointer), old: edit.old.clone(), new: edit.new.clone() }
+}
+
+/// The ship schema as the form shows it: without `extends` and `set`, the merge keywords. The form edits the merged ship (what the
+/// game sees); the project writes `extends` and `set` itself when it saves the diff, so offering them as fields would only confuse.
+pub fn form_schema(mut schema: Value) -> Value {
+    if let Some(props) = schema["properties"].as_object_mut() {
+        props.shift_remove("extends");
+        props.shift_remove("set");
+    }
+    schema
 }
 
 #[cfg(test)]
@@ -628,5 +638,16 @@ mod tests {
         assert!(!st.take_focus(&Focus { rel: "data/weapons/guns.json".into(), path: "G.range".into() }));
         assert!(st.take_focus(&Focus { rel: ship_rel("Ship_A"), path: "guns.M1.arc_deg".into() }));
         assert_eq!((st.selected.as_deref(), st.focus.as_deref()), (Some("Ship_A"), Some("/guns/M1/arc_deg")));
+    }
+
+    #[test]
+    fn the_form_schema_has_no_merge_keywords() {
+        let full = project_panel::schema_named("ship.schema.json");
+        assert!(full["properties"].get("extends").is_some(), "the engine's schema has them");
+        let f = form_schema(full);
+        assert!(f["properties"].get("extends").is_none() && f["properties"].get("set").is_none());
+        assert!(f["properties"].get("points").is_some());
+        // a file that has them is not flagged as having unknown keys by the form (the engine's own schema knows them)
+        assert!(openprocyon::authoring::unknown_keys(&project_panel::schema_named("ship.schema.json"), &serde_json::json!({"extends": "X"})).is_empty());
     }
 }

@@ -18,4 +18,5 @@ pub mod project_panel;
 pub mod schema_form;
 pub mod ship_view;
 pub mod ships_panel;
+pub mod startup;
 pub mod weapons_panel;

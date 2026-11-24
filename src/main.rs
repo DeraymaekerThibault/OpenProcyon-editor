@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, weapons_panel};
+use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -40,9 +40,21 @@ fn find_assets() -> Assets {
     Assets { dir, status }
 }
 
+/// The command-line flags (`startup::parse`), kept for the systems that act on them.
+#[derive(Resource)]
+struct Flags(startup::Args);
+
 fn main() {
+    let flags = match startup::parse(std::env::args().skip(1)) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("procyon-editor: {e}");
+            std::process::exit(2);
+        }
+    };
     App::new()
         .insert_resource(find_assets())
+        .insert_resource(Flags(flags))
         .init_resource::<mission_panel::State>()
         .init_resource::<map_view::State>()
         .init_resource::<project_panel::State>()
@@ -60,11 +72,61 @@ fn main() {
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn((Camera2d, PrimaryEguiContext));
         })
+        .add_systems(PostStartup, apply_flags)
+        .add_systems(Update, screenshot_and_exit)
         .add_systems(EguiPrimaryContextPass, panel)
         .add_systems(Update, project_panel::poll_system)
         // After the 3D view's own Update systems: its edits go to the undo stack, undo and redo show in the view.
         .add_systems(PostUpdate, ships_panel::sync_system)
         .run();
+}
+
+/// `--mod`, `--tab` and `--ship`, once at start.
+#[allow(clippy::too_many_arguments)] // a Bevy system takes one parameter per resource it sets
+fn apply_flags(
+    flags: Res<Flags>,
+    assets: Res<Assets>,
+    mut project: ResMut<project_panel::State>,
+    mut tab: ResMut<Tab>,
+    mut ships: ResMut<ships_panel::State>,
+    mut view: ResMut<ShipView>,
+    mut link: ResMut<ships_panel::Linked>,
+) {
+    let f = &flags.0;
+    if let Some(dir) = &f.mod_dir {
+        project.open(dir, assets.dir.clone().filter(|d| d.is_dir()), false);
+    }
+    if let Some(t) = f.tab.as_deref() {
+        *tab = match t {
+            "ships" => Tab::Ships,
+            "weapons" => Tab::Weapons,
+            "3d" => Tab::Ship3d,
+            "playtest" => Tab::Playtest,
+            "mission" => Tab::Mission,
+            "map" => Tab::Map,
+            _ => Tab::Project,
+        };
+    }
+    if let Some(id) = &f.ship {
+        ships.selected = Some(id.clone());
+        if *tab == Tab::Ship3d
+            && let Some(p) = &mut project.project
+            && let Err(e) = p.open_doc(&ships_panel::ship_rel(id)).and_then(|_| ships_panel::show_in_3d(p, id, &mut view, &mut link))
+        {
+            eprintln!("procyon-editor: --ship {id}: {e}");
+        }
+    }
+}
+
+/// `--screenshot <file> [--frame N]`: saves the window at frame N, then exits a few frames later (once the picture is written).
+fn screenshot_and_exit(flags: Res<Flags>, mut frame: Local<u32>, mut commands: Commands, mut exit: MessageWriter<AppExit>) {
+    let Some(path) = flags.0.screenshot.clone() else { return };
+    *frame += 1;
+    if *frame == flags.0.frame {
+        commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(path));
+    } else if *frame == flags.0.frame + 30 {
+        exit.write(AppExit::Success);
+    }
 }
 
 /// The central area's tabs. Each package adds its tab here and draws it from its own module.

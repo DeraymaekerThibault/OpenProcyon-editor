@@ -181,6 +181,27 @@ Engine requirements:
   path, is not found (the GLB of a new ship is checked against every `ships/*/model.glb`, P4). Requirement: a library "compare with the
   import" in `authoring` (what `tools/compare_assets.py` does, by meaning), returning the files that are game content.
 
+## Seen running (Xvfb, software Vulkan, synthetic data)
+
+The editor was run in a virtual display in the cloud container (Xvfb + Mesa lavapipe) on synthetic data of our own
+(`tools/synthetic_mod.py`: a box hull with a sail and hardpoint nodes made in code, a ship.json, a gun, a bullet, and a mod that extends
+the ship) and driven with xdotool. `tools/shot.sh <out.png> [--mod <dir>] [--tab <name>] [--ship <id>] [--frame N]` repeats the pictures
+(the editor's own `--screenshot`, plus `--mod`, `--tab`, `--ship` flags for scripted runs, `src/startup.rs`).
+
+Seen working: every tab draws; the Mod tab form; the problems panel with `check_mod`'s finding and its suggestion; a click on the
+finding switches to the Ships tab and scrolls to the unknown-key row with Rename to / Remove; the 3D view composes with egui (the 3D
+camera under the egui camera, panels intact); hull layers, hover highlight with the section note, every hardpoint kind, gun arcs, the
+tow line; "Add crew place" refuses without a name, then places the node on the clicked face; dragging the z and the x handle moves the
+point along that axis (one undo step each); Undo twice restores both positions in the 3D view; Save writes an `extends` file that keeps
+the hand-written keys and restates the crew list whole (an array replaces the inherited one).
+
+Found and fixed: (1) every 3D pick and hover was off by the side panel's width: Bevy 0.20's `viewport_to_world` takes window
+coordinates and subtracts the viewport origin itself, and the view subtracted it too; (2) faces of a model with mixed winding were
+lit dark from behind (materials are now double-sided); (3) the ship form offered `extends` and `set` as fields, which the save writes
+itself (hidden from the form now); (4) `--ship` with the 3D tab did not open the ship's document first.
+
+Still only on a real machine: real retail hulls and textures, a real game for play-test and preview, frame rate, file dialogs.
+
 ## Engine requirements, all packages
 
 For the engine's `authoring` API, in the order they block the editor most:

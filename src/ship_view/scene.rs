@@ -161,7 +161,7 @@ fn rebuild_meshes(
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nor);
         // One colour per layer, spread around the hue circle.
         let color = Color::hsl((i as f32 * 47.0) % 360.0, 0.25, 0.62);
-        let material = materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, cull_mode: None, ..default() });
+        let material = materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, cull_mode: None, double_sided: true, ..default() });
         commands.spawn((HullMesh { layer: i, material: material.clone() }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
     }
 }
@@ -212,12 +212,14 @@ fn interact(mut view: ResMut<ShipView>, mut drag: ResMut<Dragging>, orbit: Res<O
     view.hovered_layer = None;
     view.hovered_point = None;
     let input: ViewInput = view.input;
-    let Some((rmin, _)) = input.rect else {
+    let Some(_) = input.rect else {
         drag.0 = None;
         return;
     };
     let (camera, gt) = *cam;
-    let cursor = input.hover.map(|h| h - rmin);
+    // Window coordinates (logical): Bevy 0.20's `viewport_to_world` / `world_to_viewport` subtract and add the viewport's origin
+    // themselves, so the cursor is not made relative to the rect here (it was, and every ray was off by the side panel's width).
+    let cursor = input.hover;
     let ray = cursor.and_then(|c| camera.viewport_to_world(gt, c).ok());
     let project = |p: Vec3| camera.world_to_viewport(gt, p).unwrap_or(Vec2::splat(f32::MAX / 4.0));
     let points = shown_points(view, &drag);
@@ -250,7 +252,7 @@ fn interact(mut view: ResMut<ShipView>, mut drag: ResMut<Dragging>, orbit: Res<O
         view.hovered_layer = view.facts.as_ref().and_then(|f| ray_hit(origin, dir, &f.layers)).map(|(i, _)| i);
         if let (Some(i), Some(c)) = (view.hovered_point, cursor) {
             let h = &points[i];
-            view.hover_label = Some((rmin + c + Vec2::new(12.0, 12.0), format!("{} {}", h.kind.title(), h.label)));
+            view.hover_label = Some((c + Vec2::new(12.0, 12.0), format!("{} {}", h.kind.title(), h.label)));
         }
     }
     if !input.primary_pressed {
