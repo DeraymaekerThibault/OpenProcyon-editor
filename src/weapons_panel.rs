@@ -173,6 +173,13 @@ pub struct State {
 }
 
 impl State {
+    /// Forgets the selected entry (another mod was opened: its form is not the new mod's).
+    pub fn forget(&mut self) {
+        self.selected = None;
+        self.focus = None;
+        self.status.clear();
+    }
+
     /// The name box of the table that is shown: guns and bullets each keep their own text.
     pub fn new_name(&mut self) -> &mut String {
         &mut self.new_names[self.table as usize]
@@ -223,31 +230,44 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         Err(_) => vec![],
     };
     let notes = project_panel::notes_for(&ps.findings, rel);
+    let mut revert: Option<Option<String>> = None;
     ui.label(format!("{rel}{}", if project.docs[i].dirty { " (unsaved)" } else { "" }));
+    if !project.docs[i].base.is_null() {
+        // above the list, always drawn: it does not move when an entry is reverted
+        if ui
+            .add_enabled(project.docs[i].can_revert(), egui::Button::new("Revert file to retail"))
+            .on_hover_text("Take every change of the mod in this table back (one undo step); saving deletes the file when nothing is left")
+            .clicked()
+        {
+            revert = Some(None);
+        }
+    }
     ui.horizontal(|ui| {
         ui.label("Filter");
         ui.text_edit_singleline(&mut st.filter);
     });
     let rows = entry_rows(&project.docs[i], &st.filter);
-    egui::ScrollArea::vertical().id_salt("weapon-list").max_height(crate::ships_panel::list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
-        for r in &rows {
-            let mark = if r.added {
-                " [added]"
-            } else if r.changed {
-                " [changed]"
-            } else {
-                ""
-            };
-            if ui.selectable_label(st.selected.as_deref() == Some(r.name.as_str()), format!("{}{mark}", r.name)).clicked() {
-                st.selected = Some(r.name.clone());
-                st.focus = None;
+    egui::ScrollArea::vertical().id_salt("weapon-list").max_height(crate::ships_panel::list_height(crate::ships_panel::remaining_height(ui), st.selected.is_some())).show(
+        ui,
+        |ui| {
+            for r in &rows {
+                let mark = if r.added {
+                    " [added]"
+                } else if r.changed {
+                    " [changed]"
+                } else {
+                    ""
+                };
+                if ui.selectable_label(st.selected.as_deref() == Some(r.name.as_str()), format!("{}{mark}", r.name)).clicked() {
+                    st.selected = Some(r.name.clone());
+                    st.focus = None;
+                }
             }
-        }
-    });
+        },
+    );
     let mut edits: Vec<Edit> = vec![];
     let mut label = String::new();
     let mut typing = false;
-    let mut revert: Option<Option<String>> = None;
     ui.horizontal(|ui| {
         ui.label(format!("New {}", table.word()));
         ui.text_edit_singleline(st.new_name());
@@ -288,24 +308,17 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         ui.strong(&name);
         let entry = &doc.edited[&name];
         let pointer_of_entry = format!("/{}", escape(&name));
-        ui.horizontal(|ui| {
-            if doc.base.get(&name).is_some_and(|b| b != entry)
-                && ui
-                    .button(format!("Revert {name} to retail"))
-                    .on_hover_text("Put this entry back to the game's values (one undo step); the mod then holds no change of it")
-                    .clicked()
+        // The entry's own button stays where it is (disabled when there is nothing to take back); the file's is above the list.
+        if doc.base.get(&name).is_some() {
+            let changed = doc.base.get(&name).is_some_and(|b| b != entry);
+            if ui
+                .add_enabled(changed, egui::Button::new(format!("Revert {name} to retail")))
+                .on_hover_text("Put this entry back to the game's values (one undo step); the mod then holds no change of it")
+                .clicked()
             {
                 revert = Some(Some(pointer_of_entry.clone()));
             }
-            if doc.can_revert()
-                && ui
-                    .button("Revert file to retail")
-                    .on_hover_text("Take every change of the mod in this table back (one undo step); saving deletes the file when nothing is left")
-                    .clicked()
-            {
-                revert = Some(None);
-            }
-        });
+        }
         if table == Table::Guns {
             for key in bullet_fields(entry) {
                 let current = entry.get(&key).and_then(Value::as_str).unwrap_or("");
@@ -374,14 +387,17 @@ fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, impo
         ui.text_edit_singleline(&mut st.filter);
     });
     let filter = st.filter.trim().to_lowercase();
-    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(crate::ships_panel::list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
-        for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
-            if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), k).clicked() {
-                st.selected = Some(k.clone());
-                st.focus = None;
+    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(crate::ships_panel::list_height(crate::ships_panel::remaining_height(ui), st.selected.is_some())).show(
+        ui,
+        |ui| {
+            for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
+                if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), k).clicked() {
+                    st.selected = Some(k.clone());
+                    st.focus = None;
+                }
             }
-        }
-    });
+        },
+    );
     ui.separator();
     let Some(name) = st.selected.clone().filter(|n| doc.get(n).is_some()) else {
         ui.label(format!("Select a {}.", table.word()));

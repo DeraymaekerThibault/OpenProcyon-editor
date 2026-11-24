@@ -73,7 +73,7 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
         if ui.button("Load").clicked() {
             match load(Path::new(view.path.trim())) {
                 Ok(l) => {
-                    view.status = format!("Loaded {} ({} layers)", l.ship_id, l.facts.as_ref().map_or(0, |f| f.layers.len()));
+                    view.status = format!("Loaded {} ({})", l.ship_id, super::layers_summary(l.facts.as_ref()));
                     view.set(l);
                 }
                 Err(e) => view.status = e,

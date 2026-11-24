@@ -225,6 +225,8 @@ pub struct Project {
     redo: Vec<Command>,
     notices: Vec<Notice>,
     scratch: String,
+    /// The files in the mod folder at the last overlay build ([`layers::listing`]); a difference in [`Project::poll`] rebuilds it.
+    files: std::collections::BTreeSet<String>,
 }
 
 impl Drop for Project {
@@ -254,7 +256,8 @@ impl Project {
         let import = import.filter(|d| d.is_dir()).map(|d| std::path::absolute(&d).unwrap_or(d));
         guard::check_project_dir(&dir, import.as_deref())?;
         let scratch = format!("project-{}", NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed));
-        let mut p = Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch };
+        let mut p =
+            Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch, files: Default::default() };
         p.rebuild()?;
         if p.dir.join("mod.json").is_file()
             && let Err(e) = p.open_doc("mod.json")
@@ -311,6 +314,7 @@ impl Project {
         };
         let (root, report) = crate::overlay::build(&base, std::slice::from_ref(&self.dir), &crate::overlay::scratch(&self.scratch))?;
         (self.root, self.report) = (root, report);
+        self.files = layers::listing(&self.dir);
         Ok(())
     }
 
@@ -605,6 +609,23 @@ impl Project {
         let mut out: Vec<Notice> = std::mem::take(&mut self.notices);
         let mut reload = vec![];
         let mut touched = false;
+        // Files added or removed by hand (or by a script): the layer list is the engine's report of the folder, so build it again.
+        let now = layers::listing(&self.dir);
+        if now != self.files {
+            let names = |a: &std::collections::BTreeSet<String>, b: &std::collections::BTreeSet<String>| {
+                let v: Vec<&str> = a.difference(b).map(String::as_str).take(3).collect();
+                (a.difference(b).count(), v.join(", "))
+            };
+            let (added, removed) = (names(&now, &self.files), names(&self.files, &now));
+            let mut parts = vec![];
+            for (what, (n, list)) in [("added", added), ("removed", removed)] {
+                if n > 0 {
+                    parts.push(format!("{what} {list}{}", if n > 3 { format!(" and {} more", n - 3) } else { String::new() }));
+                }
+            }
+            out.push(Notice { rel: String::new(), text: format!("mod folder changed: {}", parts.join("; ")), conflict: false });
+            touched = true;
+        }
         for d in &mut self.docs {
             let now = FileStamp::of(&self.dir.join(&d.rel));
             if stamp::same(&now, &d.disk) {
@@ -922,6 +943,27 @@ mod tests {
         assert!(rep.warnings[0].starts_with("ships/Ship_X/ship.json: /speed"), "{rep:?}");
         drop(p);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_file_added_or_removed_by_hand_shows_in_the_layers_at_the_next_poll() {
+        let (root, assets, m) = setup("handfile");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        assert!(p.poll().is_empty());
+        write(&m, "data/render/look.json", r#"{"a": 1}"#);
+        let notes = p.poll();
+        assert!(notes.iter().any(|n| n.text.contains("added data/render/look.json")), "{notes:?}");
+        assert!(p.layer_rows().iter().any(|r| r.file == "data/render/look.json"), "{:?}", p.layer_rows());
+        assert!(p.poll().is_empty(), "announced once");
+        std::fs::remove_file(m.join("data/render/look.json")).unwrap();
+        let notes = p.poll();
+        assert!(notes.iter().any(|n| n.text.contains("removed data/render/look.json")), "{notes:?}");
+        assert!(!p.layer_rows().iter().any(|r| r.file == "data/render/look.json"));
+        // the editor's own save is not announced as a change by hand
+        p.do_edits("ships/Ship_X/ship.json", "e", vec![Edit::set("/speed", json!(9))]).unwrap();
+        assert!(p.save().errors.is_empty());
+        assert!(p.poll().is_empty(), "own writes are known");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

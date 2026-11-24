@@ -195,7 +195,7 @@ pub fn loaded_from_project(project: &Project, id: &str) -> Result<Loaded, String
 /// Fills the 3D view with the project's ship `id` and links the two.
 pub fn show_in_3d(project: &Project, id: &str, view: &mut ShipView, link: &mut Linked) -> Result<(), String> {
     let loaded = loaded_from_project(project, id)?;
-    view.status = format!("{id} from the mod project ({} layers)", loaded.facts.as_ref().map_or(0, |f| f.layers.len()));
+    view.status = format!("{id} from the mod project ({})", crate::ship_view::layers_summary(loaded.facts.as_ref()));
     view.set(loaded);
     *link = Linked { rel: Some(ship_rel(id)), generation: view.generation };
     Ok(())
@@ -252,6 +252,14 @@ pub struct State {
 }
 
 impl State {
+    /// Forgets the selected ship (another mod was opened: its form is not the new mod's).
+    pub fn forget(&mut self) {
+        self.selected = None;
+        self.focus = None;
+        self.status.clear();
+        self.compare_with.clear();
+    }
+
     /// A click in the problems list: selects the ship and focuses the field. Returns whether the file is a ship's.
     pub fn take_focus(&mut self, focus: &Focus) -> bool {
         let Some(id) = ship_id_of(&focus.rel) else { return false };
@@ -261,9 +269,16 @@ impl State {
     }
 }
 
-/// The tallest a list of ships or weapons grows: 40% of the window, never under 180 points (it used to be 180: about nine rows).
-pub fn list_height(window_height: f32) -> f32 {
-    (window_height * 0.4).max(180.0)
+/// The height of a list of ships or weapons, from `remaining`, the height left below its top in the visible area: with nothing
+/// selected it takes what is left minus a margin for the rows under it; with a selection the form needs room, so the list takes half.
+/// Never under 180 points (about nine rows).
+pub fn list_height(remaining: f32, selected: bool) -> f32 {
+    (if selected { remaining * 0.5 } else { remaining - 90.0 }).max(180.0)
+}
+
+/// The height left for a list drawn at the cursor of `ui`.
+pub fn remaining_height(ui: &egui::Ui) -> f32 {
+    (ui.clip_rect().bottom() - ui.cursor().top()).max(0.0)
 }
 
 /// Draws the Ships tab. Returns `true` when "Show in 3D" was pressed and succeeded (the caller switches to the 3D tab).
@@ -295,7 +310,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         ui.text_edit_singleline(&mut st.filter);
     });
     let rows = ship_rows(&listing, entry.as_ref(), &unsaved, &st.filter);
-    egui::ScrollArea::vertical().id_salt("ship-list").max_height(list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("ship-list").max_height(list_height(remaining_height(ui), st.selected.is_some())).show(ui, |ui| {
         for r in &rows {
             let text = format!("{}  [{}{}]", r.id, r.status.label(), if r.unsaved { ", unsaved" } else { "" });
             if ui.selectable_label(st.selected.as_deref() == Some(r.id.as_str()), text).clicked() {
@@ -509,9 +524,11 @@ mod tests {
     }
 
     #[test]
-    fn the_list_takes_a_share_of_the_window_with_a_floor() {
-        assert_eq!(list_height(1000.0), 400.0);
-        assert_eq!(list_height(300.0), 180.0);
+    fn the_list_takes_what_is_left_with_a_floor_and_shares_it_with_the_form() {
+        assert_eq!(list_height(800.0, false), 710.0, "nothing selected: the rest, minus the rows below");
+        assert_eq!(list_height(800.0, true), 400.0, "a selection: half, the form needs room");
+        assert_eq!(list_height(100.0, false), 180.0);
+        assert_eq!(list_height(100.0, true), 180.0);
     }
 
     #[test]
