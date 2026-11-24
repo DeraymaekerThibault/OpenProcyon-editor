@@ -14,6 +14,10 @@ concurrency:
   cancel-in-progress: true
 env:
   CARGO_INCREMENTAL: 0
+  # No debug info in CI: every test binary links Bevy statically, and with debug info the build filled the runner's disk
+  # (the linker died with a bus error at 36 MB free). Local builds keep the Cargo.toml profiles.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
   # AGENTS.md "Build and check": Rust >= 1.97.1 (Cargo.toml rust-version).
   RUST_TOOLCHAIN: "1.97.1"
   # Bevy's Linux packages (ALSA, udev, Wayland, X11, xkbcommon incl. the X11 part, Vulkan loader).
@@ -25,6 +29,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
       - name: Install the Bevy Linux packages
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES
       - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
@@ -43,6 +49,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
       - name: Install the Bevy Linux packages, Xvfb and Mesa's software Vulkan (lavapipe)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES xvfb mesa-vulkan-drivers imagemagick
       - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
@@ -75,6 +83,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
       - name: Install the Bevy Linux packages
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES
       - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
