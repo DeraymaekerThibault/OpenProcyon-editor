@@ -20,6 +20,8 @@
 //! pitch and roll signs are the editor's own; the default snap steps (10 units, 15 degrees, 12 units), the zoom limits and the
 //! default `world_half` of 1600 are guesses.
 
+pub mod canvas;
 pub mod orient;
 pub mod plan_view;
+pub mod select;
 pub mod snap;
