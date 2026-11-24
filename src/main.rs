@@ -1,7 +1,7 @@
 //! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
-use openprocyon_editor::{map_view, mission_panel, project_panel};
+use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
@@ -46,6 +46,7 @@ fn main() {
         .init_resource::<map_view::State>()
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
+        .init_resource::<playtest_panel::State>()
         .init_resource::<Tab>()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
@@ -64,12 +65,14 @@ enum Tab {
     Project,
     Mission,
     Map,
+    Playtest,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 3] = [(Tab::Project, "Mod"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+    const ALL: [(Tab, &'static str); 4] = [(Tab::Project, "Mod"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)"), (Tab::Playtest, "Play-test & export")];
 }
 
+#[allow(clippy::too_many_arguments)]
 fn panel(
     mut contexts: EguiContexts,
     assets: Res<Assets>,
@@ -78,6 +81,7 @@ fn panel(
     mut map: ResMut<map_view::State>,
     mut project: ResMut<project_panel::State>,
     mut focus: ResMut<project_panel::Focus>,
+    mut playtest: ResMut<playtest_panel::State>,
 ) -> Result {
     project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
     let ctx = contexts.ctx_mut()?;
@@ -117,6 +121,15 @@ fn panel(
             Tab::Project => project_panel::tab(ui, &mut project),
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
+            Tab::Playtest => {
+                let import = assets.dir.as_deref().filter(|d| d.is_dir());
+                let (maps, ships) = import.map_or((Vec::new(), Vec::new()), |d| (playtest_panel::map_ids(d), playtest_panel::ship_ids(d)));
+                let unsaved = project.project.as_ref().map_or(0, |p| p.dirty_rels().len());
+                playtest_panel::show(ui, &mut playtest, project.project.as_ref().map(|p| p.dir.as_path()), unsaved, &maps, &ships);
+                if std::mem::take(&mut playtest.save_requested) {
+                    project.save();
+                }
+            }
         });
     });
     Ok(())

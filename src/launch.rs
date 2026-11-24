@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 
 /// The game binary: `PROCYON_GAME_BIN` if set, else `openprocyon` (found on PATH when spawned).
 pub fn game_bin() -> PathBuf {
@@ -13,24 +13,171 @@ fn bin_from(env: Option<OsString>) -> PathBuf {
     env.filter(|v| !v.is_empty()).map_or_else(|| PathBuf::from("openprocyon"), PathBuf::from)
 }
 
-/// The arguments that start map `map_id` of the mod in `mod_dir`.
-pub fn args(mod_dir: &Path, map_id: &str) -> Vec<OsString> {
-    vec!["--mod".into(), mod_dir.into(), "--map".into(), map_id.into()]
+/// A screenshot request: the game writes the picture(s) and exits (`--shot`, `--shot-frame`, `--dist/--yaw/--pitch`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shot {
+    /// Where the game writes the picture; absolute. With several frames the game writes `<stem>_<N>.png` next to it.
+    pub file: PathBuf,
+    /// The frames to capture, in order.
+    pub frames: Vec<u32>,
+    pub dist: Option<f32>,
+    pub yaw: Option<f32>,
+    pub pitch: Option<f32>,
 }
 
-/// Starts the game and returns at once; poll the child with `try_wait`.
+/// One game start: a mod, a map, optionally a ship and a screenshot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Launch {
+    /// The mod folder, absolute.
+    pub mod_dir: PathBuf,
+    pub map: String,
+    pub ship: Option<String>,
+    pub shot: Option<Shot>,
+}
+
+impl Launch {
+    /// A launch of `map` from the mod in `mod_dir`; the folder is made absolute (the game runs in another working directory).
+    pub fn new(mod_dir: &Path, map: &str) -> Launch {
+        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None }
+    }
+
+    /// The command line, in the engine's flag order: `--mod <abs> --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]`.
+    pub fn args(&self) -> Vec<OsString> {
+        let mut a: Vec<OsString> = vec!["--mod".into(), self.mod_dir.clone().into(), "--map".into(), self.map.clone().into()];
+        if let Some(ship) = &self.ship {
+            a.extend(["--ship".into(), ship.clone().into()]);
+        }
+        if let Some(s) = &self.shot {
+            let frames = s.frames.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+            a.extend(["--shot".into(), absolute(&s.file).into(), "--shot-frame".into(), frames.into()]);
+            for (flag, v) in [("--dist", s.dist), ("--yaw", s.yaw), ("--pitch", s.pitch)] {
+                if let Some(v) = v {
+                    a.extend([flag.into(), v.to_string().into()]);
+                }
+            }
+        }
+        a
+    }
+
+    /// Starts the game and returns at once; poll the child with `try_wait`.
+    pub fn spawn(&self) -> std::io::Result<Child> {
+        Command::new(game_bin()).args(self.args()).spawn()
+    }
+
+    /// Like [`Launch::spawn`], with the child's stderr written to `stderr_file` (a file never fills up like a pipe nobody reads).
+    pub fn spawn_logged(&self, stderr_file: &Path) -> std::io::Result<Child> {
+        if let Some(parent) = stderr_file.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let log = std::fs::File::create(stderr_file)?;
+        Command::new(game_bin()).args(self.args()).stdout(Stdio::null()).stderr(log).spawn()
+    }
+}
+
+/// Starts map `map_id` of the mod in `mod_dir` without a screenshot (kept for the spike panels).
 pub fn spawn(mod_dir: &Path, map_id: &str) -> std::io::Result<Child> {
-    Command::new(game_bin()).args(args(mod_dir, map_id)).spawn()
+    Launch::new(mod_dir, map_id).spawn()
+}
+
+fn absolute(p: &Path) -> PathBuf {
+    std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The files the game writes for `shot`: the file itself for one frame, `<stem>_<N>.png` for each of a list of frames.
+pub fn shot_outputs(shot: &Shot) -> Vec<PathBuf> {
+    let file = absolute(&shot.file);
+    if shot.frames.len() <= 1 {
+        return vec![file];
+    }
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = file.extension().map_or("png".into(), |e| e.to_string_lossy().into_owned());
+    shot.frames.iter().map(|n| file.with_file_name(format!("{stem}_{n}.{ext}"))).collect()
+}
+
+/// Reads the version out of the output of `--version` (`OpenProcyon 0.2.0`).
+pub fn parse_version(output: &str) -> Result<String, String> {
+    output
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("OpenProcyon "))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("unexpected output of --version: {:?}", output.trim()))
+}
+
+/// Runs `<game bin> --version` and returns the version it prints; compare it with `openprocyon::authoring::ENGINE_VERSION`.
+pub fn game_version() -> Result<String, String> {
+    version_of(&game_bin())
+}
+
+fn version_of(bin: &Path) -> Result<String, String> {
+    let out = Command::new(bin).arg("--version").output().map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+    if !out.status.success() {
+        return Err(format!("{} --version failed: {}", bin.display(), out.status));
+    }
+    parse_version(&String::from_utf8_lossy(&out.stdout))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn shot(file: &str, frames: &[u32]) -> Shot {
+        Shot { file: file.into(), frames: frames.to_vec(), dist: None, yaw: None, pitch: None }
+    }
+
     #[test]
     fn arguments_are_mod_then_map() {
-        let a = args(Path::new("/m/gates"), "gate_ambush");
-        assert_eq!(a, ["--mod", "/m/gates", "--map", "gate_ambush"].map(OsString::from));
+        let l = Launch::new(Path::new("/m/gates"), "gate_ambush");
+        assert_eq!(l.args(), ["--mod", "/m/gates", "--map", "gate_ambush"].map(OsString::from));
+    }
+
+    #[test]
+    fn ship_and_shot_flags_follow_in_the_engines_order() {
+        let mut l = Launch::new(Path::new("/m/gates"), "gate_ambush");
+        l.ship = Some("Ship_X".into());
+        assert_eq!(l.args(), ["--mod", "/m/gates", "--map", "gate_ambush", "--ship", "Ship_X"].map(OsString::from));
+        l.ship = None;
+        l.shot = Some(shot("/s/a.png", &[300]));
+        assert_eq!(l.args(), ["--mod", "/m/gates", "--map", "gate_ambush", "--shot", "/s/a.png", "--shot-frame", "300"].map(OsString::from));
+        l.ship = Some("Ship_X".into());
+        l.shot = Some(Shot { dist: Some(120.0), yaw: Some(30.5), pitch: Some(-10.0), ..shot("/s/a.png", &[100, 300]) });
+        assert_eq!(
+            l.args(),
+            ["--mod", "/m/gates", "--map", "gate_ambush", "--ship", "Ship_X", "--shot", "/s/a.png", "--shot-frame", "100,300", "--dist", "120", "--yaw", "30.5", "--pitch", "-10"]
+                .map(OsString::from)
+        );
+        // only some camera flags
+        l.shot = Some(Shot { yaw: Some(5.0), ..shot("/s/a.png", &[1]) });
+        let a = l.args();
+        assert!(a.ends_with(&["--yaw", "5"].map(OsString::from)) && !a.contains(&"--dist".into()));
+    }
+
+    #[test]
+    fn paths_are_absolute_even_from_relative_input() {
+        let mut l = Launch::new(Path::new("mods/gates"), "m");
+        l.shot = Some(shot("local/a.png", &[300]));
+        let a = l.args();
+        assert!(Path::new(&a[1]).is_absolute());
+        assert!(Path::new(&a[5]).is_absolute());
+        assert!(shot_outputs(l.shot.as_ref().unwrap())[0].is_absolute());
+    }
+
+    #[test]
+    fn shot_outputs_name_one_frame_and_a_list() {
+        assert_eq!(shot_outputs(&shot("/s/a.png", &[300])), [PathBuf::from("/s/a.png")]);
+        assert_eq!(shot_outputs(&shot("/s/a.png", &[100, 300])), [PathBuf::from("/s/a_100.png"), PathBuf::from("/s/a_300.png")]);
+    }
+
+    #[test]
+    fn version_output_is_parsed() {
+        assert_eq!(parse_version("OpenProcyon 0.2.0\n"), Ok("0.2.0".into()));
+        assert!(parse_version("hello\n").is_err());
+        assert!(parse_version("").is_err());
+    }
+
+    #[test]
+    fn a_missing_binary_has_no_version() {
+        assert!(version_of(Path::new("/nonexistent/openprocyon")).is_err());
     }
 
     #[test]
@@ -42,7 +189,7 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_an_error_not_a_panic() {
-        let r = Command::new("/nonexistent/openprocyon").args(args(Path::new("."), "x")).spawn();
+        let r = Command::new("/nonexistent/openprocyon").args(Launch::new(Path::new("."), "x").args()).spawn();
         assert!(r.is_err());
     }
 }
