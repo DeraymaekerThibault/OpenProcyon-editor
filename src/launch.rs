@@ -67,9 +67,9 @@ impl Launch {
     /// Like [`Launch::spawn`], with the child's stderr written to `stderr_file` (a file never fills up like a pipe nobody reads).
     pub fn spawn_logged(&self, stderr_file: &Path) -> std::io::Result<Child> {
         if let Some(parent) = stderr_file.parent() {
-            std::fs::create_dir_all(parent)?;
+            crate::project::guard::create_dir_all(parent, None).map_err(std::io::Error::other)?;
         }
-        let log = std::fs::File::create(stderr_file)?;
+        let log = crate::project::guard::create_file(stderr_file, None).map_err(std::io::Error::other)?;
         Command::new(game_bin()).args(self.args()).stdout(Stdio::null()).stderr(log).spawn()
     }
 }

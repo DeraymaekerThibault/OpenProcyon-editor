@@ -4,6 +4,7 @@
 //! No window code here: everything is testable headless.
 
 pub mod diff;
+pub mod guard;
 pub mod layers;
 pub mod problems;
 pub mod stamp;
@@ -156,11 +157,11 @@ pub struct Project {
 
 impl Drop for Project {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(crate::overlay::scratch(&self.scratch));
-        let _ = std::fs::remove_dir_all(crate::overlay::scratch(&format!("{}-empty", self.scratch)));
-        // The per-process folder goes too once no project of this process uses it (fails, harmlessly, while another does).
+        let _ = guard::remove_dir_all(&crate::overlay::scratch(&self.scratch), self.import.as_deref());
+        let _ = guard::remove_dir_all(&crate::overlay::scratch(&format!("{}-empty", self.scratch)), self.import.as_deref());
+        // The per-process folder goes too once no project of this process uses it (the guard has no remove_dir: it is empty or kept).
         if let Some(parent) = crate::overlay::scratch(&self.scratch).parent() {
-            let _ = std::fs::remove_dir(parent);
+            let _ = guard::remove_empty_dir(parent, self.import.as_deref());
         }
     }
 }
@@ -199,8 +200,8 @@ impl Project {
         if created {
             let id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "my-mod".into());
             let meta = json!({"id": id, "name": id, "version": "0.1.0", "description": "", "category": "Other", "format": 1, "game_version": ENGINE_VERSION});
-            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            std::fs::write(&path, to_json_string(&meta)).map_err(|e| format!("{}: {e}", path.display()))?;
+            guard::create_dir_all(&dir, import.as_deref())?;
+            guard::write(&path, to_json_string(&meta), import.as_deref())?;
         }
         Ok((Project::open(&dir, import)?, created))
     }
@@ -211,7 +212,7 @@ impl Project {
             Some(b) => b.clone(),
             None => {
                 let empty = crate::overlay::scratch(&format!("{}-empty", self.scratch));
-                std::fs::create_dir_all(&empty).map_err(|e| format!("{}: {e}", empty.display()))?;
+                guard::create_dir_all(&empty, None)?;
                 empty
             }
         };
@@ -428,15 +429,15 @@ impl Project {
 
     fn save_doc(&mut self, rel: &str) -> Result<(bool, Vec<String>), String> {
         let path = self.dir.join(rel);
+        let import = self.import.clone();
         let doc = self.docs.iter_mut().find(|d| d.rel == rel).ok_or_else(|| format!("{rel}: not open"))?;
         let d = diff::compute(doc.kind, &doc.base, &doc.edited, &doc.own, doc.parent.as_deref());
         let mut wrote = false;
         if let Some(file) = d.file.filter(|f| *f != doc.own) {
             if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                guard::create_dir_all(dir, import.as_deref())?;
             }
-            let text = to_json_string(&file);
-            std::fs::write(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+            guard::write(&path, to_json_string(&file), import.as_deref())?;
             // The editor's own write is not an outside change.
             doc.disk = FileStamp::of(&path);
             doc.own = file;

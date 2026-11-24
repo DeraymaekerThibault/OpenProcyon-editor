@@ -88,7 +88,7 @@ pub fn plan(mod_dir: &Path, import: Option<&Path>) -> Result<ExportPlan, String>
 /// folder are byte-identical.
 pub fn write_zip(plan: &ExportPlan, out: &Path) -> Result<(), String> {
     let err = |e: &dyn std::fmt::Display| format!("{}: {e}", out.display());
-    let file = std::fs::File::create(out).map_err(|e| err(&e))?;
+    let file = crate::project::guard::create_file(out, None)?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)

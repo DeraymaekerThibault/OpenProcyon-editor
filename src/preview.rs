@@ -69,10 +69,10 @@ impl Preview {
         let picture = shot_outputs(shot).pop().ok_or("no frame requested")?;
         let log = shot.file.with_extension("log");
         for old in shot_outputs(shot) {
-            let _ = std::fs::remove_file(old);
+            let _ = crate::project::guard::remove_file(&old, None);
         }
         if let Some(parent) = shot.file.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+            crate::project::guard::create_dir_all(parent, None)?;
         }
         let child = launch.spawn_logged(&log).map_err(|e| format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", crate::launch::game_bin().display()))?;
         self.image = None;

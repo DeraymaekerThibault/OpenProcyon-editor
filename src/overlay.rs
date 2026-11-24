@@ -16,7 +16,7 @@ pub fn build(base: &Path, mods: &[PathBuf], out: &Path) -> Result<(PathBuf, ModR
         return Ok((base.to_path_buf(), ModReport::default()));
     }
     if let Some(parent) = out.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        crate::project::guard::create_dir_all(parent, Some(base))?;
     }
     let report = overlay_into(base, mods, out)?;
     Ok((out.to_path_buf(), report))

@@ -48,7 +48,7 @@ impl Mission {
             if v.is_null() {
                 continue;
             }
-            std::fs::write(at.join(name), to_json_string(v)).map_err(|e| format!("{}: {e}", at.join(name).display()))?;
+            crate::project::guard::write(&at.join(name), to_json_string(v), None)?;
         }
         Ok(())
     }

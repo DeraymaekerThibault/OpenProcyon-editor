@@ -153,8 +153,8 @@ pub fn new_ship_from_glb(project: &mut Project, id: &str, glb: &Path) -> Result<
         return Err(format!("{id}: a ship of that id exists already"));
     }
     let dest = project.dir.join("ships").join(id).join("model.glb");
-    std::fs::create_dir_all(dest.parent().expect("has a parent")).map_err(|e| format!("{}: {e}", dest.display()))?;
-    std::fs::write(&dest, &bytes).map_err(|e| format!("{}: {e}", dest.display()))?;
+    crate::project::guard::create_dir_all(dest.parent().expect("has a parent"), project.import.as_deref())?;
+    crate::project::guard::write(&dest, &bytes, project.import.as_deref())?;
     project.open_new_doc(&rel, None, json!({"race": "", "points": 0, "skirmish": false})).map(|_| ())
 }
 

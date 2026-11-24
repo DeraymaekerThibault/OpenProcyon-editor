@@ -44,14 +44,14 @@ fn has_files(dir: &Path) -> bool {
 /// `mod.json` if the folder has none.
 pub fn save(out: &Path, id: &str, map: &Value) -> Result<PathBuf, String> {
     let at = out.join("maps").join(id);
-    std::fs::create_dir_all(&at).map_err(|e| format!("{}: {e}", at.display()))?;
+    crate::project::guard::create_dir_all(&at, None)?;
     let modj = out.join("mod.json");
     if !modj.exists() {
         let m = json!({"id": "editor-scratch", "name": "Editor scratch", "version": "0.0", "description": "Written by the editor spike. Holds derived game data: never commit or share."});
-        std::fs::write(&modj, to_json_string(&m)).map_err(|e| format!("{}: {e}", modj.display()))?;
+        crate::project::guard::write(&modj, to_json_string(&m), None)?;
     }
     let file = at.join("map.json");
-    std::fs::write(&file, to_json_string(map)).map_err(|e| format!("{}: {e}", file.display()))?;
+    crate::project::guard::write(&file, to_json_string(map), None)?;
     Ok(file)
 }
 
