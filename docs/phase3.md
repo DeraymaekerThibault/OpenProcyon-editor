@@ -34,8 +34,11 @@ Engine requirements:
 Works (headless): `src/form/` draws any document against a JSON Schema from `authoring::schemas()` and returns `Edit`s (it never
 mutates). `form::model` (no egui) resolves `$ref`, optional types (`anyOf [X, null]`, `type: [X, "null"]`), enums, integer and number
 ranges (`format: uint*` means a minimum of 0), maps (`additionalProperties`: guns by mount name, sections by label, bullet damage by
-material), arrays and short number lists (`pos`, `rot`, `homing` as one row). Keys the mod does not set show the inherited (parent)
-value greyed, with Set; set keys have Reset. Unknown keys (`authoring::unknown_keys`) are warning rows with Rename to / Remove. Findings
+material), arrays and short number lists (`pos`, `rot`, `homing` as one row). A document that is laid over another (`FormCtx.base`) is the
+MERGED result, and each field carries a badge: inherited (equal to the base), overridden or added (B6 below); only overridden and added
+fields have "Reset to parent". A key absent from the document but present in the base shows the base's value greyed with Set. Unknown
+keys (`authoring::unknown_keys`) the mod writes are warning rows with Rename to / Remove; unknown keys the base has too (retail ships
+carry `entity`, `response`, `skipped_guns`, ...) are shown read only, without a warning. Without a base (`mod.json`) Reset removes the key. Findings
 are drawn under their field; a focus pointer opens and scrolls to a field. Map rename and remove set the whole map in one edit, so the
 order of sections and mounts survives an undo.
 
@@ -134,14 +137,16 @@ Works (headless):
 
 - Ships tab: every `ships/<id>/ship.json` of the project's overlay (import plus mod), or of the import alone when no mod is open
   (read only). Rows say retail / extends / overrides / added / new and unsaved; filter and sort. A ship opens through the project and is
-  edited with the P2 form on the engine's ship schema, the retail (or `extends` parent) values shown as inherited, the problems of that
+  edited with the P2 form on the engine's ship schema (the merged ship, each field badged against the retail or `extends` parent), the problems of that
   file under their fields. A retail ship changed this way is saved as `{"extends": <id>, changed keys}` (tested: only the change).
 - New ship: extending an existing one (nothing is written until something changes), or from the author's own GLB, which is copied to
   `ships/<id>/model.glb` with a minimal `ship.json`; a GLB byte-identical to any `ships/*/model.glb` of the import is refused.
 - Weapons tab: `data/weapons/guns.json` and `bullets.json` entries (changed / added marks), each edited with the form on the entry
-  schema; only the changed entries and keys are saved (merged-path files). New gun or bullet from scratch is the default; duplicating an
-  entry warns that a duplicated retail entry is saved whole (it is new, so it has no base to diff against). A gun's bullet fields get a
-  picker of the bullet ids.
+  schema; only the changed entries and keys are saved (merged-path files). New gun or bullet from scratch is the default; it needs every field the game
+  requires before the game loads it (the form does not mark required fields yet: the problems list names what is missing, PROVISIONAL).
+  Duplicating a retail entry shows a warning after the duplicate was made: the copy is a new key, saved whole, so the mod would carry
+  the game's data. A gun's bullet fields get a picker of the bullet ids, drawn once (the form skips those rows). Guns and bullets keep
+  separate name boxes for new entries.
 - Compare with retail: points, MaxSpeed, MaxThrust, Mass, core HP, the sum of section HP, mounts and their guns, sight, against the
   import's file of the same ship, the `extends` parent or a chosen ship, with differences; a value a file leaves out shows "derived".
 - "Show in 3D" feeds the P5 view from the project; each drag lands in the undo stack as its own step (`Project::do_step`), and the
@@ -201,6 +206,43 @@ lit dark from behind (materials are now double-sided); (3) the ship form offered
 itself (hidden from the form now); (4) `--ship` with the 3D tab did not open the ship's document first.
 
 Still only on a real machine: real retail hulls and textures, a real game for play-test and preview, frame rate, file dialogs.
+
+## B6. Retail stays intact
+
+Works (headless, `tools/check.sh` GATE OK; no assets, no display):
+
+- One write guard (`project::guard`): every file the editor writes or deletes (project save and delete, mod creation, the GLB copy, map
+  and mission spike writers, the export zip, screenshots, the overlay scratch) is checked against the import (the project's, and the
+  engine's `base_assets()`): paths are made absolute with symlinks resolved, a path that does not exist yet is judged by its nearest
+  existing parent, `..` is applied. `tests/hygiene.rs` fails when non-test code in `src/` calls `std::fs` writers or `File::create`
+  anywhere else. Tested: inside, nested new file, symlink into the import (also a dangling one), sibling and same-prefix folders allowed,
+  a mod folder made inside the import refused.
+- "Which mod?" (`which_mod`): with no mod open, retail ships (Ships tab) and guns and bullets (Weapons tab) are editable; the first
+  edit opens "Save this change into which mod?" with Open mod folder, New mod (folder, id, author, licence) and Cancel. The project opens
+  and the same edit is applied through it (so it saves as `extends` or a merged diff, one undo step); Cancel drops it; a failure keeps it
+  held. The state machine `which_mod::choose` is tested; the window is not (needs a display).
+- A new mod is complete: `mod.json`, a `LICENSE` and the folders the first change needs (never a retail file; an existing `mod.json` or
+  `LICENSE` is never overwritten). Licences: CC-BY-4.0 (default), CC-BY-SA-4.0, CC0-1.0, GPL-3.0-or-later, All rights reserved.
+  PROVISIONAL: the file is a notice (SPDX id, holder, URL, "replace with the full text before sharing"), not the licence text; the
+  editor ships no licence texts. `mod.json` gets no author key (the schema has none).
+- Compare per field: inherited / overridden / added badges (`form::model::classify`), the base's value on hover, "Reset to parent" on
+  overridden and added fields (sets the base's value back, or removes the key the base lacks). A reset key leaves the saved file: the
+  diff drops a key the mod wrote that now equals the base (a key that always equalled it stays as its author wrote it), also nested keys,
+  entries and hand-written `set` pointers.
+- Revert per file: "Revert file to retail" (ship, weapons table, layer list) takes the whole document back to what is below it as one
+  undo step; "Revert <entry> to retail" does that for one gun or bullet. Saving then deletes the mod's file (and folders it leaves empty)
+  when it was a retail ship's `extends`-itself file with only `extends` left, or a merged table with no entry left; a clone extending
+  another ship goes back to its parent but stays; a ship new in the mod has nothing to revert to and offers nothing. Deletion goes through
+  the guard and shows as "deleted: back to retail".
+- A document is unsaved only when saving would change the file: undoing back, or resetting every field by hand, is clean again.
+
+Not verified here: all windows, the badges' look, file dialogs, anything against a real import.
+
+Not done: files that replace a retail file whole (`Replaced` kind, e.g. a hand-made `data/render/*.json`) have no revert, because the
+base is retail content and reverting would mean writing a copy of it; delete the file instead. Maps and missions are not covered (B5).
+
+Engine requirements: a reference to a retail entry (so a duplicate can be saved as a diff, not whole); required fields marked in the
+schemas (new gun and bullet need them); `authoring` telling which fields are engine extensions (B2) so badges could say retail or extension.
 
 ## Engine requirements, all packages
 

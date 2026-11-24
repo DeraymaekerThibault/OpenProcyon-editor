@@ -6,7 +6,7 @@ use bevy_egui::egui::{self, Align, Color32, RichText, Stroke};
 use openprocyon::authoring::Level;
 use serde_json::{Value, json};
 
-use super::model::{self, Kind, Node};
+use super::model::{self, Kind, Node, Origin};
 use crate::edit::{self, Edit};
 
 /// A finding to draw under the field it names (`pointer` is a JSON pointer; see [`edit::dotted_to_pointer`] for the engine's dotted paths).
@@ -19,12 +19,18 @@ pub struct FieldNote {
 
 /// What the form needs besides the document and its schema.
 pub struct FormCtx<'a> {
-    /// The parent document (what a key means when the mod does not set it, e.g. the retail ship under an `extends`).
+    /// What the document is laid over (the retail ship under an `extends`, the import's gun entry). The document is the MERGED result
+    /// (what the game sees), so every field shows where its value comes from: a badge says inherited (equal to `base`), overridden
+    /// (differs) or added (`base` has no such key), the last two with "Reset" (back to the base's value, or the key removed), and
+    /// hovering the badge shows the base's value. Inherited fields have no Reset and no Remove. `None`: the document stands alone
+    /// (`mod.json`, a ship new in the mod): no badges, and Reset removes the key.
     pub base: Option<&'a Value>,
     /// Findings drawn under their field (red for errors, yellow for warnings); those that name no drawn field are listed at the end.
     pub findings: &'a [FieldNote],
     /// A JSON pointer to bring into view: the sections on its path open once, the field scrolls into view and is outlined while this stays set.
     pub focus: Option<&'a str>,
+    /// JSON pointers of fields not to draw because the caller draws them itself (the weapons tab's bullet pickers).
+    pub hidden: &'a [String],
 }
 
 const ERROR: Color32 = Color32::from_rgb(230, 90, 90);
@@ -106,12 +112,23 @@ fn brief(v: &Value) -> String {
     if s.chars().count() > 48 { format!("{}...", s.chars().take(45).collect::<String>()) } else { s }
 }
 
+/// A value for a hover text: all of it up to a few hundred characters.
+fn long(v: &Value) -> String {
+    let s = v.to_string();
+    if s.chars().count() > 300 { format!("{}...", s.chars().take(297).collect::<String>()) } else { s }
+}
+
 /// The part of an element that names it in a list's headings (`name`, `label`, ...: a generic guess at a readable name).
 fn item_name(item: &Value) -> Option<&str> {
     ["name", "label", "id", "gun", "layer", "fx"].iter().find_map(|k| item.get(*k)?.as_str())
 }
 
 impl<'a> St<'a> {
+    /// `extends` and `set` of a document laid over another are written by the project when it saves; they are not fields to edit.
+    fn managed(&self, parent: &str, key: &str) -> bool {
+        parent.is_empty() && self.ctx.base.is_some() && matches!(key, "extends" | "set")
+    }
+
     fn focus_on_path(&self, ptr: &str) -> bool {
         self.ctx.focus.is_some_and(|f| ptr.is_empty() || f == ptr || f.starts_with(&format!("{ptr}/")))
     }
@@ -127,6 +144,44 @@ impl<'a> St<'a> {
             if self.fresh {
                 ui.scroll_to_rect(rect, Some(Align::Center));
             }
+        }
+    }
+
+    /// What the base has at `ptr`.
+    fn base_at(&self, ptr: &str) -> Option<&'a Value> {
+        let base: &'a Value = self.ctx.base?;
+        base.pointer(ptr)
+    }
+
+    /// Where the document's value at `ptr` comes from; `None` without a base or without a value.
+    fn origin(&self, ptr: &str) -> Option<Origin> {
+        self.ctx.base?;
+        model::classify(self.doc.pointer(ptr), self.base_at(ptr))
+    }
+
+    /// The badge (inherited / overridden / added) with the base's value on hover; returns the origin.
+    fn badge(&self, ui: &mut egui::Ui, ptr: &str) -> Option<Origin> {
+        let o = self.origin(ptr)?;
+        let color = match o {
+            Origin::Inherited => ui.visuals().weak_text_color(),
+            Origin::Overridden => Color32::from_rgb(110, 170, 240),
+            Origin::Added => Color32::from_rgb(110, 200, 130),
+        };
+        let hover = match (o, self.base_at(ptr)) {
+            (Origin::Inherited, Some(b)) => format!("Same as the parent: {}", long(b)),
+            (_, Some(b)) => format!("The parent (retail) has: {}", long(b)),
+            (_, None) => "The parent has no such key: the mod adds it".to_string(),
+        };
+        ui.label(RichText::new(o.label()).small().color(color)).on_hover_text(hover);
+        Some(o)
+    }
+
+    /// "Reset" next to an overridden or added field: back to the base's value, or the key removed. An inherited field gets none.
+    fn reset_button(&mut self, ui: &mut egui::Ui, ptr: &str, origin: Option<Origin>) {
+        if matches!(origin, Some(Origin::Overridden | Origin::Added))
+            && ui.small_button("Reset to parent").on_hover_text("Put the parent's value back (or remove the key the parent does not have)").clicked()
+        {
+            self.out.push(model::reset_to_base(ptr, self.base_at(ptr)));
         }
     }
 
@@ -150,6 +205,9 @@ impl<'a> St<'a> {
 
     /// One property: a collapsible section for a value with parts, else one row.
     fn field(&mut self, ui: &mut egui::Ui, label: &str, node: &Node, ptr: &str) {
+        if self.ctx.hidden.iter().any(|h| h == ptr) {
+            return;
+        }
         if node.is_compound() { self.section(ui, label, node, ptr, Slot::Field) } else { self.row(ui, label, node, ptr, Slot::Field) }
     }
 
@@ -160,6 +218,9 @@ impl<'a> St<'a> {
         match &node.kind {
             Kind::Object { props } => {
                 for (name, child) in props {
+                    if self.managed(ptr, name) {
+                        continue;
+                    }
                     self.field(ui, name, child, &model::child_pointer(ptr, name));
                 }
                 for (up, known) in self.unknown.clone() {
@@ -242,30 +303,30 @@ impl<'a> St<'a> {
         let doc = self.doc;
         let present = doc.pointer(ptr);
         let inherited = self.ctx.base.and_then(|i| i.pointer(ptr));
-        ui.horizontal(|ui| match slot {
-            Slot::Field => match (present, inherited) {
-                (None, Some(inh)) => {
-                    ui.weak("not set here: the parent's value applies");
-                    if ui.button("Set").on_hover_text("Copy the parent's value here to change it").clicked() {
-                        self.out.push(model::set_from(ptr, inh));
-                    }
-                }
-                (None, None) => {
-                    if !matches!(node.kind, Kind::Object { .. }) {
-                        ui.weak("not set");
-                        if ui.button("Set").clicked() {
-                            self.out.push(model::set_from(ptr, &model::default_value(node)));
+        ui.horizontal(|ui| {
+            let origin = self.badge(ui, ptr);
+            match slot {
+                Slot::Field => match (present, inherited) {
+                    (None, Some(inh)) => {
+                        ui.weak("not set here: the parent's value applies");
+                        if ui.button("Set").on_hover_text("Copy the parent's value here to change it").clicked() {
+                            self.out.push(model::set_from(ptr, inh));
                         }
                     }
-                }
-                (Some(_), inh) => {
-                    if (inh.is_some() || self.ctx.base.is_some()) && ui.button("Reset").on_hover_text("Remove this key so the parent's value applies").clicked() {
-                        self.out.push(model::reset(ptr));
+                    (None, None) => {
+                        if !matches!(node.kind, Kind::Object { .. }) {
+                            ui.weak("not set");
+                            if ui.button("Set").clicked() {
+                                self.out.push(model::set_from(ptr, &model::default_value(node)));
+                            }
+                        }
                     }
-                }
-            },
-            Slot::Entry(parent, key) => self.entry_controls(ui, parent, key),
-            Slot::Item(parent, i) => self.item_controls(ui, parent, i),
+                    (Some(_), _) if self.ctx.base.is_some() => self.reset_button(ui, ptr, origin),
+                    (Some(_), _) => {}
+                },
+                Slot::Entry(parent, key) => self.entry_controls(ui, parent, key),
+                Slot::Item(parent, i) => self.item_controls(ui, parent, i),
+            }
         });
     }
 
@@ -284,6 +345,10 @@ impl<'a> St<'a> {
         {
             self.out.extend(model::rename_key(parent, obj, key, &name));
             ui.data_mut(|d| d.remove_temp::<String>(rkey));
+        }
+        let origin = self.origin(&model::child_pointer(parent, key));
+        if origin == Some(Origin::Overridden) {
+            self.reset_button(ui, &model::child_pointer(parent, key), origin);
         }
         if ui.button("Remove").clicked()
             && let Some(map) = parent_value
@@ -317,9 +382,12 @@ impl<'a> St<'a> {
             match value {
                 Some(v) => {
                     self.editor(ui, node, ptr, v);
+                    let origin = self.badge(ui, ptr);
                     match slot {
                         Slot::Field => {
-                            if ui.small_button("Reset").on_hover_text("Remove this key so the parent's value (or the default) applies").clicked() {
+                            if self.ctx.base.is_some() {
+                                self.reset_button(ui, ptr, origin);
+                            } else if ui.small_button("Reset").on_hover_text("Remove this key so the default applies").clicked() {
                                 self.out.push(model::reset(ptr));
                             }
                         }
@@ -446,8 +514,26 @@ impl<'a> St<'a> {
 
     /// A key the schema does not list: yellow row with its raw value, a "Rename to" list of the known keys and Remove.
     fn unknown_row(&mut self, ui: &mut egui::Ui, parent: &str, key: &str, known: &[String]) {
+        if self.managed(parent, key) {
+            return;
+        }
         let doc = self.doc;
         let ptr = model::child_pointer(parent, key);
+        let base_v = self.base_at(&ptr);
+        // A key the file below has and the mod leaves alone (retail ships carry keys the schema does not list): shown, never a warning,
+        // and there is nothing to remove or rename here.
+        if base_v.is_some() && base_v == doc.pointer(&ptr) {
+            let r = ui.horizontal(|ui| {
+                ui.weak(format!("`{key}`"));
+                if let Some(v) = doc.pointer(&ptr) {
+                    ui.weak(brief(v));
+                }
+                ui.weak("inherited, not in the schema").on_hover_text("The parent has this key and the schema does not list it; it is kept as it is");
+            });
+            self.mark(ui, r.response.rect, &ptr);
+            self.notes(ui, &ptr);
+            return;
+        }
         let obj = doc.pointer(parent);
         let taken = |k: &str| obj.and_then(Value::as_object).is_some_and(|m| m.contains_key(k));
         let r = ui.horizontal(|ui| {
@@ -464,8 +550,8 @@ impl<'a> St<'a> {
                     }
                 }
             });
-            if ui.button("Remove").clicked() {
-                self.out.push(model::reset(&ptr));
+            if ui.button(if base_v.is_some() { "Reset to parent" } else { "Remove" }).clicked() {
+                self.out.push(model::reset_to_base(&ptr, base_v));
             }
         });
         self.mark(ui, r.response.rect, &ptr);
@@ -507,12 +593,12 @@ mod tests {
         ];
         for focus in [None, Some("/guns/Gun_B/arc_deg"), Some("/sections/Hull/destruct/fx"), Some("/sigth")] {
             for inherited in [None, Some(&parent)] {
-                let ctx = FormCtx { base: inherited, findings: &findings, focus };
+                let ctx = FormCtx { base: inherited, findings: &findings, focus, hidden: &[] };
                 assert!(frame(&schema("ship.schema.json"), &ship, &ctx).is_empty(), "{focus:?}");
             }
         }
         // an empty document and a document of the wrong shape do not panic either
-        let ctx = FormCtx { base: Some(&parent), findings: &[], focus: None };
+        let ctx = FormCtx { base: Some(&parent), findings: &[], focus: None, hidden: &[] };
         for doc in [json!({}), json!(null), json!({"guns": [1], "engines": {"a": 1}, "points": "x", "physics": 5})] {
             assert!(frame(&schema("ship.schema.json"), &doc, &ctx).is_empty());
         }
@@ -520,7 +606,7 @@ mod tests {
 
     #[test]
     fn the_other_schemas_draw_too() {
-        let ctx = FormCtx { base: None, findings: &[], focus: None };
+        let ctx = FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
         let guns = json!({"$schema": "guns.schema.json", "Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "BulletsPerBurst": 3, "BulletAffectedByGravity": false, "visual": {"base": "b", "pivot": [0, 0, 0], "muzzles": [[0, 1, 0], [1, 1, 0]]}, "beam": {"charge": 1}, "typo_key": 1}});
         assert!(frame(&schema("guns.schema.json"), &guns, &ctx).is_empty());
         let bullets =
@@ -530,7 +616,7 @@ mod tests {
         assert!(frame(&schema("crew_nodes.schema.json"), &crew, &ctx).is_empty());
         let m = json!({"id": "m", "format": 1, "requires": ["a", "b"], "extra": true});
         let inh = json!({"id": "p", "name": "Parent"});
-        let ctx = FormCtx { base: Some(&inh), findings: &[], focus: Some("/requires/1") };
+        let ctx = FormCtx { base: Some(&inh), findings: &[], focus: Some("/requires/1"), hidden: &[] };
         assert!(frame(&schema("mod.schema.json"), &m, &ctx).is_empty());
     }
 
@@ -552,5 +638,80 @@ mod tests {
             edit::undo(&mut doc, e).unwrap();
         }
         assert_eq!(doc, ship);
+    }
+
+    /// Every piece of text one frame of the form paints (labels, buttons, hover-less), in drawing order.
+    fn painted(schema: &Value, doc: &Value, ctx: &FormCtx) -> Vec<String> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let egui_ctx = egui::Context::default();
+        let mut texts = vec![];
+        for _ in 0..2 {
+            texts.clear();
+            let mut full = egui_ctx.run_ui(egui::RawInput::default(), |ui| {
+                show(ui, schema, doc, ctx, egui::Id::new("painted"));
+            });
+            full.textures_delta.clear();
+            full.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        }
+        texts
+    }
+
+    fn has(texts: &[String], s: &str) -> bool {
+        texts.iter().any(|t| t == s)
+    }
+
+    #[test]
+    fn inherited_fields_show_a_badge_and_never_reset_while_changed_ones_can_go_back() {
+        let ship = schema("ship.schema.json");
+        let ship = crate::ships_panel::form_schema(ship);
+        let base = json!({"race": "Navy", "points": 10, "extends": "x"});
+        // the merged document: race inherited, points overridden, sight added; `extends` is the project's business
+        let doc = json!({"race": "Navy", "points": 12, "sight": 300, "extends": "x"});
+        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[] };
+        let t = painted(&ship, &doc, &ctx);
+        assert!(has(&t, "inherited") && has(&t, "overridden") && has(&t, "added"), "{t:?}");
+        assert_eq!(t.iter().filter(|x| *x == "Reset to parent").count(), 2, "points and sight, not race: {t:?}");
+        assert!(!t.iter().any(|x| x.contains("Remove")), "{t:?}");
+        // only inherited values: no Reset anywhere
+        let same = json!({"race": "Navy", "points": 10});
+        let t = painted(&ship, &same, &ctx);
+        assert!(has(&t, "inherited") && !t.iter().any(|x| x.contains("Reset") || x.contains("Remove")), "{t:?}");
+        // `extends` is not a field (and not "not set")
+        assert!(!t.iter().any(|x| x.contains("extends")), "{t:?}");
+        let raw = schema("ship.schema.json");
+        let t = painted(&raw, &same, &ctx);
+        assert!(!t.iter().any(|x| x == "extends" || x == "set"), "managed keys are skipped when there is a base: {t:?}");
+        // without a base the old behaviour stays: Reset on a set key, no badges
+        let alone = FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
+        let t = painted(&ship, &same, &alone);
+        assert!(has(&t, "Reset") && !has(&t, "inherited"), "{t:?}");
+    }
+
+    #[test]
+    fn a_retail_key_the_schema_lacks_is_shown_read_only_and_only_the_mods_own_unknown_keys_warn() {
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let base = json!({"race": "Navy", "entity": 7, "skipped_guns": ["a"]});
+        let doc = json!({"race": "Navy", "entity": 7, "skipped_guns": ["a"], "sigth": 3});
+        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[] };
+        let t = painted(&ship, &doc, &ctx);
+        assert!(has(&t, "`entity`") && has(&t, "`skipped_guns`"), "{t:?}");
+        assert!(t.iter().any(|x| x.contains("unknown key `sigth`")), "{t:?}");
+        assert!(!t.iter().any(|x| x.contains("unknown key `entity`") || x.contains("unknown key `skipped_guns`")), "{t:?}");
+        assert_eq!(t.iter().filter(|x| *x == "Remove").count(), 1, "Remove only for the mod's own typo: {t:?}");
+    }
+
+    #[test]
+    fn hidden_fields_are_not_drawn() {
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let doc = json!({"race": "Navy", "points": 10});
+        let hidden = ["/race".to_string()];
+        let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: None, hidden: &hidden });
+        assert!(!has(&t, "race") && has(&t, "points"), "{t:?}");
     }
 }

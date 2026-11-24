@@ -67,9 +67,10 @@ impl State {
     pub fn save(&mut self) {
         let Some(p) = &mut self.project else { return };
         let report = p.save();
-        self.status = match (report.written.len(), report.errors.is_empty()) {
+        self.status = match (report.written.len() + report.deleted.len(), report.errors.is_empty()) {
             (0, true) => "Nothing to save.".into(),
-            (n, true) => format!("Saved {n} file{}.", if n == 1 { "" } else { "s" }),
+            (n, true) if report.deleted.is_empty() => format!("Saved {n} file{}.", if n == 1 { "" } else { "s" }),
+            (n, true) => format!("Saved {n} file{} ({} deleted: back to retail).", if n == 1 { "" } else { "s" }, report.deleted.len()),
             (_, false) => report.errors.join("; "),
         };
         for w in report.warnings {
@@ -182,9 +183,6 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
     if let Some(e) = error {
         st.status = e;
     }
-    if do_save {
-        st.save();
-    }
     let mut dismiss = None;
     for (i, n) in st.notices.iter().enumerate() {
         ui.horizontal_wrapped(|ui| {
@@ -197,6 +195,7 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
     if let Some(i) = dismiss {
         st.notices.remove(i);
     }
+    let mut revert: Option<String> = None;
     egui::CollapsingHeader::new(format!("Layers ({})", rows.len())).default_open(true).show(ui, |ui| {
         if rows.is_empty() {
             ui.label("The mod has no files yet.");
@@ -208,9 +207,28 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
                 _ => ui.visuals().text_color(),
             };
             let text = if r.note.is_empty() { format!("{}: {}", r.kind.label(), r.file) } else { format!("{}: {} ({})", r.kind.label(), r.file, r.note) };
-            ui.colored_label(color, text);
+            ui.horizontal(|ui| {
+                ui.colored_label(color, text);
+                let can = matches!(r.kind, LayerKind::Extends | LayerKind::Merged | LayerKind::Unsaved) && p.open_doc(&r.file).is_ok_and(|i| p.docs[i].can_revert());
+                if can
+                    && ui
+                        .small_button("Revert file")
+                        .on_hover_text("Take every change of the mod in this file back (one undo step); saving deletes the file when nothing is left")
+                        .clicked()
+                {
+                    revert = Some(r.file.clone());
+                }
+            });
         }
     });
+    if let Some(rel) = revert
+        && let Err(e) = p.revert_file(&rel)
+    {
+        st.status = e;
+    }
+    if do_save {
+        st.save();
+    }
 }
 
 /// The bottom panel's mod problems: errors first, a click sets [`Focus`].
@@ -237,11 +255,17 @@ pub fn problems_panel(ui: &mut egui::Ui, st: &mut State, focus: &mut Focus) {
             if ui.add(egui::Label::new(text).sense(egui::Sense::click())).clicked() && !f.file.is_empty() {
                 *focus = Focus { rel: f.file.clone(), path: f.path.clone() };
             }
-            if let Some(s) = &f.suggestion {
-                ui.label(format!("    did you mean \"{s}\"?"));
+            if let Some(s) = suggestion_line(f) {
+                ui.label(s);
             }
         }
     });
+}
+
+/// The "did you mean" line under a finding, only when its message does not say so already (the engine puts it in both).
+pub fn suggestion_line(f: &Finding) -> Option<String> {
+    let s = f.suggestion.as_deref()?;
+    (!f.message.contains("did you mean")).then(|| format!("    did you mean \"{s}\"?"))
 }
 
 /// The "Mod" tab: `mod.json`.
@@ -256,7 +280,8 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
             ui.label(format!("{}/mod.json{}", p.dir.display(), if p.docs[i].dirty { " (unsaved)" } else { "" }));
             let schema = mod_schema();
             let notes = notes_for(&st.findings, "mod.json");
-            let edits = crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { base: None, findings: &notes, focus: None }, egui::Id::new("mod.json form"));
+            let edits =
+                crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] }, egui::Id::new("mod.json form"));
             if !edits.is_empty()
                 && let Err(e) = p.do_edits("mod.json", "Edit mod.json", edits)
             {
@@ -286,4 +311,20 @@ pub fn notes_for(findings: &[Finding], rel: &str) -> Vec<crate::form::FieldNote>
         .filter(|f| f.file == rel)
         .map(|f| crate::form::FieldNote { pointer: crate::edit::dotted_to_pointer(&f.path), level: f.level, message: f.message.clone() })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn did_you_mean_is_printed_once() {
+        let mut f = Finding::new(Level::Error, "", "", "", "gun 'Gunn' is not in guns.json (did you mean 'Gun'?)");
+        f.suggestion = Some("Gun".into());
+        assert_eq!(suggestion_line(&f), None, "the engine's message has it already");
+        f.message = "gun 'Gunn' is not in guns.json".into();
+        assert_eq!(suggestion_line(&f).as_deref(), Some("    did you mean \"Gun\"?"));
+        f.suggestion = None;
+        assert_eq!(suggestion_line(&f), None);
+    }
 }

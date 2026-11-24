@@ -315,7 +315,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         match read_merged(&root, &rel) {
             Ok(v) => {
                 ui.strong(&id);
-                let ctx = crate::form::FormCtx { base: None, findings: &[], focus: None };
+                let ctx = crate::form::FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
                 let edits = crate::form::show(ui, &schema, &v, &ctx, egui::Id::new(("ship form retail", &id)));
                 if !edits.is_empty() {
                     crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.clone(), label: format!("Edit {id}"), edits });
@@ -338,6 +338,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     let mut go3d = false;
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
     let mut edits = vec![];
+    let mut revert = false;
     egui::ScrollArea::vertical().id_salt("ship-detail").show(ui, |ui| {
         let doc = &project.docs[i];
         ui.strong(format!("{id}{}", if doc.dirty { " (unsaved)" } else { "" }));
@@ -345,15 +346,26 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         if ui.button("Show in 3D").clicked() {
             go3d = true;
         }
+        if doc.can_revert()
+            && ui
+                .button(if doc.is_retail_layer() { "Revert file to retail" } else { "Revert file to its parent" })
+                .on_hover_text("Take every change of the mod in this ship back (one undo step); saving deletes the mod's file when nothing is left")
+                .clicked()
+        {
+            revert = true;
+        }
         egui::CollapsingHeader::new("Compare").default_open(false).show(ui, |ui| compare_ui(ui, st, project, doc, &id, &ids));
         let pointer = st.focus.take();
         let inherited = (!doc.base.is_null()).then_some(&doc.base);
-        let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref() };
+        let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref(), hidden: &[] };
         edits = crate::form::show(ui, &schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
     });
     if !edits.is_empty()
         && let Err(e) = project.do_edits(&rel, &format!("Edit {id}"), edits)
     {
+        st.status = e;
+    }
+    if revert && let Err(e) = project.revert_file(&rel) {
         st.status = e;
     }
     if go3d {

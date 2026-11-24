@@ -143,9 +143,21 @@ pub fn bullet_fields(gun: &Value) -> Vec<String> {
     keys
 }
 
+/// The pointers (inside the entry) of the fields the tab draws itself as pickers, so the form leaves them out: a gun's bullet fields.
+pub fn hidden_fields(table: Table, entry: &Value) -> Vec<String> {
+    if table == Table::Guns { bullet_fields(entry).iter().map(|k| format!("/{}", escape(k))).collect() } else { vec![] }
+}
+
 /// The edit that sets bullet field `key` of gun `gun` to `bullet`.
 pub fn bullet_pick_edit(gun: &str, key: &str, bullet: &str) -> Edit {
     Edit::set(format!("/{}/{}", escape(gun), escape(key)), json!(bullet))
+}
+
+/// The warning shown when `from` is duplicated: a copy of a retail entry is a new key, which a mod saves whole, so the mod would carry
+/// the game's data. `None` for an entry the import does not have (the mod's own). PROVISIONAL (the engine has no way to copy an entry
+/// by reference).
+pub fn duplicate_warning(doc: &Doc, from: &str) -> Option<String> {
+    doc.base.get(from).map(|_| format!("{from} is a retail entry: its copy is saved whole, so the mod would carry the game's data. Change what you need and delete what you keep unchanged, or start from scratch (PROVISIONAL)."))
 }
 
 /// The tab's own state.
@@ -154,13 +166,18 @@ pub struct State {
     pub table: Table,
     pub selected: Option<String>,
     filter: String,
-    new_name: String,
+    new_names: [String; 2],
     status: String,
     focus: Option<String>,
     schemas: Option<[Value; 2]>,
 }
 
 impl State {
+    /// The name box of the table that is shown: guns and bullets each keep their own text.
+    pub fn new_name(&mut self) -> &mut String {
+        &mut self.new_names[self.table as usize]
+    }
+
     /// A click in the problems list: selects the entry and sets the field to focus. Returns whether the file is a weapon table.
     pub fn take_focus(&mut self, focus: &Focus) -> bool {
         let Some(table) = Table::of_file(&focus.rel) else { return false };
@@ -229,15 +246,16 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     });
     let mut edits: Vec<Edit> = vec![];
     let mut label = String::new();
+    let mut revert: Option<Option<String>> = None;
     ui.horizontal(|ui| {
         ui.label(format!("New {}", table.word()));
-        ui.text_edit_singleline(&mut st.new_name);
+        ui.text_edit_singleline(st.new_name());
         if ui.button(format!("New {} from scratch", table.word())).clicked() {
-            match new_entry_edits(&project.docs[i].edited, &st.new_name) {
+            match new_entry_edits(&project.docs[i].edited, &st.new_names[table as usize]) {
                 Ok(e) => {
                     edits = e;
-                    label = format!("New {} {}", table.word(), st.new_name.trim());
-                    st.selected = Some(st.new_name.trim().to_string());
+                    label = format!("New {} {}", table.word(), st.new_names[table as usize].trim());
+                    st.selected = Some(st.new_names[table as usize].trim().to_string());
                 }
                 Err(e) => st.status = e,
             }
@@ -245,20 +263,21 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         if ui.add_enabled(st.selected.is_some(), egui::Button::new("Duplicate selected under this name")).clicked()
             && let Some(from) = st.selected.clone()
         {
-            match duplicate_edits(&project.docs[i].edited, &from, &st.new_name) {
+            match duplicate_edits(&project.docs[i].edited, &from, &st.new_names[table as usize]) {
                 Ok(e) => {
                     edits = e;
-                    label = format!("Duplicate {from} as {}", st.new_name.trim());
-                    st.selected = Some(st.new_name.trim().to_string());
+                    label = format!("Duplicate {from} as {}", st.new_names[table as usize].trim());
+                    st.status = duplicate_warning(&project.docs[i], &from).unwrap_or_default();
+                    st.selected = Some(st.new_names[table as usize].trim().to_string());
                 }
                 Err(e) => st.status = e,
             }
         }
     });
-    ui.colored_label(
-        egui::Color32::YELLOW,
-        "A duplicate of a retail entry is saved whole, so the mod would carry the game's data. Start from scratch where you can (PROVISIONAL warning).",
-    );
+    ui.weak(format!(
+        "A new {} from scratch needs every field the game requires before it loads (the problems list names what is missing; PROVISIONAL: the form does not mark required fields).",
+        table.word()
+    ));
     if !st.status.is_empty() {
         ui.label(&st.status);
     }
@@ -267,6 +286,25 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         let doc = &project.docs[i];
         ui.strong(&name);
         let entry = &doc.edited[&name];
+        let pointer_of_entry = format!("/{}", escape(&name));
+        ui.horizontal(|ui| {
+            if doc.base.get(&name).is_some_and(|b| b != entry)
+                && ui
+                    .button(format!("Revert {name} to retail"))
+                    .on_hover_text("Put this entry back to the game's values (one undo step); the mod then holds no change of it")
+                    .clicked()
+            {
+                revert = Some(Some(pointer_of_entry.clone()));
+            }
+            if doc.can_revert()
+                && ui
+                    .button("Revert file to retail")
+                    .on_hover_text("Take every change of the mod in this table back (one undo step); saving deletes the file when nothing is left")
+                    .clicked()
+            {
+                revert = Some(None);
+            }
+        });
         if table == Table::Guns {
             for key in bullet_fields(entry) {
                 let current = entry.get(&key).and_then(Value::as_str).unwrap_or("");
@@ -285,7 +323,8 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
         let pointer = st.focus.take();
         let inherited = doc.base.get(&name);
-        let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref() };
+        let hidden = hidden_fields(table, entry);
+        let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref(), hidden: &hidden };
         let schema = &schemas[table as usize];
         let shown = crate::form::show(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
         if !shown.is_empty() {
@@ -294,6 +333,15 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
     } else {
         ui.label(format!("Select a {}.", table.word()));
+    }
+    if let Some(r) = revert {
+        let done = match r {
+            Some(pointer) => project.revert_at(rel, &pointer),
+            None => project.revert_file(rel),
+        };
+        if let Err(e) = done {
+            st.status = e;
+        }
     }
     if !edits.is_empty()
         && let Err(e) = project.do_edits(rel, &label, edits)
@@ -339,7 +387,7 @@ fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, impo
     };
     ui.strong(&name);
     let pointer = st.focus.take();
-    let ctx = crate::form::FormCtx { base: None, findings: &[], focus: pointer.as_deref() };
+    let ctx = crate::form::FormCtx { base: None, findings: &[], focus: pointer.as_deref(), hidden: &[] };
     let shown = crate::form::show(ui, &schemas[table as usize], &doc[&name], &ctx, egui::Id::new(("weapon form retail", rel, &name)));
     if !shown.is_empty() {
         crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.to_string(), label: format!("Edit {name}"), edits: prefix_edits(&name, shown) });
@@ -457,5 +505,32 @@ mod tests {
         assert!(!st.take_focus(&Focus { rel: "ships/A/ship.json".into(), path: String::new() }));
         assert!(st.take_focus(&Focus { rel: Table::Bullets.rel().into(), path: "B1.lifetime".into() }));
         assert_eq!((st.table, st.selected.as_deref(), st.focus.as_deref()), (Table::Bullets, Some("B1"), Some("/lifetime")));
+    }
+
+    #[test]
+    fn guns_and_bullets_keep_their_own_new_name_and_the_bullet_field_is_drawn_once() {
+        let mut st = State::default();
+        *st.new_name() = "Gun_N".into();
+        st.table = Table::Bullets;
+        assert_eq!(st.new_name(), "", "the bullet box does not show the gun's text");
+        *st.new_name() = "B_N".into();
+        st.table = Table::Guns;
+        assert_eq!(st.new_name(), "Gun_N");
+        let gun = json!({"BulletTypeName_Primary": "B1", "BulletTypeName_Alt": "B2", "MuzzleSpeed": 1});
+        assert_eq!(hidden_fields(Table::Guns, &gun), ["/BulletTypeName_Primary", "/BulletTypeName_Alt"], "the combo boxes draw these, the form skips them");
+        assert!(hidden_fields(Table::Bullets, &gun).is_empty());
+        assert_eq!(hidden_fields(Table::Guns, &json!({})), ["/BulletTypeName_Primary"], "the primary picker is always there");
+    }
+
+    #[test]
+    fn the_duplicate_warning_is_for_retail_entries_only() {
+        let (root, assets, m) = setup("dupwarn");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        edit_entry(&mut p, Table::Guns, "Gun_N", vec![Edit::set("/MuzzleSpeed", json!(1))]).unwrap();
+        let doc = p.doc(Table::Guns.rel()).unwrap();
+        assert!(duplicate_warning(doc, "Gun_A").unwrap().contains("retail entry"));
+        assert!(duplicate_warning(doc, "Gun_N").is_none(), "the mod's own entry is no retail data");
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

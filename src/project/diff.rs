@@ -49,8 +49,12 @@ fn extends_file(base: &Value, edited: &Value, own: &Value, parent: Option<&str>,
     let mut sets: Vec<(String, Value)> = vec![];
     // Hand-written `set` entries stay while the pointer exists; their value follows the document.
     if let Some(Value::Object(set)) = &own_set {
-        for (ptr, _) in set {
+        for (ptr, own_value) in set {
             if let Some(cur) = edited.pointer(ptr) {
+                // A `set` that was changed back to what the parent has is dropped.
+                if base.pointer(ptr) == Some(cur) && own_value != cur {
+                    continue;
+                }
                 sets.push((ptr.clone(), cur.clone()));
             }
         }
@@ -96,7 +100,18 @@ fn diff_obj(base: Option<&Map<String, Value>>, edited: &Map<String, Value>, own:
         match edited.get(key) {
             Some(ev) => {
                 let (bv, ov) = (base.and_then(|b| b.get(key)), own.and_then(|o| o.get(key)));
-                out.insert(key.clone(), kept(bv, ev, ov, path, cx));
+                // A key the mod wrote that now equals what is below it was reset to the parent: it is dropped (a key that always
+                // equalled the parent stays, as the author wrote it).
+                if bv == Some(ev) && ov != bv {
+                    path.pop();
+                    continue;
+                }
+                let v = kept(bv, ev, ov, path, cx);
+                if matches!(&v, Value::Object(m) if m.is_empty()) && bv.is_some_and(Value::is_object) && ov.is_some_and(|o| o.as_object().is_some_and(|m| !m.is_empty())) {
+                    path.pop();
+                    continue;
+                }
+                out.insert(key.clone(), v);
             }
             None if base.is_some_and(|b| b.contains_key(key)) => cx.warnings.push(removed(path)),
             None => {}
@@ -387,5 +402,34 @@ mod tests {
         let d = compute(DocKind::Replaced, &base, &edited, &Value::Null, None);
         assert_eq!(d.file, Some(edited.clone()));
         assert_eq!(engine_result(rel, &base, d.file.as_ref().unwrap(), "replaced"), edited);
+    }
+
+    #[test]
+    fn a_key_reset_to_the_parent_is_dropped_from_the_file_but_one_that_always_matched_stays() {
+        let base = ship();
+        // the mod's file overrides speed and hull.hp, repeats `name` (equal to the parent), adds `extra` and sets an engine
+        let own = json!({"extends": "Ship_X", "name": "Cutter", "speed": 5, "hull": {"hp": 90, "armour": 6}, "extra": 1, "set": {"/engines/1/fx": "B"}});
+        let mut edited = base.clone();
+        edited["hull"]["armour"] = json!(6);
+        // speed and hull.hp are back at the parent's values, `extra` was removed, the engine is back
+        let (file, warnings) = extends(&base, &edited, &own, "reset");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(file, json!({"extends": "Ship_X", "name": "Cutter", "hull": {"armour": 6}}), "only what matched all along stays");
+        // nothing differs from the parent any more: only `extends` remains
+        let own = json!({"extends": "Ship_X", "speed": 5, "hull": {"hp": 90}, "set": {"/engines/1/fx": "B"}});
+        let (file, _) = extends(&base, &base, &own, "reset-all");
+        assert_eq!(file, json!({"extends": "Ship_X"}));
+    }
+
+    #[test]
+    fn a_merged_entry_reset_to_the_parent_is_dropped() {
+        let base = json!({"Gun_A": {"range": 10, "dmg": 1}, "Gun_B": {"range": 1}});
+        let own = json!({"Gun_A": {"range": 12}, "Gun_B": {"range": 2}});
+        let mut edited = base.clone();
+        edited["Gun_B"]["range"] = json!(2);
+        let d = compute(DocKind::Merged, &base, &edited, &own, None);
+        assert_eq!(d.file, Some(json!({"Gun_B": {"range": 2}})), "Gun_A is back at retail: no entry of it remains");
+        let d = compute(DocKind::Merged, &base, &base, &own, None);
+        assert_eq!(d.file, Some(json!({})), "an empty file: the project deletes it");
     }
 }

@@ -292,6 +292,47 @@ pub fn reset(pointer: &str) -> Edit {
     Edit::remove(pointer)
 }
 
+/// Where a field's value in a document that is laid over another comes from (docs/roadmap.md B6 "compare").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// The same as the document below it (the parent or retail): the mod does not change it.
+    Inherited,
+    /// The mod changes it.
+    Overridden,
+    /// The document below has no such key: the mod adds it.
+    Added,
+}
+
+impl Origin {
+    /// The word on the badge.
+    pub fn label(self) -> &'static str {
+        match self {
+            Origin::Inherited => "inherited",
+            Origin::Overridden => "overridden",
+            Origin::Added => "added",
+        }
+    }
+}
+
+/// How `value` (what the document has at a place) stands against `base` (what is below it there). `None` when the document has no
+/// value: the key is not set, or was removed (which a mod file cannot express; see [`reset_to_base`] for the way back).
+pub fn classify(value: Option<&Value>, base: Option<&Value>) -> Option<Origin> {
+    match (value?, base) {
+        (v, Some(b)) if v == b => Some(Origin::Inherited),
+        (_, Some(_)) => Some(Origin::Overridden),
+        (_, None) => Some(Origin::Added),
+    }
+}
+
+/// "Reset to parent": the edit that puts `pointer` back to what is below it: the base's value, or the key removed when the base has
+/// none, so the saved diff no longer holds the key.
+pub fn reset_to_base(pointer: &str, base: Option<&Value>) -> Edit {
+    match base {
+        Some(b) => Edit::set(pointer, b.clone()),
+        None => Edit::remove(pointer),
+    }
+}
+
 /// Adds the entry `name` (value `value`) to the map at `pointer`. Empty when the name is empty or taken.
 pub fn map_add(pointer: &str, map: Option<&Value>, name: &str, value: Value) -> Vec<Edit> {
     if name.is_empty() || map.and_then(Value::as_object).is_some_and(|m| m.contains_key(name)) {
@@ -561,5 +602,38 @@ mod tests {
         assert_eq!(split_pointer("/a"), Some((String::new(), "a".to_string())));
         assert_eq!(split_pointer(""), None);
         assert_eq!(child_pointer("/a", "x/y"), "/a/x~1y");
+    }
+
+    #[test]
+    fn origin_is_inherited_overridden_or_added_and_a_missing_value_has_none() {
+        let base = json!({"speed": 3, "hull": {"hp": 10}, "flags": ["a"]});
+        let v = |p: &str, doc: &Value| classify(doc.pointer(p), base.pointer(p));
+        let doc = json!({"speed": 4, "hull": {"hp": 10}, "flags": ["a", "b"], "extra": 1, "ring": null});
+        assert_eq!(v("/speed", &doc), Some(Origin::Overridden));
+        assert_eq!(v("/hull", &doc), Some(Origin::Inherited));
+        assert_eq!(v("/hull/hp", &doc), Some(Origin::Inherited));
+        assert_eq!(v("/flags", &doc), Some(Origin::Overridden));
+        assert_eq!(v("/extra", &doc), Some(Origin::Added));
+        assert_eq!(v("/ring", &doc), Some(Origin::Added), "null is a value");
+        assert_eq!(v("/gone", &doc), None);
+        assert_eq!(classify(None, base.pointer("/speed")), None, "a removed inherited key has no origin");
+        assert_eq!(Origin::Added.label(), "added");
+    }
+
+    #[test]
+    fn reset_to_base_sets_an_overridden_key_back_and_removes_an_added_one() {
+        let base = json!({"speed": 3, "hull": {"hp": 10, "armour": 1}});
+        let mut doc = json!({"speed": 4, "hull": {"hp": 11, "armour": 1}, "extra": {"a": 1}});
+        for (p, expect) in [("/speed", Some(json!(3))), ("/hull", Some(json!({"hp": 10, "armour": 1}))), ("/extra", None), ("/hull/hp", Some(json!(10)))] {
+            let mut d = doc.clone();
+            let e = reset_to_base(p, base.pointer(p));
+            let applied = edit::apply(&mut d, &e).unwrap();
+            assert_eq!(d.pointer(p).cloned(), expect, "{p}");
+            assert!(matches!(classify(d.pointer(p), base.pointer(p)), None | Some(Origin::Inherited)), "{p}: no longer different");
+            edit::undo(&mut d, &applied).unwrap();
+            assert_eq!(d, doc, "{p}: undone byte for byte");
+        }
+        doc["speed"] = json!(3);
+        assert_eq!(classify(doc.get("speed"), base.get("speed")), Some(Origin::Inherited));
     }
 }

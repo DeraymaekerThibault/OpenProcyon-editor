@@ -107,6 +107,60 @@ pub struct Doc {
     pub conflict: Option<Option<FileStamp>>,
 }
 
+/// What saving a document does to its file.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Plan {
+    /// Nothing: the file is equal in meaning to what is to be saved.
+    Nothing,
+    /// Write this content.
+    Write(Value),
+    /// Delete the mod's file: nothing of the mod's change is left in it.
+    Delete,
+}
+
+impl Doc {
+    /// The file this document is saved as (see [`diff`]), and the changes a mod file cannot express. A file that holds nothing but what
+    /// is below it is deleted: a retail ship's `extends`-itself file with no key left, a merged table with no entry left.
+    pub fn plan(&self) -> (Plan, Vec<String>) {
+        let d = diff::compute(self.kind, &self.base, &self.edited, &self.own, self.parent.as_deref());
+        let in_place = self.parent.as_deref() == Some(own_id(&self.rel).as_str());
+        let empty = |f: &Value, keep: &[&str]| f.as_object().is_some_and(|m| m.keys().all(|k| keep.contains(&k.as_str())));
+        let plan = match d.file {
+            Some(f) if !self.own.is_null() && ((self.kind == DocKind::Merged && empty(&f, &[])) || (self.kind == DocKind::Extends && in_place && empty(&f, &["extends"]))) => {
+                Plan::Delete
+            }
+            Some(f) if f != self.own => Plan::Write(f),
+            _ => Plan::Nothing,
+        };
+        (plan, d.warnings)
+    }
+
+    /// Sets `dirty`: there is something to save. A document that exists nowhere yet stays dirty while it differs from its start; any
+    /// other is dirty only when saving would change the file (so undoing back, or resetting every field by hand, is clean again).
+    fn refresh_dirty(&mut self) {
+        self.dirty = if self.edited == self.clean {
+            false
+        } else if self.clean.is_null() {
+            true
+        } else {
+            let (plan, warnings) = self.plan();
+            plan != Plan::Nothing || !warnings.is_empty()
+        };
+    }
+
+    /// Whether the document can go back to what is below it ("Revert file"): a mod file that changes a retail file (`Merged`, or an
+    /// `Extends` of the retail file of the same id), or one extending another file, with something to take back. A file with nothing
+    /// below it (a ship new in the mod) has nothing to revert to.
+    pub fn can_revert(&self) -> bool {
+        !self.base.is_null() && self.kind != DocKind::Replaced && self.edited != self.base && (!self.own.is_null() || self.dirty)
+    }
+
+    /// Whether the retail file of the same id is what is below this document (a retail ship edited as `extends` itself).
+    pub fn is_retail_layer(&self) -> bool {
+        self.kind == DocKind::Merged || self.parent.as_deref() == Some(own_id(&self.rel).as_str())
+    }
+}
+
 /// A change the user should hear about (poll results, save problems).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
@@ -131,6 +185,8 @@ pub struct Command {
 pub struct SaveReport {
     /// Files written (relative paths).
     pub written: Vec<String>,
+    /// Files deleted because nothing of the mod's change was left in them (a file reverted to retail).
+    pub deleted: Vec<String>,
     /// Changes a mod file cannot express (a removed inherited key), with the file named.
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
@@ -369,7 +425,7 @@ impl Project {
         }
         let doc = &mut self.docs[i];
         doc.edited = next;
-        doc.dirty = doc.edited != doc.clean;
+        doc.refresh_dirty();
         // Consecutive sets of the same one field (typing a name, dragging a number) are one step: the first one's `before` is kept.
         let single = |c: &[Edit]| match c {
             [e] if e.new.is_some() => Some(e.pointer.clone()),
@@ -412,7 +468,7 @@ impl Project {
         let Ok(i) = self.open_doc(&cmd.rel) else { return None };
         let doc = &mut self.docs[i];
         doc.edited = cmd.before.clone();
-        doc.dirty = doc.edited != doc.clean;
+        doc.refresh_dirty();
         let label = cmd.label.clone();
         self.redo.push(cmd);
         Some(label)
@@ -430,7 +486,7 @@ impl Project {
             }
         }
         doc.edited = next;
-        doc.dirty = doc.edited != doc.clean;
+        doc.refresh_dirty();
         let label = cmd.label.clone();
         self.undo.push(cmd);
         Some(label)
@@ -442,16 +498,18 @@ impl Project {
         let mut report = SaveReport::default();
         for rel in self.dirty_rels() {
             match self.save_doc(&rel) {
-                Ok((wrote, warnings)) => {
-                    if wrote {
-                        report.written.push(rel.clone());
+                Ok((outcome, warnings)) => {
+                    match outcome {
+                        Plan::Write(_) => report.written.push(rel.clone()),
+                        Plan::Delete => report.deleted.push(rel.clone()),
+                        Plan::Nothing => {}
                     }
                     report.warnings.extend(warnings.into_iter().map(|w| format!("{rel}: {w}")));
                 }
                 Err(e) => report.errors.push(e),
             }
         }
-        if !report.written.is_empty()
+        if !(report.written.is_empty() && report.deleted.is_empty())
             && let Err(e) = self.rebuild()
         {
             report.errors.push(e);
@@ -459,26 +517,70 @@ impl Project {
         report
     }
 
-    fn save_doc(&mut self, rel: &str) -> Result<(bool, Vec<String>), String> {
+    fn save_doc(&mut self, rel: &str) -> Result<(Plan, Vec<String>), String> {
         let path = self.dir.join(rel);
         let import = self.import.clone();
+        let dir = self.dir.clone();
         let doc = self.docs.iter_mut().find(|d| d.rel == rel).ok_or_else(|| format!("{rel}: not open"))?;
-        let d = diff::compute(doc.kind, &doc.base, &doc.edited, &doc.own, doc.parent.as_deref());
-        let mut wrote = false;
-        if let Some(file) = d.file.filter(|f| *f != doc.own) {
-            if let Some(dir) = path.parent() {
-                guard::create_dir_all(dir, import.as_deref())?;
+        let (plan, warnings) = doc.plan();
+        match &plan {
+            Plan::Write(file) => {
+                if let Some(parent) = path.parent() {
+                    guard::create_dir_all(parent, import.as_deref())?;
+                }
+                guard::write(&path, to_json_string(file), import.as_deref())?;
+                // The editor's own write is not an outside change.
+                doc.disk = FileStamp::of(&path);
+                doc.own = file.clone();
             }
-            guard::write(&path, to_json_string(&file), import.as_deref())?;
-            // The editor's own write is not an outside change.
-            doc.disk = FileStamp::of(&path);
-            doc.own = file;
-            wrote = true;
+            Plan::Delete => {
+                match guard::remove_file(&path, import.as_deref()) {
+                    Ok(()) => {}
+                    Err(_) if !path.exists() => {}
+                    Err(e) => return Err(e),
+                }
+                // Folders the file leaves empty go too (never the mod folder itself, never one with something in it).
+                let mut at = path.parent().map(Path::to_path_buf);
+                while let Some(d) = at.filter(|d| *d != dir && d.starts_with(&dir)) {
+                    if guard::remove_empty_dir(&d, import.as_deref()).is_err() {
+                        break;
+                    }
+                    at = d.parent().map(Path::to_path_buf);
+                }
+                doc.disk = None;
+                doc.own = Value::Null;
+            }
+            Plan::Nothing => {}
         }
         doc.clean = doc.edited.clone();
         doc.dirty = false;
         doc.conflict = None;
-        Ok((wrote, d.warnings))
+        Ok((plan, warnings))
+    }
+
+    /// Takes the whole document `rel` back to what is below it (the retail file, or the parent), as one undo step. Saving then deletes
+    /// the mod's file when it was a retail file's `extends`-itself file or a merged table (see [`Doc::plan`]). Errors when there is
+    /// nothing below the file.
+    pub fn revert_file(&mut self, rel: &str) -> Result<(), String> {
+        let i = self.open_doc(rel)?;
+        let doc = &self.docs[i];
+        if doc.base.is_null() {
+            return Err(format!("{rel}: nothing is below this file, so there is nothing to revert to"));
+        }
+        let (base, label) = (doc.base.clone(), if doc.is_retail_layer() { format!("Revert {rel} to retail") } else { format!("Revert {rel} to its parent") });
+        self.do_step(rel, &label, vec![Edit::set("", base)])
+    }
+
+    /// Takes one part of the document `rel` (a JSON pointer, e.g. a gun's entry `/Gun_A`) back to what is below it: set to the base's
+    /// value, or removed when the base has none, as one undo step.
+    pub fn revert_at(&mut self, rel: &str, pointer: &str) -> Result<(), String> {
+        let i = self.open_doc(rel)?;
+        let base = self.docs[i].base.pointer(pointer).cloned();
+        let edit = match base {
+            Some(b) => Edit::set(pointer, b),
+            None => Edit::remove(pointer),
+        };
+        self.do_step(rel, &format!("Revert {pointer} in {rel}"), vec![edit])
     }
 
     /// Looks at the files of the open documents (about once a second). A changed file of a clean document is reloaded; one of a
@@ -553,7 +655,7 @@ impl Project {
                 let _ = edit::apply(&mut fresh.edited, &Edit { old: None, ..e.clone() });
             }
         }
-        fresh.dirty = fresh.edited != fresh.clean;
+        fresh.refresh_dirty();
         self.replace(fresh);
         Ok(())
     }
@@ -871,5 +973,116 @@ mod tests {
         p.save();
         assert!(m.join("ships/Ship_W/ship.json").is_file());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resetting_every_change_by_hand_is_clean_again() {
+        let (root, assets, m) = setup("cleanagain");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        let rel = "ships/Ship_X/ship.json";
+        p.do_edits(rel, "a", vec![Edit::set("/speed", json!(5))]).unwrap();
+        assert!(p.doc(rel).unwrap().dirty);
+        p.do_edits(rel, "b", vec![Edit::set("/speed", json!(3))]).unwrap();
+        assert!(!p.doc(rel).unwrap().dirty, "equal to retail again: nothing to save");
+        assert_eq!(p.save(), SaveReport::default());
+        // after a save, undoing back is a change to save (the file has to go), redoing is clean
+        p.do_edits(rel, "c", vec![Edit::set("/speed", json!(6))]).unwrap();
+        assert_eq!(p.save().written, [rel]);
+        assert!(!p.doc(rel).unwrap().dirty);
+        p.undo();
+        assert!(p.doc(rel).unwrap().dirty);
+        p.redo();
+        assert!(!p.doc(rel).unwrap().dirty);
+        // a document that exists nowhere yet stays unsaved until it is written
+        p.open_new_doc("ships/Ship_N/ship.json", None, json!({"race": ""})).unwrap();
+        assert!(p.doc("ships/Ship_N/ship.json").unwrap().dirty);
+        p.do_edits("ships/Ship_N/ship.json", "n", vec![Edit::set("/race", json!("x"))]).unwrap();
+        p.undo();
+        assert!(p.doc("ships/Ship_N/ship.json").unwrap().dirty);
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reverting_a_retail_ship_file_deletes_the_extends_file_on_save_and_undo_brings_it_back() {
+        let (root, assets, m) = setup("revertship");
+        let rel = "ships/Ship_X/ship.json";
+        let mut p = Project::open(&m, Some(assets.clone())).unwrap();
+        assert!(!p.open_doc(rel).map(|i| p.docs[i].can_revert()).unwrap(), "an untouched retail ship has nothing to revert");
+        p.do_edits(rel, "Speed", vec![Edit::set("/speed", json!(5))]).unwrap();
+        assert!(p.doc(rel).unwrap().can_revert());
+        assert_eq!(p.save().written, [rel]);
+        assert!(m.join(rel).is_file());
+        p.revert_file(rel).unwrap();
+        assert_eq!(p.undo_label(), Some("Revert ships/Ship_X/ship.json to retail"));
+        assert_eq!(p.doc(rel).unwrap().edited["speed"], 3);
+        assert!(p.doc(rel).unwrap().dirty);
+        // undo of the revert is one step and restores the edit
+        p.undo();
+        assert_eq!(p.doc(rel).unwrap().edited["speed"], 5);
+        assert!(!p.doc(rel).unwrap().dirty, "back to what is on disk");
+        p.redo();
+        let report = p.save();
+        assert_eq!((report.deleted.as_slice(), report.written.len(), report.errors.len()), ([rel.to_string()].as_slice(), 0, 0), "{report:?}");
+        assert!(!m.join(rel).exists() && !m.join("ships/Ship_X").exists() && !m.join("ships").exists(), "the file and the folders it leaves empty are gone");
+        assert!(m.is_dir());
+        assert_eq!(p.entry().unwrap().extends.len(), 0, "the engine sees no extends file");
+        assert!(!p.doc(rel).unwrap().can_revert() && !p.doc(rel).unwrap().dirty);
+        assert!(std::fs::read_to_string(assets.join(rel)).unwrap().contains("\"speed\": 3"), "retail is untouched");
+        // editing again after the delete writes a fresh file
+        p.do_edits(rel, "Speed", vec![Edit::set("/speed", json!(7))]).unwrap();
+        assert_eq!(p.save().written, [rel]);
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reverting_one_gun_keeps_the_other_changed_entry_and_the_last_revert_deletes_the_file() {
+        let (root, assets, m) = setup("revertgun");
+        write(&assets, "data/weapons/guns.json", r#"{"Gun_A": {"range": 10}, "Gun_B": {"range": 1, "dmg": 2}}"#);
+        let rel = "data/weapons/guns.json";
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        p.do_edits(rel, "A", vec![Edit::set("/Gun_A/range", json!(12))]).unwrap();
+        p.do_edits(rel, "B", vec![Edit::set("/Gun_B/range", json!(2)), Edit::set("/Gun_C", json!({"range": 9}))]).unwrap();
+        assert_eq!(p.save().written, [rel]);
+        let file = |m: &Path| -> Value { serde_json::from_slice(&std::fs::read(m.join(rel)).unwrap()).unwrap() };
+        assert_eq!(file(&m), json!({"Gun_A": {"range": 12}, "Gun_B": {"range": 2}, "Gun_C": {"range": 9}}));
+        p.revert_at(rel, "/Gun_A").unwrap();
+        assert_eq!(p.doc(rel).unwrap().edited["Gun_A"], json!({"range": 10}));
+        assert_eq!(p.save().written, [rel]);
+        assert_eq!(file(&m), json!({"Gun_B": {"range": 2}, "Gun_C": {"range": 9}}), "Gun_A has no entry left, the others stay");
+        // a new entry has no retail value: revert removes it
+        p.revert_at(rel, "/Gun_C").unwrap();
+        assert!(p.doc(rel).unwrap().edited.get("Gun_C").is_none());
+        // one undo step each
+        assert_eq!(p.undo().as_deref(), Some("Revert /Gun_C in data/weapons/guns.json"));
+        assert!(p.doc(rel).unwrap().edited.get("Gun_C").is_some());
+        p.redo();
+        p.revert_file(rel).unwrap();
+        let report = p.save();
+        assert_eq!(report.deleted, [rel], "{report:?}");
+        assert!(!m.join(rel).exists());
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_ship_new_in_the_mod_has_nothing_to_revert_to_and_a_clone_goes_back_to_its_parent() {
+        let (root, assets, m) = setup("revertnew");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        p.open_new_doc("ships/Ship_N/ship.json", None, json!({"race": "x"})).unwrap();
+        assert!(!p.doc("ships/Ship_N/ship.json").unwrap().can_revert());
+        assert!(p.revert_file("ships/Ship_N/ship.json").is_err());
+        p.open_new_doc("ships/Ship_C/ship.json", Some("Ship_X"), Value::Null).unwrap();
+        p.do_edits("ships/Ship_C/ship.json", "e", vec![Edit::set("/speed", json!(9))]).unwrap();
+        assert!(p.save().written.contains(&"ships/Ship_C/ship.json".to_string()));
+        p.revert_file("ships/Ship_C/ship.json").unwrap();
+        assert_eq!(p.undo_label(), Some("Revert ships/Ship_C/ship.json to its parent"));
+        let report = p.save();
+        assert_eq!(report.written, ["ships/Ship_C/ship.json"], "the clone itself stays");
+        let file: Value = serde_json::from_slice(&std::fs::read(m.join("ships/Ship_C/ship.json")).unwrap()).unwrap();
+        assert_eq!(file, json!({"extends": "Ship_X"}));
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
