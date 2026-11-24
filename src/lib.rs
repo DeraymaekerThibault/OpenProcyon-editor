@@ -2,6 +2,7 @@
 //! lives in these modules. It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 pub mod checks;
+pub mod compare;
 pub mod edit;
 pub mod form;
 pub mod launch;
@@ -13,3 +14,5 @@ pub mod project;
 pub mod project_panel;
 pub mod schema_form;
 pub mod ship_view;
+pub mod ships_panel;
+pub mod weapons_panel;
