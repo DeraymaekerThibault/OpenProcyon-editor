@@ -25,13 +25,27 @@ struct Assets {
     status: Imported,
 }
 
+/// The engine's rule (`run` in its lib.rs): only the per-user folder the download imports into must carry this version's stamp;
+/// `PROCYON_ASSETS` and a checkout's `assets/` (made by the command-line importer, no stamp) are used as they are if they hold `ships/`.
+fn status_of(dir: &std::path::Path, env_set: bool, user_assets: Option<&std::path::Path>, version: &str) -> Imported {
+    let player = !env_set && user_assets.is_some_and(|u| u == dir);
+    match player {
+        true => imported(dir, version),
+        false if dir.join("ships").is_dir() => Imported::Ready,
+        false => Imported::Missing,
+    }
+}
+
 /// The engine's own lookup is `base_assets()`, which is `pub(crate)` at v0.2.0, and the public `assets_dir()` rebuilds the shared
 /// overlay folder as a side effect (it would clobber a running game's, see #136). So this composes the engine's public pieces in
 /// the same order: `PROCYON_ASSETS`, else the per-user folder the importer fills.
 /// PROVISIONAL: skips the engine's checkout `assets/` step (meaningless from a git dependency); replace with the Phase 1 `authoring` API.
 fn find_assets() -> Assets {
-    let dir = std::env::var_os("PROCYON_ASSETS").map(PathBuf::from).or_else(|| Some(openprocyon::campaign::user_dir()?.join("assets")));
-    let status = dir.as_deref().map_or(Imported::Missing, |d| imported(d, ENGINE_VERSION));
+    let env = std::env::var_os("PROCYON_ASSETS").map(PathBuf::from);
+    let user = openprocyon::campaign::user_dir().map(|d| d.join("assets"));
+    let env_set = env.is_some();
+    let dir = env.or_else(|| user.clone());
+    let status = dir.as_deref().map_or(Imported::Missing, |d| status_of(d, env_set, user.as_deref(), ENGINE_VERSION));
     Assets { dir, status }
 }
 
@@ -79,4 +93,45 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mi
         });
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("procyon-editor-main-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("ships")).unwrap();
+        d
+    }
+
+    #[test]
+    fn unstamped_developer_import_is_ready_like_in_the_engine() {
+        let d = tmp("dev");
+        assert_eq!(status_of(&d, true, None, "0.2.0"), Imported::Ready); // PROCYON_ASSETS
+        assert_eq!(status_of(&d, false, Some(Path::new("/elsewhere")), "0.2.0"), Imported::Ready); // checkout assets/
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn per_user_folder_needs_a_matching_stamp() {
+        let d = tmp("user");
+        assert!(matches!(status_of(&d, false, Some(&d), "0.2.0"), Imported::Outdated { version: None, .. }));
+        std::fs::write(d.join("import.json"), r#"{"version": "0.1.0"}"#).unwrap();
+        assert!(matches!(status_of(&d, false, Some(&d), "0.2.0"), Imported::Outdated { version: Some(_), .. }));
+        std::fs::write(d.join("import.json"), r#"{"version": "0.2.0"}"#).unwrap();
+        assert_eq!(status_of(&d, false, Some(&d), "0.2.0"), Imported::Ready);
+        // the same folder named by PROCYON_ASSETS is a developer's: no stamp needed
+        std::fs::remove_file(d.join("import.json")).unwrap();
+        assert_eq!(status_of(&d, true, Some(&d), "0.2.0"), Imported::Ready);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn missing_ships_folder_is_missing() {
+        let d = std::env::temp_dir().join("procyon-editor-main-none");
+        assert_eq!(status_of(&d, true, None, "0.2.0"), Imported::Missing);
+    }
 }

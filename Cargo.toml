@@ -14,7 +14,8 @@ path = "src/main.rs"
 openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", tag = "v0.2.0" }
 # Same version and features as the engine's game/Cargo.toml at v0.2.0; keep them equal on every engine upgrade.
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
-bevy_egui = "0.43"
+# bevy_egui defaults minus `picking` (map dragging uses egui's own drag sense; the engine does not build bevy_picking).
+bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }
 rfd = "0.17"
 serde_json = { version = "1", features = ["preserve_order"] } # same as the engine
 

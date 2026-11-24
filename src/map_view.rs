@@ -49,6 +49,12 @@ pub fn save(out: &Path, id: &str, map: &Value) -> Result<PathBuf, String> {
     Ok(file)
 }
 
+/// A dragged coordinate as the f32's shortest decimal (`-369.23077`), not the widened f64 (`-369.23077392578125`).
+/// The engine reads positions as f32 anyway, so nothing is lost.
+fn short(v: f32) -> Value {
+    json!(v.to_string().parse::<f64>().unwrap_or(v as f64))
+}
+
 fn pos(o: &Value) -> Option<egui::Vec2> {
     Some(egui::vec2(o["pos"][0].as_f64()? as f32, o["pos"][1].as_f64()? as f32))
 }
@@ -134,8 +140,8 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, assets: Option<&Path>) {
         && let (Some(i), Some(at)) = (st.drag, resp.interact_pointer_pos())
     {
         let w = to_world(at);
-        objects[i]["pos"][0] = json!(w.x as f64);
-        objects[i]["pos"][1] = json!(w.y as f64);
+        objects[i]["pos"][0] = short(w.x);
+        objects[i]["pos"][1] = short(w.y);
         st.dirty = true;
     }
     if resp.drag_stopped()
@@ -163,6 +169,13 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, assets: Option<&Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dragged_value_round_trips_to_a_short_number() {
+        let v = short(-369.230_77_f32);
+        assert_eq!(jsonfmt::dump(&v).trim(), "-369.23077");
+        assert_eq!(v.as_f64().unwrap() as f32, -369.230_77_f32);
+    }
 
     #[test]
     fn save_writes_map_and_mod_json_in_the_engine_layout() {

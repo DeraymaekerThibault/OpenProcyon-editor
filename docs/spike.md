@@ -15,10 +15,9 @@ compare against a web stack before Phase 3. Record what was found under each ite
     - `zstd_rust` on `bevy_image` and `debug` on `bevy_utils` (feature unification onto crates the engine also uses).
     Everything else it uses (`bevy_render`, `bevy_core_pipeline`, `bevy_ui_render`, `bevy_winit`, ...) the engine already builds.
   - At startup bevy_egui warns: `The bevy_egui/picking feature is enabled, but PickingPlugin is not added (if you use Bevy's
-    DefaultPlugins, make sure the bevy/bevy_picking feature is enabled too)`. Harmless for panels. Two ways out, for the
-    maintainer to choose: turn off bevy_egui's `picking` default (which also drops the `bevy_picking` crate), or add
-    `bevy_picking` to the features, which would no longer match the engine's list. PROVISIONAL until item 3, where clicking
-    in the 3D view shows whether egui needs picking at all.
+    DefaultPlugins, make sure the bevy/bevy_picking feature is enabled too)`. FIXED: `bevy_egui` now uses
+    `default-features = false` with the defaults minus `picking` (item 3 showed egui needs no Bevy picking);
+    `cargo tree -e features -i bevy_picking` finds no such package any more, so the warning cannot fire (not run with a display here).
   - The engine's asset lookup `base_assets()` is `pub(crate)` at v0.2.0, and the public `assets_dir()` rebuilds the shared
     overlay folder as a side effect (#136). The editor composes the public pieces instead (`PROCYON_ASSETS`, then
     `campaign::user_dir()/assets`, status from `setup::imported`). Phase 1's `authoring` API should expose the lookup without
@@ -34,8 +33,9 @@ compare against a web stack before Phase 3. Record what was found under each ite
     shared overlay (#136), and there is no typed map document (`scenario` reads `serde_json::Value` field by field). The `authoring`
     API on branch `claude/exciting-lamport-zxdqra` adds `base_assets()` and `overlay_into()` but no `map(root, id)`; the editor
     composes the path itself (PROVISIONAL). Requirement: `authoring::map_json(root, id)` (and later a typed map).
-  - Gap: the import here is reported "Imported by engine version unknown, this editor links 0.2.0. Import again": the import
-    carries no version stamp that `setup::imported` accepts, so the status line is wrong for a working import.
+  - Was a gap, FIXED: a command-line import (checkout `assets/`, `PROCYON_ASSETS`) has no `import.json` and was reported "Imported by
+    engine version unknown ... Import again". The engine only requires the stamp of the per-user folder; `status_of` in `main.rs` applies
+    the same rule (developer folders with `ships/` are ready), and a per-user folder stamped by another version still warns.
   - Only a 2D top-down plan was built (egui painter); the 3D scene (scenery GLBs through the engine's spawners) was not attempted.
 
 - [x] **3. Move one island with the mouse and save `map.json`.**
@@ -49,8 +49,9 @@ compare against a web stack before Phase 3. Record what was found under each ite
     item 1 can be settled by turning that default feature off.
   - Writer differences found on real engine data: (a) the exponent form: the import writes `2e-06` (Python), the Rust writer `2e-6`,
     so red_rover's `players[].forward` and `teams` lines change text (not value) on save; item 5's "no engine file has such numbers"
-    was wrong. (b) A dragged position is f32 pointer maths widened to f64: `-369.23077392578125`. Round edited coordinates
-    (PROVISIONAL: to 1e-3) and have the engine own the writer.
+    was wrong. (b) A dragged position is f32 pointer maths widened to f64: `-369.23077392578125`. (b) is FIXED: a dragged coordinate is stored as the f32's
+    shortest decimal (`-369.23077`; the engine reads positions as f32). (a) PROVISIONAL: `2e-06` vs `2e-6` is fixed engine-side
+    (the engine will own the canonical writer; the editor switches to it later).
   - Gap: no undo, no snapping, no height (z) or rotation editing; the scratch folder is a text field, not a project concept.
 
 - [x] **4. Edit one rule through a form generated from `openprocyon --dump-rule-schema`.**
