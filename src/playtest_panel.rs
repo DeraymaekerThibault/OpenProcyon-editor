@@ -28,6 +28,21 @@ pub struct State {
     version: Option<Result<String, String>>,
     plan: Option<Result<ExportPlan, String>>,
     confirmed: bool,
+    /// Ids of the player's other enabled mods (read once; "Read the mod list again" clears it).
+    others: Option<Vec<String>>,
+}
+
+/// `id (name)` of every enabled installed mod except the one in `mod_dir` (by folder, or by id when the folder is a copy of an
+/// installed mod of that id), in load order.
+pub fn other_enabled_mods(installed: &[openprocyon::modding::Installed], mod_dir: &Path) -> Vec<String> {
+    let this = std::fs::canonicalize(mod_dir).unwrap_or_else(|_| mod_dir.to_path_buf());
+    let this_id =
+        std::fs::read_to_string(mod_dir.join("mod.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v["id"].as_str().map(str::to_string));
+    installed
+        .iter()
+        .filter(|m| m.enabled && std::fs::canonicalize(&m.dir).unwrap_or_else(|_| m.dir.clone()) != this && this_id.as_deref() != Some(m.id.as_str()))
+        .map(|m| if m.name == m.id { m.id.clone() } else { format!("{} ({})", m.id, m.name) })
+        .collect()
 }
 
 impl Default for State {
@@ -45,6 +60,7 @@ impl Default for State {
             version: None,
             plan: None,
             confirmed: false,
+            others: None,
         }
     }
 }
@@ -105,7 +121,8 @@ impl State {
                 Err(e) => self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()),
             },
             Action::Preview => match self.preview.start(&self.launch(dir, true)) {
-                Ok(()) => self.status = "Rendering a preview...".into(),
+                // The status line of a preview is `Preview::phase()`, which follows the job; `status` is for the game run.
+                Ok(()) => self.status.clear(),
                 Err(e) => self.status = e,
             },
         }
@@ -130,6 +147,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         st.child = None;
     }
     let playing = st.child.is_some();
+    st.preview.poll();
 
     ui.heading("Play-test");
     let version = st.version.get_or_insert_with(launch::game_version).clone();
@@ -147,6 +165,17 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     }
     if ui.small_button("Check the game version again").clicked() {
         st.version = None;
+    }
+    let others = st.others.get_or_insert_with(|| other_enabled_mods(&openprocyon::modding::installed(openprocyon::bundled_mods_dir().as_deref()), dir)).clone();
+    if !others.is_empty() {
+        // PROVISIONAL: the game (at the pinned engine) has no flag to leave the player's enabled mods out of a run.
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!("Not this mod alone: the game also loads the player's enabled mods ({}) after the engine's files, so they can change what you see. Switch them off in the game's Mods menu to test this mod alone.", others.join(", ")),
+        );
+        if ui.small_button("Read the mod list again").clicked() {
+            st.others = None;
+        }
     }
     picker(ui, "Map", &mut st.map, maps);
     picker(ui, "Ship", &mut st.ship, ships);
@@ -182,7 +211,10 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if !st.status.is_empty() {
         ui.label(&st.status);
     }
-    st.preview.show(ui);
+    let line = st.preview.phase().line();
+    if !line.is_empty() {
+        ui.label(line);
+    }
 
     ui.separator();
     ui.heading("Export");
@@ -218,6 +250,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
             };
         }
     }
+    // The picture goes last, scaled to fit under a maximum height, so nothing above it is pushed off screen.
+    if st.preview.phase() != preview::Phase::Idle {
+        ui.separator();
+        st.preview.show(ui);
+    }
 }
 
 #[cfg(test)]
@@ -236,6 +273,20 @@ mod tests {
         assert_eq!(map_ids(&d), ["a", "b"]);
         assert_eq!(ship_ids(&d), ["s1"]);
         assert!(map_ids(&d.join("nowhere")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn other_enabled_mods_leave_out_this_one_and_the_switched_off() {
+        use openprocyon::modding::Installed;
+        let d = std::env::temp_dir().join(format!("procyon-editor-others-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("mine")).unwrap();
+        std::fs::write(d.join("mine/mod.json"), r#"{"id": "mine-id"}"#).unwrap();
+        let m = |id: &str, name: &str, dir: &str, enabled: bool| Installed { id: id.into(), name: name.into(), dir: d.join(dir), enabled, ..Default::default() };
+        let all = [m("a", "a", "a", true), m("b", "Bee", "b", true), m("c", "c", "c", false), m("mine-id", "Mine", "installed-copy", true), m("x", "x", "mine", true)];
+        assert_eq!(other_enabled_mods(&all, &d.join("mine")), ["a", "b (Bee)"]);
+        assert!(other_enabled_mods(&[], &d.join("mine")).is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -261,6 +261,11 @@ impl State {
     }
 }
 
+/// The tallest a list of ships or weapons grows: 40% of the window, never under 180 points (it used to be 180: about nine rows).
+pub fn list_height(window_height: f32) -> f32 {
+    (window_height * 0.4).max(180.0)
+}
+
 /// Draws the Ships tab. Returns `true` when "Show in 3D" was pressed and succeeded (the caller switches to the 3D tab).
 pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, focus: &mut Focus, view: &mut ShipView, link: &mut Linked, import: Option<&Path>) -> bool {
     ui.heading("Ships");
@@ -290,7 +295,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         ui.text_edit_singleline(&mut st.filter);
     });
     let rows = ship_rows(&listing, entry.as_ref(), &unsaved, &st.filter);
-    egui::ScrollArea::vertical().id_salt("ship-list").max_height(180.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("ship-list").max_height(list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
         for r in &rows {
             let text = format!("{}  [{}{}]", r.id, r.status.label(), if r.unsaved { ", unsaved" } else { "" });
             if ui.selectable_label(st.selected.as_deref() == Some(r.id.as_str()), text).clicked() {
@@ -499,6 +504,12 @@ mod tests {
         std::fs::write(assets.join("ships/Ship_A/model.glb"), test_glb::synthetic()).unwrap();
         std::fs::create_dir_all(&m).unwrap();
         (root, assets, m)
+    }
+
+    #[test]
+    fn the_list_takes_a_share_of_the_window_with_a_floor() {
+        assert_eq!(list_height(1000.0), 400.0);
+        assert_eq!(list_height(300.0), 180.0);
     }
 
     #[test]

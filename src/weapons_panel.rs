@@ -229,7 +229,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         ui.text_edit_singleline(&mut st.filter);
     });
     let rows = entry_rows(&project.docs[i], &st.filter);
-    egui::ScrollArea::vertical().id_salt("weapon-list").max_height(180.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("weapon-list").max_height(crate::ships_panel::list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
         for r in &rows {
             let mark = if r.added {
                 " [added]"
@@ -372,7 +372,7 @@ fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, impo
         ui.text_edit_singleline(&mut st.filter);
     });
     let filter = st.filter.trim().to_lowercase();
-    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(180.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(crate::ships_panel::list_height(ui.ctx().content_rect().height())).show(ui, |ui| {
         for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
             if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), k).clicked() {
                 st.selected = Some(k.clone());

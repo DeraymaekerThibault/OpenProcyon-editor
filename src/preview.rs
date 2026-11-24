@@ -57,7 +57,44 @@ pub struct Preview {
     pub error: Option<String>,
 }
 
+/// Where a preview job is: the panel's status line follows it (it used to keep saying "Rendering" after the picture came).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Nothing started yet.
+    Idle,
+    Rendering,
+    /// The picture is in.
+    Ready,
+    /// The game failed or timed out; `Preview::error` says how.
+    Failed,
+}
+
+impl Phase {
+    /// The status line for this phase (empty when there is nothing to say; a failure is drawn from `Preview::error`).
+    pub fn line(self) -> &'static str {
+        match self {
+            Phase::Idle | Phase::Failed => "",
+            Phase::Rendering => "Rendering a preview...",
+            Phase::Ready => "Preview ready.",
+        }
+    }
+}
+
 impl Preview {
+    /// The state of the latest job. Derived from what is held, so it cannot go stale: a job running is `Rendering`, else an error
+    /// is `Failed`, else a picture is `Ready`.
+    pub fn phase(&self) -> Phase {
+        if self.job.is_some() {
+            Phase::Rendering
+        } else if self.error.is_some() {
+            Phase::Failed
+        } else if self.image.is_some() || self.texture.is_some() {
+            Phase::Ready
+        } else {
+            Phase::Idle
+        }
+    }
+
     /// Whether the game is still rendering.
     pub fn running(&self) -> bool {
         self.job.is_some()
@@ -130,11 +167,21 @@ impl Preview {
             self.texture = Some(ui.ctx().load_texture("playtest-preview", img, egui::TextureOptions::LINEAR));
         }
         if let Some(t) = &self.texture {
-            let size = t.size_vec2();
-            let scale = (ui.available_width() / size.x).min(1.0);
-            ui.add(egui::Image::new(egui::load::SizedTexture::new(t.id(), size * scale)));
+            let size = fit(t.size_vec2(), ui.available_width(), MAX_PICTURE_HEIGHT);
+            ui.add(egui::Image::new(egui::load::SizedTexture::new(t.id(), size)));
         }
     }
+}
+
+/// The tallest the preview picture is drawn, so the controls and Export below it stay on screen.
+pub const MAX_PICTURE_HEIGHT: f32 = 300.0;
+
+/// `size` scaled down (never up) to fit `max_w` by `max_h`, keeping the aspect ratio.
+pub fn fit(size: egui::Vec2, max_w: f32, max_h: f32) -> egui::Vec2 {
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return egui::Vec2::ZERO;
+    }
+    size * (max_w.max(1.0) / size.x).min(max_h.max(1.0) / size.y).min(1.0)
 }
 
 /// A one-frame shot request for the preview (`frame` as typed in the UI).
@@ -266,6 +313,30 @@ mod tests {
         assert!(p.error.is_none() && p.image.is_some());
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn the_phase_follows_the_job_to_ready_or_failed() {
+        let (mut p, dir) = run("sleep 0.2; exit 0", "phase-ok");
+        std::fs::write(dir.join("shot.png"), tiny_png()).unwrap();
+        assert_eq!((p.phase(), p.phase().line()), (Phase::Rendering, "Rendering a preview..."));
+        finish(&mut p);
+        assert_eq!((p.phase(), p.phase().line()), (Phase::Ready, "Preview ready."));
+        let (mut f, dir2) = run("exit 3", "phase-bad");
+        finish(&mut f);
+        assert_eq!((f.phase(), f.phase().line()), (Phase::Failed, ""));
+        assert_eq!(Preview::default().phase(), Phase::Idle);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn a_picture_is_scaled_down_to_the_width_and_the_height_but_never_up() {
+        let v = egui::vec2;
+        assert_eq!(fit(v(1280.0, 720.0), 640.0, 300.0), v(1280.0 * 300.0 / 720.0, 300.0));
+        assert_eq!(fit(v(1280.0, 720.0), 400.0, 300.0), v(400.0, 225.0));
+        assert_eq!(fit(v(100.0, 50.0), 400.0, 300.0), v(100.0, 50.0));
+        assert_eq!(fit(v(0.0, 50.0), 400.0, 300.0), egui::Vec2::ZERO);
     }
 
     #[test]
