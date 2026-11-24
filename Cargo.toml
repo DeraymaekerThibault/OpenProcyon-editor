@@ -1,0 +1,25 @@
+[package]
+name = "openprocyon-editor"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.97.1" # Bevy 0.20, same as the engine
+publish = false
+
+[[bin]]
+name = "procyon-editor"
+path = "src/main.rs"
+
+[dependencies]
+openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", tag = "v0.2.0" }
+# Same version and features as the engine's game/Cargo.toml at v0.2.0; keep them equal on every engine upgrade.
+bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
+bevy_egui = "0.43"
+rfd = "0.17"
+
+# Copied from the engine: dependencies optimised, our own code quick to rebuild.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,24 @@
+# Build outputs.
+/target/
+
+# The editor ships no game content: the player's import, overlays and local files never enter Git.
+/assets/
+/local/
+
+# Local configuration: never store installation paths in tracked files.
+.env
+.env.*
+
+# Original game files (copied from the engine's .gitignore; also guarded by tests/hygiene.rs).
+*.[wW][oO][tT]
+*.[tT][wW][tT]
+*.[mM][dD][bB]
+*.[mM][sS][bB]
+*.[eE][fF][tT]
+*.[hH][dD][tT]
+*.[tT][sS][tT]
+*.[tT][gG][aA]
+*.[dD][dD][sS]
+*.[bB][iI][kK]
+*.[eE][xX][eE]
+*.[dD][lL][lL]
