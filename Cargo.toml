@@ -24,6 +24,7 @@ bevy = { version = "0.20", default-features = false, features = ["default_app", 
 bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }
 rfd = "0.17"
 serde_json = { version = "1", features = ["preserve_order"] } # same as the engine
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 
 # Copied from the engine: dependencies optimised, our own code quick to rebuild.
 [profile.dev]

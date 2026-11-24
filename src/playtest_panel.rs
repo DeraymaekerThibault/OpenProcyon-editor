@@ -1,0 +1,255 @@
+//! The "Play-test & export" tab: start the real game on the open mod, take a screenshot preview, and export the mod as a zip.
+//! Drawing only; the rules are in [`crate::launch`], [`crate::preview`] and [`crate::export`].
+
+use bevy::prelude::Resource;
+use bevy_egui::egui;
+use std::path::{Path, PathBuf};
+use std::process::Child;
+
+use crate::export::{self, ExportPlan};
+use crate::launch::{self, Launch};
+use crate::preview::{self, Preview};
+
+/// The panel's state.
+#[derive(Resource)]
+pub struct State {
+    pub map: String,
+    pub ship: String,
+    /// The frame the preview picture is taken at (text as typed).
+    pub frame: String,
+    pub preview: Preview,
+    /// Save unsaved documents before launching (the game reads files on disk).
+    pub save_first: bool,
+    /// Set when the panel wants the caller to save the open project; the caller clears it after saving.
+    pub save_requested: bool,
+    pending: Option<Action>,
+    child: Option<Child>,
+    status: String,
+    version: Option<Result<String, String>>,
+    plan: Option<Result<ExportPlan, String>>,
+    confirmed: bool,
+}
+
+impl Default for State {
+    fn default() -> State {
+        State {
+            map: String::new(),
+            ship: String::new(),
+            frame: "300".into(),
+            preview: Preview::default(),
+            save_first: true,
+            save_requested: false,
+            pending: None,
+            child: None,
+            status: String::new(),
+            version: None,
+            plan: None,
+            confirmed: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Play,
+    Preview,
+}
+
+/// Folder names under `<import>/<kind>/` that hold `<file>`: map ids (`maps`, `map.json`) or ship ids (`ships`, `ship.json`), sorted.
+pub fn ids_in(import: &Path, kind: &str, file: &str) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(import.join(kind)) else { return Vec::new() };
+    let mut ids: Vec<String> = rd.flatten().filter(|e| e.path().join(file).is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    ids.sort();
+    ids
+}
+
+/// Map ids under `<import>/maps/*/map.json`.
+pub fn map_ids(import: &Path) -> Vec<String> {
+    ids_in(import, "maps", "map.json")
+}
+
+/// Ship ids under `<import>/ships/*/ship.json`.
+pub fn ship_ids(import: &Path) -> Vec<String> {
+    ids_in(import, "ships", "ship.json")
+}
+
+fn picker(ui: &mut egui::Ui, label: &str, value: &mut String, options: &[String]) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.text_edit_singleline(value);
+        egui::ComboBox::from_id_salt(label).selected_text("pick").show_ui(ui, |ui| {
+            for o in options {
+                ui.selectable_value(value, o.clone(), o);
+            }
+        });
+    });
+}
+
+impl State {
+    fn launch(&self, dir: &Path, with_shot: bool) -> Launch {
+        let mut l = Launch::new(dir, self.map.trim());
+        l.ship = Some(self.ship.trim().to_string()).filter(|s| !s.is_empty());
+        if with_shot {
+            l.shot = Some(preview::shot(self.map.trim(), l.ship.as_deref(), self.frame.trim().parse().unwrap_or(300)));
+        }
+        l
+    }
+
+    fn run(&mut self, dir: &Path, action: Action) {
+        match action {
+            Action::Play => match self.launch(dir, false).spawn() {
+                Ok(c) => {
+                    self.child = Some(c);
+                    self.status = format!("Game started on map {}.", self.map.trim());
+                }
+                Err(e) => self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()),
+            },
+            Action::Preview => match self.preview.start(&self.launch(dir, true)) {
+                Ok(()) => self.status = "Rendering a preview...".into(),
+                Err(e) => self.status = e,
+            },
+        }
+    }
+}
+
+/// Draws the tab. `mod_dir` is the open project's folder, `unsaved` its number of unsaved documents, `maps` and `ships` the ids
+/// offered in the pickers. Saving is the caller's: when `save_requested` is set after this returns, save the project (the action
+/// that asked for it starts on the next frame).
+pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: usize, maps: &[String], ships: &[String]) {
+    let Some(dir) = mod_dir else {
+        ui.label("Open a mod folder first (Mod tab).");
+        return;
+    };
+    // An action waiting for the save to finish.
+    if !st.save_requested
+        && let Some(a) = st.pending.take()
+    {
+        st.run(dir, a);
+    }
+    if st.child.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None))) {
+        st.child = None;
+    }
+    let playing = st.child.is_some();
+
+    ui.heading("Play-test");
+    let version = st.version.get_or_insert_with(launch::game_version).clone();
+    match version {
+        Ok(v) if v != openprocyon::authoring::ENGINE_VERSION => {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!("The game binary is version {v}; this editor links {}. Files may not mean the same.", openprocyon::authoring::ENGINE_VERSION),
+            );
+        }
+        Ok(_) => {}
+        Err(e) => {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("Cannot check the game version: {e} (set PROCYON_GAME_BIN)"));
+        }
+    }
+    if ui.small_button("Check the game version again").clicked() {
+        st.version = None;
+    }
+    picker(ui, "Map", &mut st.map, maps);
+    picker(ui, "Ship", &mut st.ship, ships);
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut st.save_first, "Save unsaved documents before launching");
+        if unsaved > 0 {
+            ui.label(format!("({unsaved} unsaved)"));
+        }
+    });
+    let ready = !st.map.trim().is_empty();
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        if ui.add_enabled(ready && !playing, egui::Button::new("Play-test")).on_hover_text(format!("runs {}", launch::game_bin().display())).clicked() {
+            clicked = Some(Action::Play);
+        }
+        ui.label("Preview at frame");
+        ui.add(egui::TextEdit::singleline(&mut st.frame).desired_width(50.0));
+        if ui.add_enabled(ready && !st.preview.running(), egui::Button::new("Preview screenshot")).clicked() {
+            clicked = Some(Action::Preview);
+        }
+    });
+    if let Some(a) = clicked {
+        if st.save_first && unsaved > 0 {
+            st.save_requested = true;
+            st.pending = Some(a);
+        } else {
+            st.run(dir, a);
+        }
+    }
+    if unsaved > 0 && !st.save_first {
+        ui.label("The game reads the files on disk: unsaved documents are not in the test.");
+    }
+    if !st.status.is_empty() {
+        ui.label(&st.status);
+    }
+    st.preview.show(ui);
+
+    ui.separator();
+    ui.heading("Export");
+    if ui.button("Export zip...").clicked() {
+        st.plan = Some(export::plan(dir, openprocyon::authoring::base_assets().as_deref()));
+        st.confirmed = false;
+    }
+    let mut finish = false;
+    match &st.plan {
+        None => {}
+        Some(Err(e)) => {
+            ui.colored_label(ui.visuals().error_fg_color, e);
+        }
+        Some(Ok(plan)) => {
+            ui.label(format!("{} files go into {}/ in the zip.", plan.files.len(), plan.id));
+            for w in &plan.warnings {
+                ui.colored_label(ui.visuals().warn_fg_color, w);
+            }
+            if plan.warnings.is_empty() {
+                finish = ui.button("Choose where to save...").clicked();
+            } else {
+                ui.checkbox(&mut st.confirmed, "I have read the warnings and want to export anyway");
+                finish = ui.add_enabled(st.confirmed, egui::Button::new("Choose where to save...")).clicked();
+            }
+        }
+    }
+    if finish && let Some(Ok(plan)) = &st.plan {
+        let out: Option<PathBuf> = rfd::FileDialog::new().set_file_name(format!("{}.zip", plan.id)).add_filter("zip", &["zip"]).save_file();
+        if let Some(out) = out {
+            st.status = match export::write_zip(plan, &out) {
+                Ok(()) => format!("Exported {}", out.display()),
+                Err(e) => e,
+            };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_are_the_sorted_folders_that_hold_the_file() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-ids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for (rel, f) in [("maps/b", "map.json"), ("maps/a", "map.json"), ("maps/empty", "other.json"), ("ships/s1", "ship.json")] {
+            std::fs::create_dir_all(d.join(rel)).unwrap();
+            std::fs::write(d.join(rel).join(f), "{}").unwrap();
+        }
+        std::fs::write(d.join("maps/loose.json"), "{}").unwrap();
+        assert_eq!(map_ids(&d), ["a", "b"]);
+        assert_eq!(ship_ids(&d), ["s1"]);
+        assert!(map_ids(&d.join("nowhere")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_launch_carries_map_ship_and_frame_from_the_fields() {
+        let mut st = State { map: " m ".into(), ship: " ".into(), frame: "120".into(), ..State::default() };
+        let l = st.launch(Path::new("/mods/x"), true);
+        assert_eq!((l.map.as_str(), l.ship.clone()), ("m", None));
+        assert_eq!(l.shot.unwrap().frames, [120]);
+        st.ship = "Ship_X".into();
+        st.frame = "junk".into();
+        let l = st.launch(Path::new("/mods/x"), true);
+        assert_eq!(l.ship.as_deref(), Some("Ship_X"));
+        assert_eq!(l.shot.unwrap().frames, [300]);
+        assert!(st.launch(Path::new("/mods/x"), false).shot.is_none());
+    }
+}

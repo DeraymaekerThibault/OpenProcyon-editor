@@ -156,3 +156,44 @@ Engine requirements:
   the compare table can show what the game uses instead of "derived".
 - A schema marker for references (a gun's bullet, a mount's gun, an effect, a sound), so the form offers pickers without the editor
   knowing field names; the bullet picker finds its fields by the `BulletTypeName` prefix (PROVISIONAL).
+
+## P6. Play-test and export
+
+Works (headless):
+
+- Play-test runs the real game: `--mod <absolute folder> --map <id> [--ship <id>]` (`PROCYON_GAME_BIN`, else `openprocyon` on the
+  path), never blocking the editor; unsaved documents can be saved first. `<game> --version` is compared with `ENGINE_VERSION` and a
+  mismatch is shown.
+- Screenshot preview: `--shot <scratch>/shots/<map>-<ship>.png --shot-frame N [--dist --yaw --pitch]` into the editor's scratch
+  folder, polled, shown in the panel; on failure the exit status and the last lines of the game's stderr. The game is stopped after
+  180 s.
+- Export: a zip of the mod folder under one top folder named after the mod's id (unzipped into `mods/` it gives `mods/<id>/mod.json`),
+  sorted entries, fixed timestamps, so two exports are byte-identical; dot-files and `.git/` left out; `mod.json` required; a missing
+  `LICENSE` warned; every file byte-identical to the file at the same path in the player's import warned ("game content must not be
+  shipped"), as is a file in a format of the original game; the user confirms before exporting with warnings. New dependency: `zip`
+  (approved), `deflate` only.
+
+Not verified here: the panel, the save dialog, a real game run (`--version`, the `--shot` file names for a list of frames).
+
+Engine requirements:
+
+- Identity with the import is by bytes at the same path only (PROVISIONAL): a converted-but-edited file, or a retail file under another
+  path, is not found (the GLB of a new ship is checked against every `ships/*/model.glb`, P4). Requirement: a library "compare with the
+  import" in `authoring` (what `tools/compare_assets.py` does, by meaning), returning the files that are game content.
+
+## Engine requirements, all packages
+
+For the engine's `authoring` API, in the order they block the editor most:
+
+1. A JSON pointer in every `Finding` (the dotted `path` is ambiguous). (P2)
+2. The resolved ship as the loader sees it: hardpoints with their source (ship.json or model node), points, speed, mass, hit points,
+   mounts after derivation. (P4, P5)
+3. `authoring::merge_rule(rel)` and the merged-path list; the parent file of an `extends` file (in the report or `read_parent`). (P3)
+4. A way for an extending file to remove an inherited key, or a statement that there is none. (P3)
+5. A way to move one derived engine or wake without restating the array; a `ship.json` key for boarding points. (P5)
+6. Public `mount_rotation` and its inverse, and the inverse of `data::conv`. (P5)
+7. Crew nodes of the model in `derive::Facts`; the crew node kinds as a public list. (P5)
+8. A schema marker for references (bullet, gun, effect, sound) and typed schemas for `beam`, `blast`, `mine`, `travel_snd`. (P2, P4)
+9. The nearest key from `unknown_keys`. (P2)
+10. `defined_names` per field kind as a field accepts it (a `group` field takes players and placed ships too). (P1)
+11. A library "compare with the import" by meaning. (P6)

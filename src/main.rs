@@ -1,8 +1,8 @@
-//! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
+//! OpenProcyon Editor: the Bevy app and its egui panels (mod project, ships, weapons, 3D ship view, play-test and export).
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{map_view, mission_panel, project_panel, ships_panel, weapons_panel};
+use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, weapons_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -47,6 +47,7 @@ fn main() {
         .init_resource::<map_view::State>()
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
+        .init_resource::<playtest_panel::State>()
         .init_resource::<Tab>()
         .init_resource::<ships_panel::State>()
         .init_resource::<ships_panel::Linked>()
@@ -76,11 +77,19 @@ enum Tab {
     Mission,
     Map,
     Ship3d,
+    Playtest,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 6] =
-        [(Tab::Project, "Mod"), (Tab::Ships, "Ships"), (Tab::Weapons, "Weapons"), (Tab::Ship3d, "3D ship"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+    const ALL: [(Tab, &'static str); 7] = [
+        (Tab::Project, "Mod"),
+        (Tab::Ships, "Ships"),
+        (Tab::Weapons, "Weapons"),
+        (Tab::Ship3d, "3D ship"),
+        (Tab::Playtest, "Play-test & export"),
+        (Tab::Mission, "Mission (spike)"),
+        (Tab::Map, "Map (spike)"),
+    ];
 }
 
 #[allow(clippy::too_many_arguments)] // a Bevy system takes one parameter per resource it draws
@@ -96,6 +105,7 @@ fn panel(
     mut ships: ResMut<ships_panel::State>,
     mut link: ResMut<ships_panel::Linked>,
     mut weapons: ResMut<weapons_panel::State>,
+    mut playtest: ResMut<playtest_panel::State>,
 ) -> Result {
     project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
     let ctx = contexts.ctx_mut()?;
@@ -154,6 +164,16 @@ fn panel(
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Ship3d => {}
+            Tab::Playtest => {
+                // The mod's maps and ships too, when a mod is open (its overlay holds the import plus the mod).
+                let root = project.project.as_ref().map(|p| p.root.clone()).or_else(|| assets.dir.clone()).filter(|d| d.is_dir());
+                let (maps, ships) = root.as_deref().map_or((Vec::new(), Vec::new()), |d| (playtest_panel::map_ids(d), playtest_panel::ship_ids(d)));
+                let unsaved = project.project.as_ref().map_or(0, |p| p.dirty_rels().len());
+                playtest_panel::show(ui, &mut playtest, project.project.as_ref().map(|p| p.dir.as_path()), unsaved, &maps, &ships);
+                if std::mem::take(&mut playtest.save_requested) {
+                    project.save();
+                }
+            }
         });
     });
     if go3d {
