@@ -7,6 +7,7 @@ pub mod edit;
 pub mod export;
 pub mod form;
 pub mod launch;
+pub mod map_edit;
 pub mod map_view;
 pub mod mission;
 pub mod mission_panel;
