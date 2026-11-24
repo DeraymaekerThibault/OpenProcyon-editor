@@ -37,3 +37,6 @@ engine's `game/Cargo.toml` at the pinned tag.
   per-user folder (`~/.local/share/openprocyon/assets`, Windows `%APPDATA%\openprocyon\assets`).
 - `tools/check.sh` is the validation gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test`. It prints
   `GATE OK` and must pass before every commit.
+- `.github/workflows/ci.yml` runs on every push and pull request: job `gate` runs `tools/check.sh` (and requires `GATE OK`); job
+  `screenshot` then runs `tools/synthetic_mod.py` and `tools/shot.sh` for the tabs ships, 3d and playtest under Xvfb and lavapipe, and uploads
+  the three PNGs as an artifact (pictures of our synthetic box ship only, never game content). A weekly job builds against the engine's `main`.
