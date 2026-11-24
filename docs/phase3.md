@@ -113,12 +113,16 @@ Works (headless, pure parts tested):
 - `ship_view::pick`: ray against the model's triangles (Möller–Trumbore), nearest point to a ray, drag along an axis handle.
 - A synthetic GLB built in a test goes through `derive::read` and `hardpoints`.
 - The Bevy scene: the hull drawn from the same triangles the engine hits (one flat material per layer, the hovered layer highlighted
-  with its `sections` entry), an orbit camera (right/middle drag, wheel) in the central rect, gizmos per point (coloured by kind, crew
+  with its `sections` entry, for the layers the engine keeps: damaged variants (`...Damage_...`) are neither drawn nor pickable, with an
+  optional faint "Show damage variants" toggle, so a hovered layer names its section only because of that rule), an orbit camera (right/middle drag, wheel) in the central rect, gizmos per point (coloured by kind, crew
   by crew kind), gun facing and firing arc, engine and wake headings, the tow line, homing, axis handles on the selected point. A drag
   is one undo step (emitted on release).
 
 Not verified here (no display): everything drawn; the 3D camera under the egui camera on one window (if the view is black or wipes
-the panels, look at camera order and clear colour first); cursor to viewport mapping; pick radius and handle distance (untuned).
+the panels, look at camera order and clear colour first); pick radius and handle distance (untuned). The cursor to viewport mapping
+was wrong until `4fadcf9` (see "Seen running"); it was checked on synthetic data only. Until the damage-layer fix, a model's
+`...Damage_...` layers were drawn over the intact ones and hovering them named no section; the claim that a hovered layer shows its
+section held only for non-damage layers until then.
 The textured GLB scene is not loaded (the triangle meshes are enough to place points); `model` (another ship's model) is not followed
 by the stand-alone loader; P4 feeds the view from the project.
 
@@ -130,6 +134,8 @@ Engine requirements:
 - Crew nodes of the model in `derive::Facts`, and the crew node kinds as a public list (the editor mirrors the private `KINDS`).
 - A way for `ship.json` to move one derived engine or wake without restating the whole array (the array needs values only the engine
   derives, such as an engine's `fx`), and a `ship.json` key for boarding points.
+- Expose the damage-layer test in `authoring` (`is_damage_layer(name)`): the editor mirrors the engine's private `name.contains("Damage_")`
+  (PROVISIONAL, `ship_view::points::is_damage_layer`).
 
 ## P4. Ship and weapon editors
 
@@ -177,6 +183,10 @@ Works (headless):
   `LICENSE` warned; every file byte-identical to the file at the same path in the player's import warned ("game content must not be
   shipped"), as is a file in a format of the original game; the user confirms before exporting with warnings. New dependency: `zip`
   (approved), `deflate` only.
+
+- Play-test and the preview also load the player's other enabled mods (the game has no flag to leave them out at the pinned engine),
+  so a run does not test this mod alone. The tab lists them (`openprocyon::modding::installed`) and says to switch them off in the
+  game. Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
 
 Not verified here: the panel, the save dialog, a real game run (`--version`, the `--shot` file names for a list of frames).
 
@@ -266,3 +276,8 @@ it is, the editor drops its PROVISIONAL mirrors (`edit::dotted_to_pointer` for f
 9. The nearest key from `unknown_keys`. (P2)
 10. `defined_names` per field kind as a field accepts it (a `group` field takes players and placed ships too). (P1)
 11. A library "compare with the import" by meaning. (P6)
+12. `--only-mod` (or `--no-installed-mods`): load just the `--mod` folders, not the player's enabled mods, so a play-test and a preview
+    test one mod alone. (P6)
+13. Reproducible screenshots: two runs of the same `--shot --shot-frame 300` differ (5.9% RMSE in a tester's run, the ship took another
+    course). `--shot` should imply a fixed seed and the fixed step (the engine has `--fixed-step`), or accept `--seed`. (P6)
+14. The damage-layer test (`is_damage_layer`) in `authoring`. (P5)
