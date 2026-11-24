@@ -390,7 +390,9 @@ fn compare_ui(ui: &mut egui::Ui, st: &mut State, project: &Project, doc: &Doc, i
     });
     let other = reference_ship(project, doc, &st.compare_with);
     match other {
-        Some(o) => compare::table(ui, &compare::compare(&doc.edited, &o), id, if st.compare_with.is_empty() { "base" } else { &st.compare_with }),
+        Some(o) => {
+            compare::table(ui, &compare::compare(&doc.edited, &o), &compare::gun_lists(&doc.edited, &o), id, if st.compare_with.is_empty() { "base" } else { &st.compare_with })
+        }
         None => {
             ui.label("Nothing to compare with: pick a ship.");
         }

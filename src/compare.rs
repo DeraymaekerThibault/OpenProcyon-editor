@@ -59,6 +59,43 @@ fn gun_mounts(ship: &Value) -> usize {
     ship.get("guns").and_then(Value::as_object).map_or(0, |g| g.len())
 }
 
+fn distinct(sorted: &[String]) -> usize {
+    let mut v: Vec<&String> = sorted.iter().collect();
+    v.dedup();
+    v.len()
+}
+
+/// The gun names under the table: each ship's (with how many mounts carry each), and which names one has that the other lacks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GunLists {
+    pub this: Vec<String>,
+    pub other: Vec<String>,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+/// `Name x3` for each distinct gun name of `sorted` names.
+fn counted(sorted: &[String]) -> Vec<String> {
+    let mut out: Vec<(String, usize)> = vec![];
+    for n in sorted {
+        match out.last_mut() {
+            Some((l, c)) if l == n => *c += 1,
+            _ => out.push((n.clone(), 1)),
+        }
+    }
+    out.into_iter().map(|(n, c)| if c > 1 { format!("{n} x{c}") } else { n }).collect()
+}
+
+pub fn gun_lists(this: &Value, other: &Value) -> GunLists {
+    let (a, b) = (gun_names(this), gun_names(other));
+    let only = |x: &[String], y: &[String]| {
+        let mut v: Vec<String> = x.iter().filter(|n| !y.contains(n)).cloned().collect();
+        v.dedup();
+        v
+    };
+    GunLists { this: counted(&a), other: counted(&b), added: only(&a, &b), removed: only(&b, &a) }
+}
+
 /// `a - b` for two numbers (`+2`, `-0.5`), a set difference for two texts of names, empty otherwise.
 fn difference(a: &Cell, b: &Cell) -> String {
     match (a, b) {
@@ -86,25 +123,26 @@ pub fn compare(this: &Value, other: &Value) -> Vec<Row> {
     add(&mut rows, "Core HP", num(this, "/core_hp"), num(other, "/core_hp"));
     add(&mut rows, "Section HP (sum)", section_hp(this), section_hp(other));
     add(&mut rows, "Gun mounts", Cell::Num(gun_mounts(this) as f64), Cell::Num(gun_mounts(other) as f64));
+    // The table only counts guns; the names are in `gun_lists`, drawn wrapped below it, so no cell grows with the fleet's armament.
     let (a, b) = (gun_names(this), gun_names(other));
-    let gone: Vec<&String> = b.iter().filter(|n| !a.contains(n)).collect();
-    let new: Vec<&String> = a.iter().filter(|n| !b.contains(n)).collect();
-    let text = |v: &[String]| Cell::Text(if v.is_empty() { "none".into() } else { v.join(", ") });
-    let mut diff = String::new();
-    if !new.is_empty() {
-        diff += &format!("+ {}", new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
-    }
-    if !gone.is_empty() {
-        diff += &format!("{}- {}", if diff.is_empty() { "" } else { "; " }, gone.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
-    }
-    rows.push(Row { label: "Guns", this: text(&a), other: text(&b), diff: if diff.is_empty() { "same".into() } else { diff } });
+    let lists = gun_lists(this, other);
+    let (new, gone) = (lists.added.len(), lists.removed.len());
+    let diff = match (new, gone) {
+        (0, 0) => "same".to_string(),
+        (n, 0) => format!("{n} new"),
+        (0, g) => format!("{g} gone"),
+        (n, g) => format!("{n} new, {g} gone"),
+    };
+    rows.push(Row { label: "Guns (types)", this: Cell::Num(distinct(&a) as f64), other: Cell::Num(distinct(&b) as f64), diff });
     add(&mut rows, "Sight", num(this, "/sight"), num(other, "/sight"));
     rows
 }
 
-/// The table as an egui grid.
-pub fn table(ui: &mut bevy_egui::egui::Ui, rows: &[Row], this_title: &str, other_title: &str) {
-    bevy_egui::egui::Grid::new("ship-compare").striped(true).show(ui, |ui| {
+/// The table as an egui grid, then the gun names in collapsible, wrapped lists. Every cell is short (numbers, a count, a short
+/// difference), so the Difference column is always on screen.
+pub fn table(ui: &mut bevy_egui::egui::Ui, rows: &[Row], guns: &GunLists, this_title: &str, other_title: &str) {
+    use bevy_egui::egui;
+    egui::Grid::new("ship-compare").striped(true).show(ui, |ui| {
         ui.strong("");
         ui.strong(this_title);
         ui.strong(other_title);
@@ -116,6 +154,17 @@ pub fn table(ui: &mut bevy_egui::egui::Ui, rows: &[Row], this_title: &str, other
             ui.label(r.other.show());
             ui.label(&r.diff);
             ui.end_row();
+        }
+    });
+    egui::CollapsingHeader::new("Gun names").id_salt("ship-compare-guns").show(ui, |ui| {
+        for (title, names) in [(this_title, &guns.this), (other_title, &guns.other)] {
+            ui.add(egui::Label::new(format!("{title}: {}", if names.is_empty() { "none".to_string() } else { names.join(", ") })).wrap());
+        }
+        if !guns.added.is_empty() {
+            ui.add(egui::Label::new(format!("only in {this_title}: {}", guns.added.join(", "))).wrap());
+        }
+        if !guns.removed.is_empty() {
+            ui.add(egui::Label::new(format!("only in {other_title}: {}", guns.removed.join(", "))).wrap());
         }
     });
 }
@@ -140,7 +189,9 @@ mod tests {
         let rows = compare(&ship, &base);
         assert_eq!((row(&rows, "Points").diff.as_str(), row(&rows, "MaxSpeed").diff.as_str(), row(&rows, "Mass").diff.as_str()), ("-2", "+1.5", "same"));
         assert_eq!((row(&rows, "Section HP (sum)").this.clone(), row(&rows, "Section HP (sum)").diff.as_str()), (Cell::Num(170.0), "+20"));
-        assert_eq!((row(&rows, "Gun mounts").diff.as_str(), row(&rows, "Guns").this.show().as_str(), row(&rows, "Guns").diff.as_str()), ("+1", "G1, G2", "+ G2"));
+        assert_eq!((row(&rows, "Gun mounts").diff.as_str(), row(&rows, "Guns (types)").this.show().as_str(), row(&rows, "Guns (types)").diff.as_str()), ("+1", "2", "1 new"));
+        let lists = gun_lists(&ship, &base);
+        assert_eq!((lists.this, lists.other, lists.added, lists.removed), (vec!["G1".to_string(), "G2".into()], vec!["G1".to_string()], vec!["G2".to_string()], vec![]));
         assert_eq!(row(&rows, "Sight").diff, "same");
     }
 
@@ -150,7 +201,22 @@ mod tests {
         assert_eq!(row(&rows, "Core HP").this, Cell::Derived);
         assert_eq!((row(&rows, "Core HP").this.show().as_str(), row(&rows, "Core HP").diff.as_str()), ("derived", ""));
         assert_eq!(row(&rows, "Section HP (sum)").other, Cell::Derived);
-        assert_eq!((row(&rows, "Guns").this.show().as_str(), row(&rows, "Guns").diff.as_str()), ("none", "same"));
+        assert_eq!((row(&rows, "Guns (types)").this.show().as_str(), row(&rows, "Guns (types)").diff.as_str()), ("0", "same"));
+    }
+
+    #[test]
+    fn a_large_armament_stays_one_short_cell_and_the_names_go_to_the_lists() {
+        let guns = |n: usize, gun: &str| json!({"guns": (0..n).map(|i| (format!("M{i}"), json!({"gun": gun}))).collect::<serde_json::Map<_, _>>()});
+        let (a, b) = (guns(40, "Gun_With_A_Very_Long_Name_Indeed"), guns(40, "Other_Long_Gun_Name"));
+        let rows = compare(&a, &b);
+        let r = row(&rows, "Guns (types)");
+        assert!(r.this.show().len() <= 3 && r.other.show().len() <= 3 && r.diff.len() <= 20, "{r:?}");
+        assert_eq!(r.diff, "1 new, 1 gone");
+        let l = gun_lists(&a, &b);
+        assert_eq!((l.this, l.added), (vec!["Gun_With_A_Very_Long_Name_Indeed x40".to_string()], vec!["Gun_With_A_Very_Long_Name_Indeed".to_string()]));
+        for r in &rows {
+            assert!(r.this.show().len() < 40 && r.other.show().len() < 40 && r.diff.len() < 40, "{r:?}");
+        }
     }
 
     #[test]
