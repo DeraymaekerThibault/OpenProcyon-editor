@@ -70,6 +70,8 @@ pub struct ShipView {
     pub input: ViewInput,
     /// A label to paint at a window position (hovered point), set by the scene and painted by the panel.
     pub hover_label: Option<(Vec2, String)>,
+    /// Draw the damaged variants of sections too (faint, never pickable). Off by default: the engine drops them from the hull.
+    pub show_damage: bool,
 }
 
 impl Default for ShipView {
@@ -91,6 +93,7 @@ impl Default for ShipView {
             generation: 0,
             input: ViewInput::default(),
             hover_label: None,
+            show_damage: false,
         }
     }
 }

@@ -198,6 +198,14 @@ pub fn hardpoints(ship: &Value, facts: Option<&Facts>) -> Vec<Hardpoint> {
     out
 }
 
+/// Whether a model layer is a damaged variant of a section (`PirateSloopShipDamage_Layer2` over `PirateSloopShip_Layer2`). The engine
+/// drops these from the hull (its `authoring::check_mod` and ship art skip every layer whose name contains `Damage_`), so the view
+/// neither draws nor picks them by default. PROVISIONAL mirror of the engine's private test (game/src/authoring/check_mod.rs,
+/// game/src/shipart.rs at b2c01f5); engine requirement in docs/phase3.md: expose it in `authoring`.
+pub fn is_damage_layer(name: &str) -> bool {
+    name.contains("Damage_")
+}
+
 /// The `sections` entry whose `layer` is the mesh node `layer`: its label and the entry.
 pub fn section_for_layer<'a>(ship: &'a Value, layer: &str) -> Option<(&'a str, &'a Value)> {
     ship.get("sections")?.as_object()?.iter().find(|(_, s)| s["layer"].as_str() == Some(layer)).map(|(k, v)| (k.as_str(), v))
@@ -334,6 +342,14 @@ mod tests {
         assert_eq!(CrewKind::of_name("Crew_Count_3"), Some(CrewKind::Count));
         assert_eq!(CrewKind::of_name("Crew_Climb"), Some(CrewKind::Climb));
         assert_eq!(CrewKind::of_name("Gun_Crew"), None);
+    }
+
+    #[test]
+    fn damage_variants_are_told_by_the_engines_name_rule() {
+        assert!(is_damage_layer("PirateSloopShipDamage_Layer2"));
+        assert!(is_damage_layer("HullDamage_Two"));
+        assert!(!is_damage_layer("PirateSloopShip_Layer2"));
+        assert!(!is_damage_layer("DamageControl"));
     }
 
     #[test]

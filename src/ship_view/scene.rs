@@ -8,7 +8,7 @@
 use super::coords::{facing, to_bevy};
 use super::pick::{axis_drag, pick_point, ray_hit};
 use super::place::{add_point, move_point};
-use super::points::{CrewKind, Hardpoint, Kind, Source};
+use super::points::{CrewKind, Hardpoint, Kind, Source, is_damage_layer};
 use super::{ShipView, ViewInput};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::Viewport;
@@ -30,6 +30,8 @@ pub fn plugin(app: &mut App) {
 #[derive(Component)]
 struct HullMesh {
     layer: usize,
+    /// A damaged variant of a section: faint, never highlighted.
+    damage: bool,
     material: Handle<StandardMaterial>,
 }
 
@@ -44,11 +46,12 @@ struct Orbit {
     dist: f32,
     target: Vec3,
     seen: u64,
+    seen_damage: bool,
 }
 
 impl Default for Orbit {
     fn default() -> Self {
-        Orbit { yaw: -0.6, pitch: 0.45, dist: 40.0, target: Vec3::ZERO, seen: 0 }
+        Orbit { yaw: -0.6, pitch: 0.45, dist: 40.0, target: Vec3::ZERO, seen: 0, seen_damage: false }
     }
 }
 
@@ -112,9 +115,9 @@ pub fn arc_points(centre: Vec3, facing: Vec3, arc_deg: f32, radius: f32, n: usiz
 
 /// A camera distance that frames the model: from the layers' box (game axes) the centre in Bevy axes and a distance.
 pub fn frame(facts: Option<&Facts>) -> (Vec3, f32) {
-    let Some(f) = facts.filter(|f| !f.layers.is_empty()) else { return (Vec3::ZERO, 40.0) };
+    let Some(f) = facts.filter(|f| f.layers.iter().any(|l| !is_damage_layer(&l.name))) else { return (Vec3::ZERO, 40.0) };
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
-    for l in &f.layers {
+    for l in f.layers.iter().filter(|l| !is_damage_layer(&l.name)) {
         for k in 0..3 {
             lo[k] = lo[k].min(l.aabb[0][k]);
             hi[k] = hi[k].max(l.aabb[1][k]);
@@ -142,16 +145,23 @@ fn rebuild_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if orbit.seen == view.generation {
+    if orbit.seen == view.generation && orbit.seen_damage == view.show_damage {
         return;
     }
+    if orbit.seen != view.generation {
+        let (target, dist) = frame(view.facts.as_ref());
+        (orbit.target, orbit.dist) = (target, dist);
+    }
     orbit.seen = view.generation;
+    orbit.seen_damage = view.show_damage;
     for e in &old {
         commands.entity(e).despawn();
     }
-    let (target, dist) = frame(view.facts.as_ref());
-    (orbit.target, orbit.dist) = (target, dist);
     for (i, layer) in view.facts.iter().flat_map(|f| f.layers.iter()).enumerate() {
+        let damage = is_damage_layer(&layer.name);
+        if damage && !view.show_damage {
+            continue;
+        }
         let (pos, nor) = layer_mesh(layer);
         if pos.is_empty() {
             continue;
@@ -160,9 +170,10 @@ fn rebuild_meshes(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nor);
         // One colour per layer, spread around the hue circle.
-        let color = Color::hsl((i as f32 * 47.0) % 360.0, 0.25, 0.62);
-        let material = materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, cull_mode: None, double_sided: true, ..default() });
-        commands.spawn((HullMesh { layer: i, material: material.clone() }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
+        let color = if damage { Color::hsla(0.0, 0.5, 0.5, 0.3) } else { Color::hsl((i as f32 * 47.0) % 360.0, 0.25, 0.62) };
+        let alpha_mode = if damage { AlphaMode::Blend } else { AlphaMode::Opaque };
+        let material = materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, cull_mode: None, double_sided: true, alpha_mode, ..default() });
+        commands.spawn((HullMesh { layer: i, damage, material: material.clone() }, Mesh3d(meshes.add(mesh)), MeshMaterial3d(material), Transform::default()));
     }
 }
 
@@ -301,7 +312,7 @@ fn interact(mut view: ResMut<ShipView>, mut drag: ResMut<Dragging>, orbit: Res<O
 
 /// The hovered layer's mesh is lighter.
 fn highlight(view: Res<ShipView>, meshes: Query<&HullMesh>, mut materials: ResMut<Assets<StandardMaterial>>) {
-    for m in &meshes {
+    for m in meshes.iter().filter(|m| !m.damage) {
         if let Some(mut mat) = materials.get_mut(&m.material) {
             let hovered = view.hovered_layer == Some(m.layer);
             let color = Color::hsl((m.layer as f32 * 47.0) % 360.0, if hovered { 0.8 } else { 0.25 }, if hovered { 0.7 } else { 0.62 });
@@ -428,12 +439,15 @@ mod tests {
     }
 
     #[test]
-    fn framing_uses_the_layers_box_and_defaults_without_a_model() {
+    fn framing_ignores_damage_variants_and_defaults_without_a_model() {
         assert_eq!(frame(None), (Vec3::ZERO, 40.0));
         let f = facts();
         let (c, d) = frame(Some(&f));
         assert!((c - to_bevy([0.0, 0.0, 0.5])).length() < 1e-5);
         assert!(d >= 4.0);
+        let mut with_damage = facts();
+        with_damage.layers.push(Layer { name: "HullDamage_Main".into(), aabb: [[100.0; 3], [200.0; 3]], tris: vec![] });
+        assert_eq!(frame(Some(&with_damage)), frame(Some(&f)), "a damage variant does not move the frame");
     }
 
     #[test]

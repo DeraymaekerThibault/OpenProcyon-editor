@@ -39,7 +39,8 @@ fn triangle_hit(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f3
 pub fn ray_hit(origin: Vec3, dir: Vec3, layers: &[Layer]) -> Option<(usize, [f64; 3])> {
     let (o, d) = (bevy_vec_to_game(origin), bevy_vec_to_game(dir));
     let mut best: Option<(f32, usize)> = None;
-    for (i, layer) in layers.iter().enumerate() {
+    // Damaged variants of a section lie over the intact layer: never pickable (the engine drops them from the hull).
+    for (i, layer) in layers.iter().enumerate().filter(|(_, l)| !super::points::is_damage_layer(&l.name)) {
         for t in layer.tris.as_chunks::<9>().0 {
             let hit = triangle_hit(o, d, game([t[0], t[1], t[2]]), game([t[3], t[4], t[5]]), game([t[6], t[7], t[8]]));
             if let Some(h) = hit.filter(|h| best.is_none_or(|(b, _)| *h < b)) {
@@ -119,6 +120,15 @@ mod tests {
     fn a_ray_parallel_to_the_triangle_misses() {
         let (o, d) = ray([-5.0, 0.0, 0.5], [1.0, 0.0, 0.0]);
         assert!(ray_hit(o, d, &[wall(0.0)]).is_none());
+    }
+
+    #[test]
+    fn a_damage_variant_over_a_layer_is_never_hit() {
+        let over = || Layer { name: "ShipDamage_Layer2".into(), ..wall(0.5) };
+        let (o, d) = ray([0.0, -5.0, 0.5], [0.0, 1.0, 0.0]);
+        // The damage variant is nearer, but only the intact layer (index 0) is hit.
+        assert_eq!(ray_hit(o, d, &[wall(1.0), over()]).unwrap().0, 0);
+        assert!(ray_hit(o, d, &[over()]).is_none());
     }
 
     #[test]

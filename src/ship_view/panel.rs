@@ -148,6 +148,8 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
             ui.label("Read-only: ship.json has no key for boarding points.");
         }
     }
+    ui.checkbox(&mut view.show_damage, "Show damage variants")
+        .on_hover_text("Damaged copies of sections (...Damage_...) are not part of the hull the engine uses; drawn faint, never pickable.");
     ui.separator();
     ui.label(format!("{} undo step(s) pending", view.pending.len()));
     if let Some(layer) = view.hovered_layer.and_then(|i| view.facts.as_ref()?.layers.get(i)) {
