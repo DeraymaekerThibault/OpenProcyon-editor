@@ -320,7 +320,8 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         match read_merged(&root, &rel) {
             Ok(v) => {
                 ui.strong(&id);
-                let ctx = crate::form::FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
+                // no mod: the retail file is both the base and what is edited, so every field reads "inherited"
+                let ctx = crate::form::FormCtx { base: Some(&v), findings: &[], focus: None, hidden: &[] };
                 let edits = crate::form::show(ui, &schema, &v, &ctx, egui::Id::new(("ship form retail", &id)));
                 if !edits.is_empty() {
                     crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.clone(), label: format!("Edit {id}"), edits });

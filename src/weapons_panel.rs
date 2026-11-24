@@ -389,7 +389,8 @@ fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, impo
     };
     ui.strong(&name);
     let pointer = st.focus.take();
-    let ctx = crate::form::FormCtx { base: None, findings: &[], focus: pointer.as_deref(), hidden: &[] };
+    // no mod: the retail entry is both the base and what is edited, so every field reads "inherited"
+    let ctx = crate::form::FormCtx { base: Some(&doc[&name]), findings: &[], focus: pointer.as_deref(), hidden: &[] };
     let shown = crate::form::show(ui, &schemas[table as usize], &doc[&name], &ctx, egui::Id::new(("weapon form retail", rel, &name)));
     if !shown.is_empty() {
         crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.to_string(), label: format!("Edit {name}"), edits: prefix_edits(&name, shown) });

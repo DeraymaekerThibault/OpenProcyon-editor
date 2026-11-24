@@ -771,6 +771,20 @@ mod tests {
     }
 
     #[test]
+    fn with_no_mod_open_the_retail_file_is_its_own_base_so_every_field_is_inherited() {
+        // what the ship and weapons tabs pass with no project: base == the document
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let doc = json!({"race": "Navy", "points": 10, "entity": 7, "skipped_guns": ["a"]});
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: None, hidden: &[] });
+        assert!(has(&t, "inherited") && has(&t, "`entity`") && has(&t, "`skipped_guns`"), "{t:?}");
+        assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("Rename") || x.contains("unknown key")), "{t:?}");
+        let guns = json!({"Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "response": 3}});
+        let entry = &guns["Test Gun"];
+        let t = painted(&schema("guns.schema.json"), entry, &FormCtx { base: Some(entry), findings: &[], focus: None, hidden: &[] });
+        assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("unknown key")), "{t:?}");
+    }
+
+    #[test]
     fn hidden_fields_are_not_drawn() {
         let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
         let doc = json!({"race": "Navy", "points": 10});
