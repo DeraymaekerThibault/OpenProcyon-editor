@@ -20,7 +20,7 @@ pub struct FieldNote {
 /// What the form needs besides the document and its schema.
 pub struct FormCtx<'a> {
     /// The parent document (what a key means when the mod does not set it, e.g. the retail ship under an `extends`).
-    pub inherited: Option<&'a Value>,
+    pub base: Option<&'a Value>,
     /// Findings drawn under their field (red for errors, yellow for warnings); those that name no drawn field are listed at the end.
     pub findings: &'a [FieldNote],
     /// A JSON pointer to bring into view: the sections on its path open once, the field scrolls into view and is outlined while this stays set.
@@ -241,7 +241,7 @@ impl<'a> St<'a> {
     fn controls(&mut self, ui: &mut egui::Ui, node: &Node, ptr: &str, slot: Slot) {
         let doc = self.doc;
         let present = doc.pointer(ptr);
-        let inherited = self.ctx.inherited.and_then(|i| i.pointer(ptr));
+        let inherited = self.ctx.base.and_then(|i| i.pointer(ptr));
         ui.horizontal(|ui| match slot {
             Slot::Field => match (present, inherited) {
                 (None, Some(inh)) => {
@@ -259,7 +259,7 @@ impl<'a> St<'a> {
                     }
                 }
                 (Some(_), inh) => {
-                    if (inh.is_some() || self.ctx.inherited.is_some()) && ui.button("Reset").on_hover_text("Remove this key so the parent's value applies").clicked() {
+                    if (inh.is_some() || self.ctx.base.is_some()) && ui.button("Reset").on_hover_text("Remove this key so the parent's value applies").clicked() {
                         self.out.push(model::reset(ptr));
                     }
                 }
@@ -311,7 +311,7 @@ impl<'a> St<'a> {
     fn row(&mut self, ui: &mut egui::Ui, label: &str, node: &Node, ptr: &str, slot: Slot) {
         let doc = self.doc;
         let value = doc.pointer(ptr);
-        let inherited = self.ctx.inherited.and_then(|i| i.pointer(ptr));
+        let inherited = self.ctx.base.and_then(|i| i.pointer(ptr));
         let r = ui.horizontal(|ui| {
             self.label(ui, label, node);
             match value {
@@ -507,12 +507,12 @@ mod tests {
         ];
         for focus in [None, Some("/guns/Gun_B/arc_deg"), Some("/sections/Hull/destruct/fx"), Some("/sigth")] {
             for inherited in [None, Some(&parent)] {
-                let ctx = FormCtx { inherited, findings: &findings, focus };
+                let ctx = FormCtx { base: inherited, findings: &findings, focus };
                 assert!(frame(&schema("ship.schema.json"), &ship, &ctx).is_empty(), "{focus:?}");
             }
         }
         // an empty document and a document of the wrong shape do not panic either
-        let ctx = FormCtx { inherited: Some(&parent), findings: &[], focus: None };
+        let ctx = FormCtx { base: Some(&parent), findings: &[], focus: None };
         for doc in [json!({}), json!(null), json!({"guns": [1], "engines": {"a": 1}, "points": "x", "physics": 5})] {
             assert!(frame(&schema("ship.schema.json"), &doc, &ctx).is_empty());
         }
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn the_other_schemas_draw_too() {
-        let ctx = FormCtx { inherited: None, findings: &[], focus: None };
+        let ctx = FormCtx { base: None, findings: &[], focus: None };
         let guns = json!({"$schema": "guns.schema.json", "Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "BulletsPerBurst": 3, "BulletAffectedByGravity": false, "visual": {"base": "b", "pivot": [0, 0, 0], "muzzles": [[0, 1, 0], [1, 1, 0]]}, "beam": {"charge": 1}, "typo_key": 1}});
         assert!(frame(&schema("guns.schema.json"), &guns, &ctx).is_empty());
         let bullets =
@@ -530,7 +530,7 @@ mod tests {
         assert!(frame(&schema("crew_nodes.schema.json"), &crew, &ctx).is_empty());
         let m = json!({"id": "m", "format": 1, "requires": ["a", "b"], "extra": true});
         let inh = json!({"id": "p", "name": "Parent"});
-        let ctx = FormCtx { inherited: Some(&inh), findings: &[], focus: Some("/requires/1") };
+        let ctx = FormCtx { base: Some(&inh), findings: &[], focus: Some("/requires/1") };
         assert!(frame(&schema("mod.schema.json"), &m, &ctx).is_empty());
     }
 

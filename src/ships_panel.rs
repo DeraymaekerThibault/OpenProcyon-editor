@@ -283,7 +283,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         listing.dedup();
     }
     if ps.project.is_none() {
-        ui.label("No mod open: ships are shown read only. Open or make a mod in the left panel to edit.");
+        ui.label("No mod open: your first change asks which mod to save it in (the game's own files are never changed).");
     }
     ui.horizontal(|ui| {
         ui.label("Filter");
@@ -315,9 +315,11 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         match read_merged(&root, &rel) {
             Ok(v) => {
                 ui.strong(&id);
-                ui.add_enabled_ui(false, |ui| {
-                    crate::form::show(ui, &schema, &v, &crate::form::FormCtx { inherited: None, findings: &[], focus: None }, egui::Id::new(("ship form ro", &id)));
-                });
+                let ctx = crate::form::FormCtx { base: None, findings: &[], focus: None };
+                let edits = crate::form::show(ui, &schema, &v, &ctx, egui::Id::new(("ship form retail", &id)));
+                if !edits.is_empty() {
+                    crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.clone(), label: format!("Edit {id}"), edits });
+                }
             }
             Err(e) => {
                 ui.colored_label(egui::Color32::LIGHT_RED, e.to_string());
@@ -346,7 +348,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         egui::CollapsingHeader::new("Compare").default_open(false).show(ui, |ui| compare_ui(ui, st, project, doc, &id, &ids));
         let pointer = st.focus.take();
         let inherited = (!doc.base.is_null()).then_some(&doc.base);
-        let ctx = crate::form::FormCtx { inherited, findings: &notes, focus: pointer.as_deref() };
+        let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref() };
         edits = crate::form::show(ui, &schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
     });
     if !edits.is_empty()

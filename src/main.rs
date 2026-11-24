@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel};
+use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -222,7 +222,7 @@ fn panel(
         egui::ScrollArea::vertical().show(ui, |ui| match *tab {
             Tab::Project => project_panel::tab(ui, &mut project),
             Tab::Ships => go3d = ships_panel::tab(ui, &mut ships, &mut project, &mut focus, &mut ship, &mut link, assets.dir.as_deref().filter(|d| d.is_dir())),
-            Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus),
+            Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Ship3d => {}
@@ -238,6 +238,7 @@ fn panel(
             }
         });
     });
+    which_mod::window(ctx, &mut project, assets.dir.as_deref().filter(|d| d.is_dir()));
     if go3d {
         *tab = Tab::Ship3d;
     }

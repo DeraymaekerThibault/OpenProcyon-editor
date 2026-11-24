@@ -177,16 +177,17 @@ impl State {
 }
 
 /// Draws the Weapons tab.
-pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, focus: &mut Focus) {
+pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, focus: &mut Focus, import: Option<&std::path::Path>) {
     ui.heading("Weapons");
     if Table::of_file(&focus.rel).is_some() && st.take_focus(focus) {
         *focus = Focus::default();
     }
-    let Some(project) = &mut ps.project else {
-        ui.label("Open or make a mod in the left panel to edit guns and bullets.");
-        return;
-    };
     let schemas = st.schemas.get_or_insert_with(|| [Table::Guns, Table::Bullets].map(|t| entry_schema(&project_panel::schema_named(t.schema_name())))).clone();
+    if ps.project.is_none() {
+        retail(ui, st, ps, import, &schemas);
+        return;
+    }
+    let Some(project) = &mut ps.project else { return };
     ui.horizontal(|ui| {
         ui.selectable_value(&mut st.table, Table::Guns, "Guns");
         ui.selectable_value(&mut st.table, Table::Bullets, "Bullets");
@@ -284,7 +285,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
         let pointer = st.focus.take();
         let inherited = doc.base.get(&name);
-        let ctx = crate::form::FormCtx { inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref() };
+        let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref() };
         let schema = &schemas[table as usize];
         let shown = crate::form::show(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
         if !shown.is_empty() {
@@ -298,6 +299,50 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         && let Err(e) = project.do_edits(rel, &label, edits)
     {
         st.status = e;
+    }
+}
+
+/// The tab with no mod open: the import's table, editable; the first edit asks "which mod?" (see [`crate::which_mod`]).
+fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, import: Option<&std::path::Path>, schemas: &[Value; 2]) {
+    let Some(import) = import else {
+        ui.label("No imported assets found: import your own copy of the game with the engine first.");
+        return;
+    };
+    ui.label("No mod open: your first change asks which mod to save it in (the game's own files are never changed).");
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut st.table, Table::Guns, "Guns");
+        ui.selectable_value(&mut st.table, Table::Bullets, "Bullets");
+    });
+    let table = st.table;
+    let rel = table.rel();
+    let Ok(doc) = openprocyon::authoring::read_merged(import, rel) else {
+        ui.label(format!("{rel} is not in the import."));
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.label("Filter");
+        ui.text_edit_singleline(&mut st.filter);
+    });
+    let filter = st.filter.trim().to_lowercase();
+    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(180.0).show(ui, |ui| {
+        for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
+            if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), k).clicked() {
+                st.selected = Some(k.clone());
+                st.focus = None;
+            }
+        }
+    });
+    ui.separator();
+    let Some(name) = st.selected.clone().filter(|n| doc.get(n).is_some()) else {
+        ui.label(format!("Select a {}.", table.word()));
+        return;
+    };
+    ui.strong(&name);
+    let pointer = st.focus.take();
+    let ctx = crate::form::FormCtx { base: None, findings: &[], focus: pointer.as_deref() };
+    let shown = crate::form::show(ui, &schemas[table as usize], &doc[&name], &ctx, egui::Id::new(("weapon form retail", rel, &name)));
+    if !shown.is_empty() {
+        crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.to_string(), label: format!("Edit {name}"), edits: prefix_edits(&name, shown) });
     }
 }
 

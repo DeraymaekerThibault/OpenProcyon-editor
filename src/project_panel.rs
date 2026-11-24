@@ -25,8 +25,10 @@ pub struct State {
     /// The latest `check_mod` result, errors first.
     pub findings: Vec<Finding>,
     notices: Vec<Notice>,
-    status: String,
+    pub(crate) status: String,
     seconds: f32,
+    /// A change made with no mod open, waiting for the answer to "which mod?" (see [`crate::which_mod`]).
+    pub ask: crate::which_mod::Asking,
 }
 
 impl State {
@@ -35,17 +37,23 @@ impl State {
         let made = if create { Project::create(dir, import) } else { Project::open(dir, import).map(|p| (p, false)) };
         match made {
             Ok((p, created)) => {
-                self.status = match created {
-                    true => format!("Made {} with a new mod.json.", dir.display()),
+                let status = match created {
+                    true => format!("Made {} with a new mod.json and LICENSE.", dir.display()),
                     false => format!("Opened {}.", dir.display()),
                 };
-                self.project = Some(p);
-                self.notices.clear();
-                self.findings.clear();
-                self.check();
+                self.install(p, status);
             }
             Err(e) => self.status = e,
         }
+    }
+
+    /// Makes `project` the open mod, showing `status`.
+    pub fn install(&mut self, project: Project, status: String) {
+        self.status = status;
+        self.project = Some(project);
+        self.notices.clear();
+        self.findings.clear();
+        self.check();
     }
 
     /// Starts the mod check on a thread (`authoring::check_mod`).
@@ -248,7 +256,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
             ui.label(format!("{}/mod.json{}", p.dir.display(), if p.docs[i].dirty { " (unsaved)" } else { "" }));
             let schema = mod_schema();
             let notes = notes_for(&st.findings, "mod.json");
-            let edits = crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { inherited: None, findings: &notes, focus: None }, egui::Id::new("mod.json form"));
+            let edits = crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { base: None, findings: &notes, focus: None }, egui::Id::new("mod.json form"));
             if !edits.is_empty()
                 && let Err(e) = p.do_edits("mod.json", "Edit mod.json", edits)
             {

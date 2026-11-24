@@ -6,6 +6,7 @@
 pub mod diff;
 pub mod guard;
 pub mod layers;
+pub mod licence;
 pub mod problems;
 pub mod stamp;
 
@@ -135,6 +136,18 @@ pub struct SaveReport {
     pub errors: Vec<String>,
 }
 
+/// What a new mod is made with.
+#[derive(Clone, Debug, Default)]
+pub struct NewMod {
+    /// The mod's `id` and `name`; `None`: the folder's name.
+    pub id: Option<String>,
+    pub licence: licence::Licence,
+    /// The holder named in the `LICENSE` notice; empty: the mod's name.
+    pub author: String,
+    /// Folders to make, relative to the mod (the parents of the file the first change writes).
+    pub folders: Vec<String>,
+}
+
 const MAX_UNDO: usize = 500;
 static NEXT_SCRATCH: AtomicUsize = AtomicUsize::new(0);
 
@@ -191,17 +204,36 @@ impl Project {
         Ok(p)
     }
 
-    /// Makes a mod of the folder `dir`: writes `mod.json` (id = folder name, format 1, this engine's version) unless the folder
-    /// already has one, which is never overwritten, then opens it. Writes nothing else. The flag says whether a file was written.
+    /// Makes a mod of the folder `dir` with the defaults ([`NewMod::default`]); see [`Project::create_with`].
     pub fn create(dir: &Path, import: Option<PathBuf>) -> Result<(Project, bool), String> {
+        Project::create_with(dir, import, &NewMod::default())
+    }
+
+    /// Makes a complete mod of the folder `dir`: `mod.json` (id = `new.id` or the folder name, format 1, this engine's version), a
+    /// `LICENSE` notice (see [`licence::Licence`]) and the folders `new.folders` (relative to the mod, what the first change needs),
+    /// then opens it. A `mod.json` or `LICENSE` that exists is never overwritten. Copies no retail file. The flag says whether
+    /// `mod.json` was written.
+    pub fn create_with(dir: &Path, import: Option<PathBuf>, new: &NewMod) -> Result<(Project, bool), String> {
         let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let imp = import.as_deref();
+        for rel in &new.folders {
+            check_rel(rel)?;
+        }
         let path = dir.join("mod.json");
         let created = !path.exists();
+        let folder_name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "my-mod".into());
+        let id = new.id.as_deref().map(str::trim).filter(|i| !i.is_empty()).map(str::to_string).unwrap_or(folder_name);
+        guard::create_dir_all(&dir, imp)?;
         if created {
-            let id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "my-mod".into());
             let meta = json!({"id": id, "name": id, "version": "0.1.0", "description": "", "category": "Other", "format": 1, "game_version": ENGINE_VERSION});
-            guard::create_dir_all(&dir, import.as_deref())?;
-            guard::write(&path, to_json_string(&meta), import.as_deref())?;
+            guard::write(&path, to_json_string(&meta), imp)?;
+        }
+        let licence = dir.join("LICENSE");
+        if !licence.exists() {
+            guard::write(&licence, new.licence.notice(&id, &new.author), imp)?;
+        }
+        for rel in &new.folders {
+            guard::create_dir_all(&dir.join(rel), imp)?;
         }
         Ok((Project::open(&dir, import)?, created))
     }
@@ -578,7 +610,11 @@ mod tests {
         assert!(created);
         let meta: Value = serde_json::from_slice(&std::fs::read(dir.join("mod.json")).unwrap()).unwrap();
         assert_eq!(meta, json!({"id": "My-Mod", "name": "My-Mod", "version": "0.1.0", "description": "", "category": "Other", "format": 1, "game_version": ENGINE_VERSION}));
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "nothing else is written");
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["LICENSE", "mod.json"], "nothing else is written");
+        let text = std::fs::read_to_string(dir.join("LICENSE")).unwrap();
+        assert!(text.contains("SPDX-License-Identifier: CC-BY-4.0"), "{text}");
         assert_eq!(p.name(), "My-Mod");
         drop(p);
         write(&dir, "mod.json", r#"{"id": "mine", "name": "Mine"}"#);
@@ -586,6 +622,37 @@ mod tests {
         assert!(!created);
         assert_eq!(p.name(), "Mine");
         assert_eq!(std::fs::read_to_string(dir.join("mod.json")).unwrap(), r#"{"id": "mine", "name": "Mine"}"#);
+        assert!(std::fs::read_to_string(dir.join("LICENSE")).unwrap().contains("CC-BY-4.0"), "a missing LICENSE is added to an existing mod");
+        drop(p);
+        write(&dir, "LICENSE", "mine");
+        drop(Project::create(&dir, None).unwrap());
+        assert_eq!(std::fs::read_to_string(dir.join("LICENSE")).unwrap(), "mine", "an existing LICENSE is never overwritten");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_new_mod_has_the_chosen_licence_an_id_and_the_folders_the_first_change_needs_and_no_retail_file() {
+        let (root, assets, _) = setup("complete");
+        let dir = root.join("folder");
+        let new =
+            NewMod { id: Some(" cool-mod ".into()), licence: licence::Licence::Gpl3OrLater, author: "Ada".into(), folders: vec!["ships/Ship_X".into(), "data/weapons".into()] };
+        let (p, created) = Project::create_with(&dir, Some(assets.clone()), &new).unwrap();
+        assert!(created);
+        assert_eq!(p.name(), "cool-mod");
+        let text = std::fs::read_to_string(dir.join("LICENSE")).unwrap();
+        assert!(text.contains("GPL-3.0-or-later") && text.contains("Copyright (c) Ada") && text.contains("gnu.org"), "{text}");
+        assert!(dir.join("ships/Ship_X").is_dir() && dir.join("data/weapons").is_dir());
+        // nothing of the import was copied
+        let mut files = vec![];
+        fn walk(d: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                if e.path().is_dir() { walk(&e.path(), out) } else { out.push(e.file_name().to_string_lossy().into_owned()) }
+            }
+        }
+        walk(&dir, &mut files);
+        files.sort();
+        assert_eq!(files, ["LICENSE", "mod.json"]);
+        assert!(Project::create_with(&root.join("bad"), None, &NewMod { folders: vec!["../x".into()], ..Default::default() }).is_err(), "folders stay inside the mod");
         drop(p);
         let _ = std::fs::remove_dir_all(root);
     }

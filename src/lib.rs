@@ -20,3 +20,4 @@ pub mod ship_view;
 pub mod ships_panel;
 pub mod startup;
 pub mod weapons_panel;
+pub mod which_mod;
