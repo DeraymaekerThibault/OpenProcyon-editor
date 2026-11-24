@@ -127,3 +127,32 @@ Engine requirements:
 - Crew nodes of the model in `derive::Facts`, and the crew node kinds as a public list (the editor mirrors the private `KINDS`).
 - A way for `ship.json` to move one derived engine or wake without restating the whole array (the array needs values only the engine
   derives, such as an engine's `fx`), and a `ship.json` key for boarding points.
+
+## P4. Ship and weapon editors
+
+Works (headless):
+
+- Ships tab: every `ships/<id>/ship.json` of the project's overlay (import plus mod), or of the import alone when no mod is open
+  (read only). Rows say retail / extends / overrides / added / new and unsaved; filter and sort. A ship opens through the project and is
+  edited with the P2 form on the engine's ship schema, the retail (or `extends` parent) values shown as inherited, the problems of that
+  file under their fields. A retail ship changed this way is saved as `{"extends": <id>, changed keys}` (tested: only the change).
+- New ship: extending an existing one (nothing is written until something changes), or from the author's own GLB, which is copied to
+  `ships/<id>/model.glb` with a minimal `ship.json`; a GLB byte-identical to any `ships/*/model.glb` of the import is refused.
+- Weapons tab: `data/weapons/guns.json` and `bullets.json` entries (changed / added marks), each edited with the form on the entry
+  schema; only the changed entries and keys are saved (merged-path files). New gun or bullet from scratch is the default; duplicating an
+  entry warns that a duplicated retail entry is saved whole (it is new, so it has no base to diff against). A gun's bullet fields get a
+  picker of the bullet ids.
+- Compare with retail: points, MaxSpeed, MaxThrust, Mass, core HP, the sum of section HP, mounts and their guns, sight, against the
+  import's file of the same ship, the `extends` parent or a chosen ship, with differences; a value a file leaves out shows "derived".
+- "Show in 3D" feeds the P5 view from the project; each drag lands in the undo stack as its own step (`Project::do_step`), and the
+  view follows undo and redo.
+- Clicking a problem about a ship or weapon file switches to its tab, selects the ship or entry and brings the field into view.
+
+Not verified here: all drawing and dialogs, the 3D view on a real ship, anything against a real import.
+
+Engine requirements:
+
+- The resolved values of a ship as the loader sees them (points, speed, mass, hit points, mounts after derivation from the model), so
+  the compare table can show what the game uses instead of "derived".
+- A schema marker for references (a gun's bullet, a mount's gun, an effect, a sound), so the form offers pickers without the editor
+  knowing field names; the bullet picker finds its fields by the `BulletTypeName` prefix (PROVISIONAL).

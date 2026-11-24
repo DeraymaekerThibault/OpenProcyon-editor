@@ -294,9 +294,39 @@ impl Project {
         Ok(self.docs.len() - 1)
     }
 
+    /// Opens a document for a file that exists nowhere yet (neither in the mod nor in the import), so a new ship can be started. With
+    /// `parent`, the document is that parent's merged file (as `extends` would give) and saves as `extends` plus the changes, writing
+    /// nothing while there are none; without, it starts as `initial` and is written whole. Refused when the file or an open document
+    /// of that path exists already.
+    pub fn open_new_doc(&mut self, rel: &str, parent: Option<&str>, initial: Value) -> Result<usize, String> {
+        check_rel(rel)?;
+        if self.docs.iter().any(|d| d.rel == rel) || self.dir.join(rel).exists() || self.root.join(rel).exists() {
+            return Err(format!("{rel}: exists already"));
+        }
+        let base = match parent {
+            Some(p) => read_merged(&self.root, &parent_rel(rel, p)).map_err(|e| format!("{rel}: parent '{p}': {e}"))?,
+            None => Value::Null,
+        };
+        let edited = if parent.is_some() { base.clone() } else { initial };
+        let kind = merge_kind(rel, &Value::Null);
+        let parent = parent.map(str::to_string);
+        self.docs.push(Doc { rel: rel.to_string(), kind, base, own: Value::Null, clean: Value::Null, edited, dirty: true, disk: None, parent, conflict: None });
+        Ok(self.docs.len() - 1)
+    }
+
     /// Applies `edits` to the document `rel` as one undoable step, all or nothing: when one fails, the document is left as it was and
     /// the error names the step. Clears the redo stack.
+    /// Consecutive sets of the same one field with the same label are merged into one step (typing in a form field).
     pub fn do_edits(&mut self, rel: &str, label: &str, edits: Vec<Edit>) -> Result<(), String> {
+        self.push_edits(rel, label, edits, true)
+    }
+
+    /// [`Project::do_edits`] as a step of its own, never merged with the one before (one drag of a point in the 3D view).
+    pub fn do_step(&mut self, rel: &str, label: &str, edits: Vec<Edit>) -> Result<(), String> {
+        self.push_edits(rel, label, edits, false)
+    }
+
+    fn push_edits(&mut self, rel: &str, label: &str, edits: Vec<Edit>, coalesce: bool) -> Result<(), String> {
         let i = self.open_doc(rel)?;
         let before = self.docs[i].edited.clone();
         let mut next = before.clone();
@@ -313,6 +343,7 @@ impl Project {
             _ => None,
         };
         if let Some(last) = self.undo.last_mut()
+            && coalesce
             && self.redo.is_empty()
             && last.rel == rel
             && last.label == label
@@ -744,7 +775,33 @@ mod tests {
         assert!(!p.docs[i].dirty);
         p.redo();
         assert_eq!(doc(&mut p)["name"], "Abc");
+        // a step of its own is never merged
+        p.do_step("mod.json", "Move", vec![Edit::set("/version", "3".into())]).unwrap();
+        p.do_step("mod.json", "Move", vec![Edit::set("/version", "4".into())]).unwrap();
+        p.undo();
+        assert_eq!(doc(&mut p)["version"], "3");
         drop(p);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_document_extends_a_parent_or_starts_whole() {
+        let (root, assets, m) = setup("newdoc");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        assert!(p.open_new_doc("ships/Ship_X/ship.json", None, json!({})).is_err(), "retail file exists");
+        assert!(p.open_new_doc("../x.json", None, json!({})).is_err());
+        let i = p.open_new_doc("ships/Ship_New/ship.json", Some("Ship_X"), Value::Null).unwrap();
+        assert_eq!((p.docs[i].edited["speed"].as_i64(), p.docs[i].parent.as_deref()), (Some(3), Some("Ship_X")));
+        assert!(p.open_new_doc("ships/Ship_New/ship.json", None, json!({})).is_err(), "already open");
+        assert!(p.open_new_doc("ships/Ship_Q/ship.json", Some("Nope"), Value::Null).is_err());
+        p.save();
+        assert!(!m.join("ships/Ship_New/ship.json").exists(), "nothing changed: nothing written");
+        p.do_edits("ships/Ship_New/ship.json", "Edit", vec![Edit::set("/speed", json!(5))]).unwrap();
+        p.save();
+        assert_eq!(std::fs::read_to_string(m.join("ships/Ship_New/ship.json")).unwrap().replace([' ', '\n'], ""), r#"{"extends":"Ship_X","speed":5}"#);
+        p.open_new_doc("ships/Ship_W/ship.json", None, json!({"race": "", "points": 0})).unwrap();
+        p.save();
+        assert!(m.join("ships/Ship_W/ship.json").is_file());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

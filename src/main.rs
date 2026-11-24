@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{map_view, mission_panel, project_panel};
+use openprocyon_editor::{map_view, mission_panel, project_panel, ships_panel, weapons_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -48,6 +48,9 @@ fn main() {
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
         .init_resource::<Tab>()
+        .init_resource::<ships_panel::State>()
+        .init_resource::<ships_panel::Linked>()
+        .init_resource::<weapons_panel::State>()
         // The egui context belongs to the 2D camera, whichever camera spawns first (the 3D ship view has its own, below it).
         .insert_resource(EguiGlobalSettings { auto_create_primary_context: false, ..default() })
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
@@ -58,6 +61,8 @@ fn main() {
         })
         .add_systems(EguiPrimaryContextPass, panel)
         .add_systems(Update, project_panel::poll_system)
+        // After the 3D view's own Update systems: its edits go to the undo stack, undo and redo show in the view.
+        .add_systems(PostUpdate, ships_panel::sync_system)
         .run();
 }
 
@@ -66,13 +71,16 @@ fn main() {
 enum Tab {
     #[default]
     Project,
+    Ships,
+    Weapons,
     Mission,
     Map,
     Ship3d,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 4] = [(Tab::Project, "Mod"), (Tab::Ship3d, "3D ship"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+    const ALL: [(Tab, &'static str); 6] =
+        [(Tab::Project, "Mod"), (Tab::Ships, "Ships"), (Tab::Weapons, "Weapons"), (Tab::Ship3d, "3D ship"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
 }
 
 #[allow(clippy::too_many_arguments)] // a Bevy system takes one parameter per resource it draws
@@ -85,6 +93,9 @@ fn panel(
     mut project: ResMut<project_panel::State>,
     mut focus: ResMut<project_panel::Focus>,
     mut ship: ResMut<ShipView>,
+    mut ships: ResMut<ships_panel::State>,
+    mut link: ResMut<ships_panel::Linked>,
+    mut weapons: ResMut<weapons_panel::State>,
 ) -> Result {
     project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
     let ctx = contexts.ctx_mut()?;
@@ -112,6 +123,14 @@ fn panel(
         ui.separator();
         egui::CollapsingHeader::new("Mission problems (spike)").default_open(false).show(ui, |ui| mission_panel::problems(ui, &mission));
     });
+    // A click in the problems list names a file: show the tab that edits it (the tab then selects the ship or entry and the field).
+    if !focus.rel.is_empty() {
+        if ships_panel::ship_id_of(&focus.rel).is_some() {
+            *tab = Tab::Ships;
+        } else if weapons_panel::Table::of_file(&focus.rel).is_some() {
+            *tab = Tab::Weapons;
+        }
+    }
     egui::Panel::top("tabs").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             for (t, label) in Tab::ALL {
@@ -126,14 +145,20 @@ fn panel(
         return Ok(());
     }
     ship_view::panel::hidden(&mut ship);
+    let mut go3d = false;
     egui::CentralPanel::default().show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| match *tab {
             Tab::Project => project_panel::tab(ui, &mut project),
+            Tab::Ships => go3d = ships_panel::tab(ui, &mut ships, &mut project, &mut focus, &mut ship, &mut link, assets.dir.as_deref().filter(|d| d.is_dir())),
+            Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus),
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Ship3d => {}
         });
     });
+    if go3d {
+        *tab = Tab::Ship3d;
+    }
     Ok(())
 }
 
