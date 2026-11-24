@@ -115,6 +115,8 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 ### Phase 3. Editor shell, ships and weapons (about 8 to 10 weeks, editor)
 
 - Open or create a mod; layer view of base and mods; forms from schemas; problems panel; undo and redo; save as diffs.
+- Retail stays intact (backlog B6): every edit is saved into a mod, the editor never writes into the player's import, and each file
+  and field can be compared with retail and reverted to it.
 - 3D ship view: sections, gun arcs, engines, wakes, flags; place and drag every point on the model with a gizmo.
 - New ship from a GLB, with retail-texture materials listed from the import.
 - Open any retail ship or gun from the import as the starting point; edits are saved as `extends` plus the changed keys (backlog B5).
@@ -256,6 +258,18 @@ it, and save only the difference. Nothing retail is written into the mod (princi
 - Retail missions and skirmish maps are edited like retail ships (maintainer's decision, 24 November 2026): a mod ships only the
   diff, never a copy. The engine's `docs/missions.md` still says "do not copy or edit a retail mission"; reword it there to "do not
   copy" so the two repositories agree.
+
+**B6. Retail always stays intact.** Editing retail content never changes the player's import; the change lives in a mod, as a
+diff. A mod holding full copies of retail files is not the way to get this: it would be game content (hard rule 1), large, hard to
+read, and frozen against later importer fixes and format migrations. A diff already leaves retail untouched, because the engine lays
+mods over the import in a separate overlay folder; switching the mod off gives pure retail back. Phase 3.
+
+- Every edit lands in a mod. Editing a retail ship, gun, map or mission with no mod open asks "which mod?", with "new mod" as one
+  answer, which creates a complete mod folder (`mod.json`, `LICENSE`, the folders the change needs) and copies no retail file.
+- The editor never writes into the import. Every save goes through one function that refuses a path inside the import folder
+  (`PROCYON_ASSETS` or the engine's per-user folder), with a unit test. This also enforces hard rule 2.
+- Compare and revert. Each file and each field can show the retail value next to the mod's, and "revert to retail" removes the
+  key or the file from the mod. Since the mod holds only the change, reverting is a deletion.
 
 ## Risks and mitigations
 
