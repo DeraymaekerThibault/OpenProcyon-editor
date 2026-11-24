@@ -104,6 +104,32 @@ pub fn parse_version(output: &str) -> Result<String, String> {
         .ok_or_else(|| format!("unexpected output of --version: {:?}", output.trim()))
 }
 
+/// The file `bin` runs: itself when it has a folder part, else the first match on `path` (what the OS does when it spawns it).
+fn resolve_bin(bin: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if bin.components().count() > 1 {
+        return Some(bin.to_path_buf());
+    }
+    std::env::split_paths(path?).map(|d| d.join(bin)).find(|c| c.is_file())
+}
+
+/// The folder of the `mods/` the game reads besides the player's own, for a game binary at `bin` started in `cwd`: `mods/` next to the
+/// binary when there is one, else `mods/` of the source checkout found from `cwd` and then from the binary (the nearest folder with
+/// `game/Cargo.toml` and `content/`). PROVISIONAL: this restates the pinned engine's `bundled_mods_dir()` (that function looks at the
+/// editor's own binary, not the game's, so it cannot be called); the engine should take the binary as an argument.
+pub fn bundled_mods_for(bin: Option<&Path>, cwd: Option<&Path>) -> Option<PathBuf> {
+    let beside = bin.and_then(Path::parent).map(|d| d.join("mods")).filter(|d| d.is_dir());
+    let checkout = |start: &Path| start.ancestors().find(|d| d.join("game/Cargo.toml").is_file() && d.join("content").is_dir()).map(|d| d.join("mods")).filter(|d| d.is_dir());
+    beside.or_else(|| cwd.and_then(checkout)).or_else(|| bin.and_then(checkout))
+}
+
+/// [`bundled_mods_for`] for the game binary this editor starts (`PROCYON_GAME_BIN`, else `openprocyon` on the PATH) and this
+/// process's working directory, which the game inherits.
+pub fn bundled_mods() -> Option<PathBuf> {
+    let bin = resolve_bin(&game_bin(), std::env::var_os("PATH").as_deref());
+    let bin = bin.map(|b| std::fs::canonicalize(&b).unwrap_or(b));
+    bundled_mods_for(bin.as_deref(), std::env::current_dir().ok().as_deref())
+}
+
 /// Runs `<game bin> --version` and returns the version it prints; compare it with `openprocyon::authoring::ENGINE_VERSION`.
 pub fn game_version() -> Result<String, String> {
     version_of(&game_bin())
@@ -185,6 +211,32 @@ mod tests {
         assert_eq!(bin_from(Some("/opt/g/openprocyon".into())), PathBuf::from("/opt/g/openprocyon"));
         assert_eq!(bin_from(Some("".into())), PathBuf::from("openprocyon"));
         assert_eq!(bin_from(None), PathBuf::from("openprocyon"));
+    }
+
+    #[test]
+    fn the_bundled_mods_folder_is_found_the_way_the_game_finds_it() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-bundled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (dl, co) = (d.join("download"), d.join("checkout"));
+        for p in [dl.join("mods"), co.join("mods"), co.join("game"), co.join("content"), co.join("target/debug")] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(co.join("game/Cargo.toml"), "").unwrap();
+        // next to the binary wins
+        assert_eq!(bundled_mods_for(Some(&dl.join("openprocyon")), Some(&co)), Some(dl.join("mods")));
+        // else the checkout found from the working directory, then from the binary
+        let bin = co.join("target/debug/openprocyon");
+        assert_eq!(bundled_mods_for(Some(&bin), Some(&d)), Some(co.join("mods")));
+        assert_eq!(bundled_mods_for(Some(&bin), Some(&co.join("game"))), Some(co.join("mods")));
+        assert_eq!(bundled_mods_for(Some(&d.join("elsewhere/openprocyon")), Some(&d)), None);
+        assert_eq!(bundled_mods_for(None, None), None);
+        // a bare name is looked up on the PATH like the OS does; a path is kept
+        let path = std::env::join_paths([d.join("none"), dl.clone()]).unwrap();
+        std::fs::write(dl.join("openprocyon"), "").unwrap();
+        assert_eq!(resolve_bin(Path::new("openprocyon"), Some(&path)), Some(dl.join("openprocyon")));
+        assert_eq!(resolve_bin(Path::new("openprocyon"), None), None);
+        assert_eq!(resolve_bin(Path::new("/x/openprocyon"), None), Some(PathBuf::from("/x/openprocyon")));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

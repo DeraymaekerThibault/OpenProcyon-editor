@@ -29,7 +29,7 @@ pub struct State {
     plan: Option<Result<ExportPlan, String>>,
     confirmed: bool,
     /// Ids of the player's other enabled mods (read once; "Read the mod list again" clears it).
-    others: Option<Vec<String>>,
+    others: Option<(Vec<String>, Option<PathBuf>)>,
 }
 
 /// `id (name)` of every enabled installed mod except the one in `mod_dir` (by folder, or by id when the folder is a copy of an
@@ -166,13 +166,24 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if ui.small_button("Check the game version again").clicked() {
         st.version = None;
     }
-    let others = st.others.get_or_insert_with(|| other_enabled_mods(&openprocyon::modding::installed(openprocyon::bundled_mods_dir().as_deref()), dir)).clone();
+    let (others, bundled) = st
+        .others
+        .get_or_insert_with(|| {
+            let bundled = launch::bundled_mods();
+            (other_enabled_mods(&openprocyon::modding::installed(bundled.as_deref()), dir), bundled)
+        })
+        .clone();
     if !others.is_empty() {
-        // PROVISIONAL: the game (at the pinned engine) has no flag to leave the player's enabled mods out of a run.
+        // PROVISIONAL: the game (at the pinned engine) has no flag to leave the other enabled mods out of a run.
         ui.colored_label(
             ui.visuals().warn_fg_color,
-            format!("Not this mod alone: the game also loads the player's enabled mods ({}) after the engine's files, so they can change what you see. Switch them off in the game's Mods menu to test this mod alone.", others.join(", ")),
+            format!("Not this mod alone: the game also loads {} other enabled mods ({}) after the engine's files, so they can change what you see. Switch them off in the game's Mods menu to test this mod alone.", others.len(), others.join(", ")),
         );
+        ui.weak(format!(
+            "Read from your mods folder and the game's bundled mods ({}). PROVISIONAL: the bundled folder is looked up as the game does it (next to {}, else the source checkout found from this editor's working directory); if the game runs from elsewhere the list can differ.",
+            bundled.as_ref().map_or("none found".to_string(), |b| b.display().to_string()),
+            launch::game_bin().display()
+        ));
         if ui.small_button("Read the mod list again").clicked() {
             st.others = None;
         }
@@ -273,6 +284,30 @@ mod tests {
         assert_eq!(map_ids(&d), ["a", "b"]);
         assert_eq!(ship_ids(&d), ["s1"]);
         assert!(map_ids(&d.join("nowhere")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_list_has_the_users_enabled_mods_and_the_bundled_default_mods_the_game_loads() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-gameloads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (user, bundled) = (d.join("user"), d.join("bundled"));
+        for (root, id, default) in [
+            (user.join("mods"), "mine", false),
+            (user.join("mods"), "off", false),
+            (bundled.clone(), "speed", true),
+            (bundled.clone(), "plain", false),
+            (bundled.clone(), "cam", true),
+        ] {
+            std::fs::create_dir_all(root.join(id)).unwrap();
+            std::fs::write(root.join(id).join("mod.json"), format!(r#"{{"id": "{id}", "default": {default}}}"#)).unwrap();
+        }
+        std::fs::write(user.join("mods.json"), r#"{"enabled": ["mine"], "disabled": ["cam"]}"#).unwrap();
+        let all = openprocyon::modding::installed_in(&user, Some(&bundled));
+        // the user's `mine`, the bundled default `speed`; not `off`, `plain` (never switched on) or `cam` (switched off)
+        assert_eq!(other_enabled_mods(&all, &d.join("editing")), ["mine", "speed"]);
+        // without the bundled folder the editor used to show only the first
+        assert_eq!(other_enabled_mods(&openprocyon::modding::installed_in(&user, None), &d.join("editing")), ["mine"]);
         let _ = std::fs::remove_dir_all(&d);
     }
 
