@@ -206,6 +206,12 @@ Still only on a real machine: real retail hulls and textures, a real game for pl
 
 For the engine's `authoring` API, in the order they block the editor most:
 
+Requirements 1, 3 (merge rule and `extends` parent), 6, 7 and 9 are implemented on the engine branch `ccr-6c36e1b6-zoviru` (commit
+`4a5b1a9`: `Finding.pointer`, `unknown_key_findings`, `merge_rule` / `extends_parent` / `MERGED`, `game_to_bevy` / `bevy_to_game` /
+`mount_rotation` / `mount_rot`, crew nodes as `CrewNode` points of `derive::Facts`, `crew_kind` / `CREW_KINDS`), not merged yet. Once
+it is, the editor drops its PROVISIONAL mirrors (`edit::dotted_to_pointer` for findings, `project::merge_kind`'s path list,
+`ship_view::coords` inverse and `mount_rotation`, the crew kind list) and draws the model's crew nodes.
+
 1. A JSON pointer in every `Finding` (the dotted `path` is ambiguous). (P2)
 2. The resolved ship as the loader sees it: hardpoints with their source (ship.json or model node), points, speed, mass, hit points,
    mounts after derivation. (P4, P5)
