@@ -178,6 +178,9 @@ pub struct Command {
     pub edits: Vec<Edit>,
     /// The document before the step; undoing restores it exactly (an applied edit leaves created parents behind).
     before: Value,
+    /// The step came from typing or dragging a field, so the next such edit of the same field may join it. A button action (Reset,
+    /// Revert, add, remove) never does, and a save ends it ([`Project::save`]).
+    open: bool,
 }
 
 /// What a save did.
@@ -407,9 +410,16 @@ impl Project {
 
     /// Applies `edits` to the document `rel` as one undoable step, all or nothing: when one fails, the document is left as it was and
     /// the error names the step. Clears the redo stack.
-    /// Consecutive sets of the same one field with the same label are merged into one step (typing in a form field).
+    /// Consecutive sets of the same one field with the same label are merged into one step (typing in a form field), unless a save or
+    /// a [`Project::do_step`] came between.
     pub fn do_edits(&mut self, rel: &str, label: &str, edits: Vec<Edit>) -> Result<(), String> {
         self.push_edits(rel, label, edits, true)
+    }
+
+    /// What a form's edits are saved as: typing or dragging one box ([`Project::do_edits`], joins the typing before it), anything
+    /// else (a Reset, Set, add, remove button) a step of its own ([`Project::do_step`]).
+    pub fn apply_form(&mut self, rel: &str, label: &str, edits: Vec<Edit>, typing: bool) -> Result<(), String> {
+        if typing { self.do_edits(rel, label, edits) } else { self.do_step(rel, label, edits) }
     }
 
     /// [`Project::do_edits`] as a step of its own, never merged with the one before (one drag of a point in the 3D view).
@@ -435,6 +445,7 @@ impl Project {
         };
         if let Some(last) = self.undo.last_mut()
             && coalesce
+            && last.open
             && self.redo.is_empty()
             && last.rel == rel
             && last.label == label
@@ -446,7 +457,7 @@ impl Project {
             last.edits[0].old = first_old;
             return Ok(());
         }
-        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before });
+        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before, open: coalesce });
         if self.undo.len() > MAX_UNDO {
             self.undo.remove(0);
         }
@@ -498,6 +509,8 @@ impl Project {
     /// equal in meaning to the one on disk is not written.
     pub fn save(&mut self) -> SaveReport {
         let mut report = SaveReport::default();
+        // What was saved is a point to come back to: the next edit of the same field is a new step, not part of the one before.
+        self.undo.iter_mut().for_each(|c| c.open = false);
         for rel in self.dirty_rels() {
             match self.save_doc(&rel) {
                 Ok((outcome, warnings)) => {
@@ -954,6 +967,37 @@ mod tests {
         assert_eq!(doc(&mut p)["version"], "3");
         drop(p);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reset_button_is_its_own_step_and_a_save_ends_typing() {
+        let (root, assets, m) = setup("resetstep");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        let rel = "ships/Ship_X/ship.json";
+        let speed = |p: &Project| p.doc(rel).unwrap().edited["speed"].clone();
+        let typed = |p: &mut Project, v: i64| p.apply_form(rel, "Edit Ship_X", vec![Edit::set("/speed", json!(v))], true).unwrap();
+        // type 7, 70, then the Reset button (same field, same label, one set), then Undo
+        typed(&mut p, 7);
+        typed(&mut p, 70);
+        p.apply_form(rel, "Edit Ship_X", vec![Edit::set("/speed", json!(3))], false).unwrap();
+        assert_eq!(speed(&p), json!(3));
+        p.undo();
+        assert_eq!(speed(&p), json!(70), "undoing the reset brings the typed value back");
+        p.undo();
+        assert_eq!(speed(&p), json!(3), "the typing was one step");
+        p.redo();
+        p.redo();
+        // typing after a reset is a new step too, not part of the reset
+        typed(&mut p, 9);
+        p.undo();
+        assert_eq!(speed(&p), json!(3));
+        // a save ends the typing step
+        typed(&mut p, 7);
+        assert!(p.save().errors.is_empty());
+        typed(&mut p, 70);
+        p.undo();
+        assert_eq!(speed(&p), json!(7), "back to the saved value");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

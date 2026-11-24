@@ -280,10 +280,15 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
             ui.label(format!("{}/mod.json{}", p.dir.display(), if p.docs[i].dirty { " (unsaved)" } else { "" }));
             let schema = mod_schema();
             let notes = notes_for(&st.findings, "mod.json");
-            let edits =
-                crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] }, egui::Id::new("mod.json form"));
+            let (edits, typing) = crate::form::show_typed(
+                ui,
+                &schema,
+                &p.docs[i].edited,
+                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] },
+                egui::Id::new("mod.json form"),
+            );
             if !edits.is_empty()
-                && let Err(e) = p.do_edits("mod.json", "Edit mod.json", edits)
+                && let Err(e) = p.apply_form("mod.json", "Edit mod.json", edits, typing)
             {
                 st.status = e;
             }

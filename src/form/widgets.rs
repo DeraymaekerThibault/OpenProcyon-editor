@@ -53,6 +53,8 @@ struct St<'a> {
     /// Unknown keys as `(pointer, keys the schema lists there)`.
     unknown: Vec<(String, Vec<String>)>,
     out: Vec<Edit>,
+    /// How many of `out` came from a text box or a number box.
+    typed: usize,
     drawn: Vec<bool>,
     /// The focus changed this frame: open its sections and scroll to it once.
     fresh: bool,
@@ -62,6 +64,12 @@ struct St<'a> {
 /// Draws `doc` as a form for `schema` and returns the edits made this frame (JSON pointers relative to `doc`), empty when nothing changed.
 /// `id` must be unique per open form (it keys the open sections and the text boxes of the form).
 pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: egui::Id) -> Vec<Edit> {
+    show_typed(ui, schema, doc, ctx, id).0
+}
+
+/// [`show`], and whether the edits are typing or dragging one box (so they may join the step before); `false` for a button (Reset,
+/// Set, add, remove, move, rename), which is always a step of its own.
+pub fn show_typed(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: egui::Id) -> (Vec<Edit>, bool) {
     let root = Node::from_schema(schema);
     let unknown = openprocyon::authoring::unknown_keys(schema, doc).into_iter().map(|(p, keys)| (edit::dotted_to_pointer(&p), keys)).collect();
     let focus_key = id.with("focus");
@@ -75,7 +83,7 @@ pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: e
             d.remove_temp::<String>(focus_key);
         }
     });
-    let mut st = St { ctx, doc, unknown, out: vec![], drawn: vec![false; ctx.findings.len()], fresh, id };
+    let mut st = St { ctx, doc, unknown, out: vec![], typed: 0, drawn: vec![false; ctx.findings.len()], fresh, id };
     ui.push_id(id, |ui| {
         if root.is_compound() {
             st.notes(ui, "");
@@ -93,7 +101,8 @@ pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: e
             }
         }
     });
-    st.out
+    let typing = !st.out.is_empty() && st.typed == st.out.len();
+    (st.out, typing)
 }
 
 fn level_color(l: Level) -> Color32 {
@@ -429,12 +438,14 @@ impl<'a> St<'a> {
             }
             Kind::Integer(_) | Kind::Number(_) => {
                 if let Some(e) = self.number(ui, &node.kind, ptr, v) {
+                    self.typed += 1;
                     self.out.push(e);
                 }
             }
             Kind::String => {
                 let mut s = v.as_str().unwrap_or_default().to_string();
                 if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0)).changed() {
+                    self.typed += 1;
                     self.out.push(Edit::set(ptr, json!(s)));
                 }
             }
@@ -457,6 +468,7 @@ impl<'a> St<'a> {
                     if let Some(item) = item
                         && let Some(e) = self.number(ui, &item.kind, &model::child_pointer(ptr, &i.to_string()), x)
                     {
+                        self.typed += 1;
                         self.out.push(e);
                     }
                 }

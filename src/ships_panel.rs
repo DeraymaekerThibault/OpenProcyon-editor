@@ -343,6 +343,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     let mut go3d = false;
     let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
     let mut edits = vec![];
+    let mut typing = false;
     let mut revert = false;
     egui::ScrollArea::vertical().id_salt("ship-detail").show(ui, |ui| {
         let doc = &project.docs[i];
@@ -363,10 +364,10 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         let pointer = st.focus.take();
         let inherited = (!doc.base.is_null()).then_some(&doc.base);
         let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref(), hidden: &[] };
-        edits = crate::form::show(ui, &schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
+        (edits, typing) = crate::form::show_typed(ui, &schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
     });
     if !edits.is_empty()
-        && let Err(e) = project.do_edits(&rel, &format!("Edit {id}"), edits)
+        && let Err(e) = project.apply_form(&rel, &format!("Edit {id}"), edits, typing)
     {
         st.status = e;
     }

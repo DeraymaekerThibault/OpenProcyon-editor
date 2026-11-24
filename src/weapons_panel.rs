@@ -246,6 +246,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     });
     let mut edits: Vec<Edit> = vec![];
     let mut label = String::new();
+    let mut typing = false;
     let mut revert: Option<Option<String>> = None;
     ui.horizontal(|ui| {
         ui.label(format!("New {}", table.word()));
@@ -326,8 +327,9 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         let hidden = hidden_fields(table, entry);
         let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref(), hidden: &hidden };
         let schema = &schemas[table as usize];
-        let shown = crate::form::show(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
+        let (shown, shown_typing) = crate::form::show_typed(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
         if !shown.is_empty() {
+            typing = shown_typing;
             edits = prefix_edits(&name, shown);
             label = format!("Edit {name}");
         }
@@ -344,7 +346,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
     }
     if !edits.is_empty()
-        && let Err(e) = project.do_edits(rel, &label, edits)
+        && let Err(e) = project.apply_form(rel, &label, edits, typing)
     {
         st.status = e;
     }
