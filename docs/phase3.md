@@ -90,3 +90,40 @@ Engine requirements:
 - The parent of an `extends` file is found by restating the rule (another ship's or map's file at depth 3, else a sibling
   `<parent>.json`), and `ModEntry` does not say which parent each `extends` file used. Requirement: the parent path per file in the
   report, or `authoring::read_parent(root, rel)`.
+
+## P5. 3D ship view
+
+Works (headless, pure parts tested):
+
+- `ship_view::coords`: game axes to Bevy through the engine's `data::conv`, and its inverse (round trip tested against `conv`);
+  positions are written as the f32's shortest decimal.
+- `ship_view::points::hardpoints(ship.json, Facts)`: every point of a ship with where it comes from (a JSON pointer into `ship.json`,
+  or a model node): gun mounts, engines, wakes, flags, tow (tower / towee), homing, boarding (model only) and crew nodes by kind. The
+  model is read with the engine's `data::derive::read` (layers with their triangles, hardpoint nodes, game axes). The rules for which
+  wins (ship.json over the model, `engines`/`wakes`/`flags` arrays replace the model's nodes, `tow` and `homing` win) follow
+  `docs/data-format.md` (PROVISIONAL mirror, see the requirements).
+- `ship_view::place`: moving a point writes `pos` (or `/tow/tower`, `/tow/towee`, `/homing`) into `ship.json`, never into the GLB; a
+  model-only gun gets its own `guns` entry (`pos` plus `rot` with the node's yaw); a model-only flag restates the flags array from the
+  model; model-only engines and wakes and boarding points are refused with a message (see requirements). Adding a point on the hull:
+  guns (`pos`, `rot` [0,0,0], no `gun`/`arc_deg` guesses, so the checker asks for them), engines/wakes/flags where the array exists,
+  crew nodes with the name grammar, tow ends, homing.
+- `ship_view::pick`: ray against the model's triangles (Möller–Trumbore), nearest point to a ray, drag along an axis handle.
+- A synthetic GLB built in a test goes through `derive::read` and `hardpoints`.
+- The Bevy scene: the hull drawn from the same triangles the engine hits (one flat material per layer, the hovered layer highlighted
+  with its `sections` entry), an orbit camera (right/middle drag, wheel) in the central rect, gizmos per point (coloured by kind, crew
+  by crew kind), gun facing and firing arc, engine and wake headings, the tow line, homing, axis handles on the selected point. A drag
+  is one undo step (emitted on release).
+
+Not verified here (no display): everything drawn; the 3D camera under the egui camera on one window (if the view is black or wipes
+the panels, look at camera order and clear colour first); cursor to viewport mapping; pick radius and handle distance (untuned).
+The textured GLB scene is not loaded (the triangle meshes are enough to place points); `model` (another ship's model) is not followed
+by the stand-alone loader; P4 feeds the view from the project.
+
+Engine requirements:
+
+- A public inverse of `data::conv`, and the rotation of a `rot` triple (`mount_rotation`) and its inverse in `authoring`; the editor
+  mirrors the private `mount_rotation` to draw facings and arcs (PROVISIONAL).
+- The resolved hardpoints of a ship as the loader sees them (which of ship.json and the model wins), so the editor does not restate it.
+- Crew nodes of the model in `derive::Facts`, and the crew node kinds as a public list (the editor mirrors the private `KINDS`).
+- A way for `ship.json` to move one derived engine or wake without restating the whole array (the array needs values only the engine
+  derives, such as an engine's `fx`), and a `ship.json` key for boarding points.

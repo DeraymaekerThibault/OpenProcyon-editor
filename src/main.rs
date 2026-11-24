@@ -1,10 +1,11 @@
 //! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
+use openprocyon_editor::ship_view::{self, ShipView};
 use openprocyon_editor::{map_view, mission_panel, project_panel};
 
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
 use openprocyon::setup::{Imported, imported};
 use std::path::PathBuf;
 
@@ -47,10 +48,13 @@ fn main() {
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
         .init_resource::<Tab>()
+        // The egui context belongs to the 2D camera, whichever camera spawns first (the 3D ship view has its own, below it).
+        .insert_resource(EguiGlobalSettings { auto_create_primary_context: false, ..default() })
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(ship_view::scene::plugin)
         .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(Camera2d);
+            commands.spawn((Camera2d, PrimaryEguiContext));
         })
         .add_systems(EguiPrimaryContextPass, panel)
         .add_systems(Update, project_panel::poll_system)
@@ -64,12 +68,14 @@ enum Tab {
     Project,
     Mission,
     Map,
+    Ship3d,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 3] = [(Tab::Project, "Mod"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+    const ALL: [(Tab, &'static str); 4] = [(Tab::Project, "Mod"), (Tab::Ship3d, "3D ship"), (Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
 }
 
+#[allow(clippy::too_many_arguments)] // a Bevy system takes one parameter per resource it draws
 fn panel(
     mut contexts: EguiContexts,
     assets: Res<Assets>,
@@ -78,6 +84,7 @@ fn panel(
     mut map: ResMut<map_view::State>,
     mut project: ResMut<project_panel::State>,
     mut focus: ResMut<project_panel::Focus>,
+    mut ship: ResMut<ShipView>,
 ) -> Result {
     project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
     let ctx = contexts.ctx_mut()?;
@@ -112,11 +119,19 @@ fn panel(
             }
         });
     });
+    if *tab == Tab::Ship3d {
+        egui::Panel::right("ship3d_controls").resizable(true).show(&mut root, |ui| ship_view::panel::controls(ui, &mut ship));
+        // Transparent: the 3D camera draws underneath, in this panel's rect.
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(&mut root, |ui| ship_view::panel::central(ui, &mut ship));
+        return Ok(());
+    }
+    ship_view::panel::hidden(&mut ship);
     egui::CentralPanel::default().show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| match *tab {
             Tab::Project => project_panel::tab(ui, &mut project),
             Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
+            Tab::Ship3d => {}
         });
     });
     Ok(())

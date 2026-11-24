@@ -12,3 +12,4 @@ pub mod overlay;
 pub mod project;
 pub mod project_panel;
 pub mod schema_form;
+pub mod ship_view;
