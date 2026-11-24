@@ -1,0 +1,24 @@
+{
+  "$schema": "ship.schema.json",
+  "race": "Testers",
+  "skirmish": true,
+  "core_hp": 120.5,
+  "points": 3,
+  "physics": {"Mass": 1000, "MaxSpeed": 5.5, "MinExtents": [-1, -2]},
+  "sections": {
+    "Hull": {"layer": "hull_a", "material": "Wood", "hp": 50, "core_pct": 0.5, "vital_ship": false, "vital_speed": false, "vital_turn": false, "adjacent": ["hull_b"], "destruct": {"fx": "Boom", "start": 0, "end": 1, "point": [0, 0, 1]}},
+    "Deck": {"layer": "deck_a", "hp": 20}
+  },
+  "guns": {"Gun_A": {"gun": "Test Gun", "arc_deg": 90, "pos": [1, 2, 3]}, "Gun_B": {"gun": "Test Gun", "arc_deg": 45.5}},
+  "engines": [{"label": "E1", "pos": [0, -4, 0], "fx": "Flame"}, {"fx": null}],
+  "wakes": [{"pos": [0, 0, 0], "fx": "Splash"}],
+  "flags": [],
+  "engine_snd": ["hum", null],
+  "crew_posts": {"Gunners": 2, "Captains": 1},
+  "sphere": {"center": [0, 0, 0], "radius": 12},
+  "crew_nodes": [{"name": "Crew_Walk_0_0", "pos": [0, 0, 0]}],
+  "tow": {"tower": [0, 1, 0]},
+  "homing": [0, 5, 0],
+  "sigth": 300,
+  "guns_typo": true
+}

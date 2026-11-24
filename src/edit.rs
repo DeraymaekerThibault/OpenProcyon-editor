@@ -162,6 +162,45 @@ pub fn undo(doc: &mut Value, applied: &Edit) -> Result<(), String> {
     apply(doc, &inv).map(|_| ())
 }
 
+/// The JSON pointer of a dotted path as the engine's findings write it (`guns.Gun_A.arc_deg` is `/guns/Gun_A/arc_deg`, `engines[0].fx`
+/// is `/engines/0/fx`, `""` is `""`). PROVISIONAL: a key that itself holds `.` or `[` cannot be told apart from the separators;
+/// engine requirement: `Finding` should carry a JSON pointer next to the dotted path.
+pub fn dotted_to_pointer(path: &str) -> String {
+    let mut toks: Vec<String> = vec![];
+    for seg in path.split('.').filter(|s| !s.is_empty()) {
+        let (key, mut rest) = match seg.find('[') {
+            Some(i) => (&seg[..i], &seg[i..]),
+            None => (seg, ""),
+        };
+        if !key.is_empty() {
+            toks.push(key.to_string());
+        }
+        while let Some(r) = rest.strip_prefix('[') {
+            let Some(end) = r.find(']') else { break };
+            toks.push(r[..end].to_string());
+            rest = &r[end + 1..];
+        }
+    }
+    pointer(&toks)
+}
+
+/// The dotted path of a JSON pointer, the inverse of [`dotted_to_pointer`]: an all-digit token after the first is written as an
+/// index (`/engines/0/fx` is `engines[0].fx`). PROVISIONAL: a numeric object key reads as an index (same engine requirement).
+pub fn pointer_to_dotted(pointer: &str) -> String {
+    let mut out = String::new();
+    for (i, t) in tokens(pointer).iter().enumerate() {
+        if i > 0 && !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()) {
+            out.push_str(&format!("[{t}]"));
+        } else {
+            if i > 0 {
+                out.push('.');
+            }
+            out.push_str(t);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +275,16 @@ mod tests {
         assert_eq!(doc, json!([1]));
         undo(&mut doc, &e).unwrap();
         assert_eq!(doc, json!({"a": 1}));
+    }
+
+    #[test]
+    fn dotted_paths_and_pointers_convert_both_ways() {
+        for (dotted, ptr) in
+            [("guns.Gun_A.arc_deg", "/guns/Gun_A/arc_deg"), ("engines[0].fx", "/engines/0/fx"), ("tow.tow", "/tow/tow"), ("a[1][2]", "/a/1/2"), ("Gun_A", "/Gun_A"), ("", "")]
+        {
+            assert_eq!(dotted_to_pointer(dotted), ptr, "{dotted}");
+            assert_eq!(pointer_to_dotted(ptr), dotted, "{ptr}");
+        }
+        assert_eq!(dotted_to_pointer("sections.Hull Top.layer"), "/sections/Hull Top/layer");
     }
 }

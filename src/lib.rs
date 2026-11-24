@@ -3,6 +3,7 @@
 
 pub mod checks;
 pub mod edit;
+pub mod form;
 pub mod launch;
 pub mod map_view;
 pub mod mission;
