@@ -47,7 +47,7 @@ and undone byte for byte; the whole form drawn headless (`egui::Context::run_ui`
 inherited document, with no edits and no panic.
 
 Not verified here: layout, drags, clicks, focus scrolling (needs a display). Typing gives one edit per change; the undo stack
-coalesces them (P3).
+coalesces them (P3), buttons do not (the form says which it returned).
 
 Engine requirements:
 
@@ -68,7 +68,15 @@ Works (headless):
 - Documents keep what the mod's file says (`own`), what it is laid over (`base`: the `extends` parent or the import's file) and what the
   game will see (`edited`, read back through `read_merged`). A retail file the mod does not have opens on the import's version.
 - Undo/redo is a command stack of `Edit`s across documents (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y); a failing edit changes nothing;
-  consecutive sets of one field (typing, dragging) are one step.
+  consecutive sets of one field by typing or dragging are one step; a button (Reset to parent, Revert, Set, add, remove) is always a
+  step of its own (it was merged into the typing before it, so Undo skipped the Reset), and a save ends the typing step (typing again
+  after a save is a new step, so Undo goes back to the saved value). The form tells the project which it is (`form::show_typed`,
+  `Project::apply_form`). The form's widget ids no longer depend on what is drawn above it: the first edit of a retail ship with no
+  mod file made "Revert file" appear above the form, which gave every box a new id, so the box lost focus after the first keystroke
+  (typing `70` saved `7`). Tested with a headless egui frame sequence (a click puts a number box in edit mode, buttons appear above,
+  the same box keeps its id and focus; the test fails with the old `push_id`).
+- The mod folder is watched as well as the open files: a file added or removed by hand shows in Layers at the next poll (once a
+  second) with a notice, and the check runs again. Opening another mod folder clears the Ships, Weapons and 3D selections.
 - Save as diff (`project::diff`): an `extends` file holds only the changed keys, with `set` pointers when only some array elements
   changed and that is shorter; a merged-path file (`guns.json`, `bullets.json`, ...) holds only the changed entries and keys; any other
   file is written whole. Keys the mod's own file already has stay (in their order), hand-written `set` entries stay. A clean document is
@@ -184,9 +192,17 @@ Works (headless):
   shipped"), as is a file in a format of the original game; the user confirms before exporting with warnings. New dependency: `zip`
   (approved), `deflate` only.
 
-- Play-test and the preview also load the player's other enabled mods (the game has no flag to leave them out at the pinned engine),
-  so a run does not test this mod alone. The tab lists them (`openprocyon::modding::installed`) and says to switch them off in the
-  game. Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
+- Play-test and the preview also load every other enabled mod the game knows (the game has no flag to leave them out at the pinned
+  engine), so a run does not test this mod alone. What the game reads: the player's `<user>/mods/` and `mods.json`, and the game's
+  bundled `mods/` (its `"default": true` mods start on). The tab lists exactly that with the engine's own `modding::installed` and
+  says to switch them off in the game; a first version passed the engine's `bundled_mods_dir()`, which looks at the editor's own
+  binary, so it showed 3 mods where the game loaded 8. Now the bundled folder is looked up as the game does it, from the game binary
+  the editor starts: `mods/` next to it, else the source checkout's (found from this process's working directory, which the game
+  inherits, then from the binary). PROVISIONAL: that lookup restates the pinned engine's (`launch::bundled_mods_for`); the UI names
+  the folder it used and says the list can differ if the game runs from elsewhere. The real fix is the engine's `--only-mod` flag
+  (engine requirement 12, being built): then the run loads nothing else and the list can go.
+- Export: when `LICENSE` is the notice the editor wrote (found by its marker line) the plan warns "LICENSE is only a notice; replace
+  it with the full licence text before sharing". Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
 
 Not verified here: the panel, the save dialog, a real game run (`--version`, the `--shot` file names for a list of frames).
 
@@ -227,6 +243,18 @@ Works (headless, `tools/check.sh` GATE OK; no assets, no display):
   existing parent, `..` is applied. `tests/hygiene.rs` fails when non-test code in `src/` calls `std::fs` writers or `File::create`
   anywhere else. Tested: inside, nested new file, symlink into the import (also a dangling one), sibling and same-prefix folders allowed,
   a mod folder made inside the import refused.
+  Opening is refused too (`guard::check_project_dir`, called by `Project::open`, `create` and `create_with`, so every route through the
+  UI, "Open mod", "New mod" and the which-mod "Open mod folder", is covered): a folder inside the import (`<import>/data` used to open
+  and list 13 retail files as "added" layers, only the save was refused), the import itself, or a folder that contains it is refused
+  with the guard's message. Tested: subfolder, import, parent refused; a sibling allowed.
+- Scratch folders: `<temp>/openprocyon-editor-<pid>/` (symlinks into the import, merged retail JSON, preview pictures) is removed at a
+  normal quit (the projects drop, then the whole process folder) and the folders of editors that were killed are removed at the next
+  start: those whose process is not running (Linux, `/proc/<pid>`); PROVISIONAL elsewhere, only folders untouched for a day. Removal
+  goes through the guard and removes symlinks, never what they point to (tested: a symlinked folder and file outside survive). Seen in
+  Xvfb: 38 stale folders gone after one start and the run's own folder gone after the quit.
+- With no mod open the retail file is both the base and what is edited, so the ship form and the Weapons entry form show every field as
+  "inherited", with no Reset, and retail-only keys the schema lacks (`entity`, `response`, `skipped_guns`) read only without the
+  unknown-key warning or Rename/Remove, exactly as inside a mod (they showed Reset everywhere and yellow unknown-key rows).
 - "Which mod?" (`which_mod`): with no mod open, retail ships (Ships tab) and guns and bullets (Weapons tab) are editable; the first
   edit opens "Save this change into which mod?" with Open mod folder, New mod (folder, id, author, licence) and Cancel. The project opens
   and the same edit is applied through it (so it saves as `extends` or a merged diff, one undo step); Cancel drops it; a failure keeps it
@@ -246,7 +274,12 @@ Works (headless, `tools/check.sh` GATE OK; no assets, no display):
   the guard and shows as "deleted: back to retail".
 - A document is unsaved only when saving would change the file: undoing back, or resetting every field by hand, is clean again.
 
-Not verified here: all windows, the badges' look, file dialogs, anything against a real import.
+Also: the weapons tab keeps its buttons in place (the file's "Revert file to retail" above the list, the entry's next to the entry form,
+both drawn disabled instead of disappearing); the 3D header counts shown layers ("10 layers (+2 damage variants)").
+
+Not verified here: all windows, the badges' look, file dialogs, anything against a real import, typing with a real keyboard (the focus
+fix is tested with synthetic egui input, not with xdotool), and the list heights and the left panel's fixed width on a real import
+(seen only on the synthetic mod).
 
 Not done: files that replace a retail file whole (`Replaced` kind, e.g. a hand-made `data/render/*.json`) have no revert, because the
 base is retail content and reverting would mean writing a copy of it; delete the file instead. Maps and missions are not covered (B5).
