@@ -52,6 +52,8 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // A scratch folder an editor that was killed left behind (symlinks into the import, merged files, pictures).
+    openprocyon_editor::overlay::remove_stale();
     App::new()
         .insert_resource(find_assets())
         .insert_resource(Flags(flags))
@@ -79,6 +81,8 @@ fn main() {
         // After the 3D view's own Update systems: its edits go to the undo stack, undo and redo show in the view.
         .add_systems(PostUpdate, ships_panel::sync_system)
         .run();
+    // A normal quit: the projects have been dropped; what the previews and the map view made goes too.
+    openprocyon_editor::overlay::remove_own();
 }
 
 /// `--mod`, `--tab` and `--ship`, once at start.
