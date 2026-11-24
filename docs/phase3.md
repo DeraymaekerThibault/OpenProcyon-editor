@@ -28,3 +28,29 @@ Engine requirements:
 
 - `defined_names` gives `group` as the TWT groups only, but a group field accepts players and placed ships too (`known_names`). The editor
   offers `known_names` for `group` fields (PROVISIONAL). Requirement: per field kind, the names a field of that kind accepts.
+
+## P2. Schema form engine
+
+Works (headless): `src/form/` draws any document against a JSON Schema from `authoring::schemas()` and returns `Edit`s (it never
+mutates). `form::model` (no egui) resolves `$ref`, optional types (`anyOf [X, null]`, `type: [X, "null"]`), enums, integer and number
+ranges (`format: uint*` means a minimum of 0), maps (`additionalProperties`: guns by mount name, sections by label, bullet damage by
+material), arrays and short number lists (`pos`, `rot`, `homing` as one row). Keys the mod does not set show the inherited (parent)
+value greyed, with Set; set keys have Reset. Unknown keys (`authoring::unknown_keys`) are warning rows with Rename to / Remove. Findings
+are drawn under their field; a focus pointer opens and scrolls to a field. Map rename and remove set the whole map in one edit, so the
+order of sections and mounts survives an undo.
+
+Tested: every node of all five real schemas resolves; the shapes of the ship, guns, bullets and mod schemas; every edit helper applied
+and undone byte for byte; the whole form drawn headless (`egui::Context::run_ui`) for every schema with unknown keys, findings and an
+inherited document, with no edits and no panic.
+
+Not verified here: layout, drags, clicks, focus scrolling (needs a display). Typing gives one edit per change; the undo stack
+coalesces them (P3).
+
+Engine requirements:
+
+- `Finding.path` is a dotted path (`guns.Gun_A.arc_deg`, `engines[0].fx`), ambiguous for keys holding `.` or `[` or made of digits.
+  Requirement: a JSON pointer in `Finding` (the editor converts, PROVISIONAL: `edit::dotted_to_pointer`).
+- `unknown_keys` returns the keys known at that place but no nearest one; `check_mod` findings carry `suggestion`. Requirement: the
+  nearest key from `unknown_keys` too (the form lists all, unranked).
+- `beam` (guns), `blast`, `mine`, `travel_snd` (bullets) are untyped in the schemas, so the form edits them as raw JSON. Requirement:
+  typed schemas for them.
