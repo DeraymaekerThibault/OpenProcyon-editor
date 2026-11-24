@@ -68,7 +68,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Builds against the engine's main branch instead of the pinned tag, so breaking engine changes show up before the next release.
+  # Builds against the engine's main branch instead of the pinned tag or commit, so breaking engine changes show up before the next release.
   engine-main:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
@@ -80,5 +80,5 @@ jobs:
       - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
       - name: Point the engine dependency at main (this job only)
-        run: sed -i 's|tag = "v[0-9.]*"|branch = "main"|' Cargo.toml && grep -q 'branch = "main"' Cargo.toml && rm -f Cargo.lock
+        run: sed -E -i 's/(tag|rev) = "[^"]*"/branch = "main"/' Cargo.toml && grep -q 'branch = "main"' Cargo.toml && rm -f Cargo.lock
       - run: cargo build --all-targets && cargo test
