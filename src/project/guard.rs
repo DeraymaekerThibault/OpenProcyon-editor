@@ -53,6 +53,22 @@ pub fn check_writable(path: &Path, import: Option<&Path>) -> Result<(), String> 
     check_against(path, &protected(import))
 }
 
+/// Whether `dir` may be a mod folder: refused (with the guard's message) when it is inside the import, is the import, or contains
+/// the import (a parent of it): such a folder would list retail files as the mod's own and a save could reach into the import.
+pub fn check_project_dir(dir: &Path, import: Option<&Path>) -> Result<(), String> {
+    let imports = protected(import);
+    check_against(dir, &imports)?;
+    let resolved = resolve(dir)?;
+    match imports.iter().find(|i| i.starts_with(&resolved)) {
+        Some(i) => Err(format!(
+            "{}: refused, it contains the game import {} (a mod folder is a separate folder; retail files are never changed, changes go into a mod)",
+            dir.display(),
+            i.display()
+        )),
+        None => Ok(()),
+    }
+}
+
 fn io(path: &Path, e: std::io::Error) -> String {
     format!("{}: {e}", path.display())
 }
@@ -191,6 +207,25 @@ mod tests {
         let err = crate::project::Project::create(&imp.join("my-mod"), Some(imp.clone())).err().expect("refused");
         assert!(err.contains("inside the game import"), "{err}");
         assert!(!imp.join("my-mod").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn opening_or_creating_a_project_in_or_around_the_import_is_refused() {
+        use crate::project::Project;
+        let root = tmp("openguard");
+        let imp = root.join("assets");
+        std::fs::create_dir_all(imp.join("data")).unwrap();
+        std::fs::write(imp.join("data/x.json"), "{}").unwrap();
+        std::fs::create_dir_all(root.join("sibling")).unwrap();
+        for d in [imp.join("data"), imp.clone(), root.clone()] {
+            let e = Project::open(&d, Some(imp.clone())).err().unwrap_or_else(|| panic!("open {} accepted", d.display()));
+            assert!(e.contains("refused"), "{e}");
+            let e = Project::create(&d, Some(imp.clone())).err().unwrap_or_else(|| panic!("create {} accepted", d.display()));
+            assert!(e.contains("refused"), "{e}");
+        }
+        assert!(!imp.join("mod.json").exists() && !root.join("mod.json").exists() && !imp.join("data/mod.json").exists());
+        assert!(Project::open(&root.join("sibling"), Some(imp.clone())).is_ok());
         let _ = std::fs::remove_dir_all(root);
     }
 }

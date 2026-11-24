@@ -249,6 +249,7 @@ impl Project {
             return Err(format!("{} is not a folder", dir.display()));
         }
         let import = import.filter(|d| d.is_dir()).map(|d| std::path::absolute(&d).unwrap_or(d));
+        guard::check_project_dir(&dir, import.as_deref())?;
         let scratch = format!("project-{}", NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed));
         let mut p = Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch };
         p.rebuild()?;
@@ -272,6 +273,7 @@ impl Project {
     pub fn create_with(dir: &Path, import: Option<PathBuf>, new: &NewMod) -> Result<(Project, bool), String> {
         let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let imp = import.as_deref();
+        guard::check_project_dir(&dir, imp)?;
         for rel in &new.folders {
             check_rel(rel)?;
         }
