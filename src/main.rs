@@ -1,13 +1,7 @@
 //! OpenProcyon Editor, Phase 0 skeleton: a Bevy window with one egui panel that says where the player's imported assets are.
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
-mod checks;
-mod jsonfmt;
-mod launch;
-mod map_view;
-mod mission;
-mod mission_panel;
-mod schema_form;
+use openprocyon_editor::{map_view, mission_panel};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
@@ -15,8 +9,7 @@ use openprocyon::setup::{Imported, imported};
 use std::path::PathBuf;
 
 /// The engine release the editor links; an import is stamped with the version that made it (`setup::imported`).
-/// PROVISIONAL: kept equal to the tag in Cargo.toml by hand; the engine exposes no version constant at v0.2.0.
-const ENGINE_VERSION: &str = "0.2.0";
+use openprocyon::authoring::ENGINE_VERSION;
 const IMPORT_HELP: &str = "https://github.com/DeraymaekerThibault/OpenProcyon#getting-started-from-source";
 
 #[derive(Resource)]
@@ -36,15 +29,12 @@ fn status_of(dir: &std::path::Path, env_set: bool, user_assets: Option<&std::pat
     }
 }
 
-/// The engine's own lookup is `base_assets()`, which is `pub(crate)` at v0.2.0, and the public `assets_dir()` rebuilds the shared
-/// overlay folder as a side effect (it would clobber a running game's, see #136). So this composes the engine's public pieces in
-/// the same order: `PROCYON_ASSETS`, else the per-user folder the importer fills.
-/// PROVISIONAL: skips the engine's checkout `assets/` step (meaningless from a git dependency); replace with the Phase 1 `authoring` API.
+/// The engine's own side-effect-free lookup (`authoring::base_assets`: `PROCYON_ASSETS`, the checkout's `assets/`, the per-user
+/// folder); the stamp rule above needs to know whether the folder found is the per-user one.
 fn find_assets() -> Assets {
-    let env = std::env::var_os("PROCYON_ASSETS").map(PathBuf::from);
+    let env_set = std::env::var_os("PROCYON_ASSETS").is_some();
     let user = openprocyon::campaign::user_dir().map(|d| d.join("assets"));
-    let env_set = env.is_some();
-    let dir = env.or_else(|| user.clone());
+    let dir = openprocyon::authoring::base_assets().or_else(|| user.clone());
     let status = dir.as_deref().map_or(Imported::Missing, |d| status_of(d, env_set, user.as_deref(), ENGINE_VERSION));
     Assets { dir, status }
 }
@@ -54,6 +44,7 @@ fn main() {
         .insert_resource(find_assets())
         .init_resource::<mission_panel::State>()
         .init_resource::<map_view::State>()
+        .init_resource::<Tab>()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, |mut commands: Commands| {
@@ -63,7 +54,19 @@ fn main() {
         .run();
 }
 
-fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mission_panel::State>, mut map: ResMut<map_view::State>) -> Result {
+/// The central area's tabs. Each package adds its tab here and draws it from its own module.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    #[default]
+    Mission,
+    Map,
+}
+
+impl Tab {
+    const ALL: [(Tab, &'static str); 2] = [(Tab::Mission, "Mission (spike)"), (Tab::Map, "Map (spike)")];
+}
+
+fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut tab: ResMut<Tab>, mut mission: ResMut<mission_panel::State>, mut map: ResMut<map_view::State>) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(ctx.viewport_rect()));
     egui::Panel::left("side").resizable(true).show(&mut root, |ui| {
@@ -84,12 +87,17 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mi
         };
     });
     egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| mission_panel::problems(ui, &mission));
+    egui::Panel::top("tabs").show(&mut root, |ui| {
+        ui.horizontal(|ui| {
+            for (t, label) in Tab::ALL {
+                ui.selectable_value(&mut *tab, t, label);
+            }
+        });
+    });
     egui::CentralPanel::default().show(&mut root, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::CollapsingHeader::new("Map (spike items 2, 3, 7)").default_open(true).show(ui, |ui| {
-                map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir()));
-            });
-            mission_panel::show(ui, &mut mission);
+        egui::ScrollArea::vertical().show(ui, |ui| match *tab {
+            Tab::Mission => mission_panel::show(ui, &mut mission),
+            Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
         });
     });
     Ok(())

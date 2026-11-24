@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Child;
 
-use crate::{jsonfmt, launch};
+use crate::launch;
+use openprocyon::authoring::to_json_string;
 
 #[derive(Resource)]
 pub struct State {
@@ -27,11 +28,16 @@ impl Default for State {
     }
 }
 
-/// `maps/<id>/map.json` of the import, read with the engine's own JSON loader (`data::try_json`, what `data::map_json` uses).
-/// PROVISIONAL: `data::map_json` itself goes through `assets_dir()`, which rebuilds the shared overlay, so the path is composed here.
-pub fn load(assets: &Path, id: &str) -> Result<Value, String> {
-    let path = assets.join("maps").join(id).join("map.json");
-    openprocyon::data::try_json(&path).filter(Value::is_object).ok_or_else(|| format!("{}: missing or not a JSON object", path.display()))
+/// `maps/<id>/map.json` as the game would see it with the scratch mod in `out` laid over the import (`out` missing or empty: the
+/// import alone), through the engine's overlay and reader (`authoring::overlay_into`, `read_map`) in the editor's own scratch folder.
+pub fn load(assets: &Path, out: &Path, id: &str) -> Result<Value, String> {
+    let mods: Vec<PathBuf> = has_files(out).then(|| std::path::absolute(out).unwrap_or_else(|_| out.to_path_buf())).into_iter().collect();
+    let (root, _) = crate::overlay::build(assets, &mods, &crate::overlay::scratch("map-overlay"))?;
+    openprocyon::authoring::read_map(&root, id).map_err(|e| e.to_string()).and_then(|v| if v.is_object() { Ok(v) } else { Err(format!("maps/{id}/map.json: not a JSON object")) })
+}
+
+fn has_files(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some())
 }
 
 /// Writes the edited map as `<out>/maps/<id>/map.json` (whole file: a mod's `map.json` without `extends` replaces the base one) and a
@@ -42,10 +48,10 @@ pub fn save(out: &Path, id: &str, map: &Value) -> Result<PathBuf, String> {
     let modj = out.join("mod.json");
     if !modj.exists() {
         let m = json!({"id": "editor-scratch", "name": "Editor scratch", "version": "0.0", "description": "Written by the editor spike. Holds derived game data: never commit or share."});
-        std::fs::write(&modj, jsonfmt::dump(&m)).map_err(|e| format!("{}: {e}", modj.display()))?;
+        std::fs::write(&modj, to_json_string(&m)).map_err(|e| format!("{}: {e}", modj.display()))?;
     }
     let file = at.join("map.json");
-    std::fs::write(&file, jsonfmt::dump(map)).map_err(|e| format!("{}: {e}", file.display()))?;
+    std::fs::write(&file, to_json_string(map)).map_err(|e| format!("{}: {e}", file.display()))?;
     Ok(file)
 }
 
@@ -66,7 +72,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, assets: Option<&Path>) {
         if ui.add_enabled(assets.is_some(), egui::Button::new("Load imported map")).clicked()
             && let Some(a) = assets
         {
-            match load(a, &st.id) {
+            match load(a, Path::new(&st.out), &st.id) {
                 Ok(m) => {
                     st.status = format!("Loaded {} ({} objects)", st.id, m["objects"].as_array().map_or(0, Vec::len));
                     st.map = Some(m);
@@ -173,7 +179,7 @@ mod tests {
     #[test]
     fn dragged_value_round_trips_to_a_short_number() {
         let v = short(-369.230_77_f32);
-        assert_eq!(jsonfmt::dump(&v).trim(), "-369.23077");
+        assert_eq!(to_json_string(&v).trim(), "-369.23077");
         assert_eq!(v.as_f64().unwrap() as f32, -369.230_77_f32);
     }
 
@@ -183,11 +189,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let map = json!({"world_half": 100.0, "objects": [{"type": "Rock", "id": 1, "pos": [1.5, -2.0, 0.0]}]});
         let file = save(&tmp, "m", &map).unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), jsonfmt::dump(&map));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), to_json_string(&map));
         assert!(tmp.join("mod.json").is_file());
-        // read back through the engine's loader
-        assert_eq!(load(&tmp, "m").unwrap(), map);
-        assert!(load(&tmp, "nope").is_err());
+        // read back through the engine's overlay and loader: the mod's map over an import that has another version of it
+        let base = tmp.with_extension("base");
+        std::fs::create_dir_all(base.join("maps/m")).unwrap();
+        std::fs::write(base.join("maps/m/map.json"), r#"{"world_half": 5.0, "objects": []}"#).unwrap();
+        assert_eq!(load(&base, &tmp, "m").unwrap(), map);
+        assert_eq!(load(&base, &tmp.with_extension("none"), "m").unwrap()["world_half"], 5.0, "no mod: the import alone");
+        assert!(load(&base, &tmp, "nope").is_err());
+        let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

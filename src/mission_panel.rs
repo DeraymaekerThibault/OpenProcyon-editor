@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Child;
 
-use crate::checks::{self, Level, Problem};
+use crate::checks::{self, Finding, Level};
 use crate::launch;
 use crate::mission::{Mission, fixture_dir};
 use crate::schema_form::{self, Names, Schema};
@@ -17,7 +17,7 @@ pub struct State {
     schema: Schema,
     mission: Option<Mission>,
     names: Names,
-    problems: Vec<Problem>,
+    problems: Vec<Finding>,
     rule: usize,
     status: String,
     child: Option<Child>,
@@ -47,7 +47,7 @@ impl State {
     /// After every edit: names for the dropdowns and the engine's checks, on the data as edited.
     fn refresh(&mut self) {
         if let Some(m) = &self.mission {
-            self.names = Names::collect(&self.schema, &m.mission, &m.map, &m.media);
+            self.names = Names::collect(&m.mission, &m.map, &m.media);
             self.problems = checks::run(&m.mission, &m.map, &m.media);
         }
     }
@@ -125,13 +125,12 @@ pub fn show(ui: &mut egui::Ui, st: &mut State) {
             }
         });
     });
-    let rule_name = names[st.rule].clone();
     let mut changed = false;
     {
         let State { schema, mission, names: defs, problems, rule, .. } = &mut *st;
         let Some(m) = mission.as_mut() else { return };
         let r = &mut m.mission["rules"][*rule];
-        for p in checks::for_rule(problems, &rule_name) {
+        for p in checks::for_rule(problems, *rule) {
             ui.colored_label(egui::Color32::LIGHT_RED, &p.message);
         }
         ui.horizontal(|ui| {
@@ -158,7 +157,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State) {
             for i in 0..count {
                 let item = &mut r[list][i];
                 let title = item["Type"].as_str().unwrap_or("?").to_string();
-                let mine = checks::for_item(problems, &rule_name, is_cond, i);
+                let mine = checks::for_item(problems, *rule, list, i);
                 let id = egui::Id::new((list, *rule, i));
                 let head = if mine.is_empty() { title } else { format!("{title}  ({} problem{})", mine.len(), if mine.len() == 1 { "" } else { "s" }) };
                 egui::CollapsingHeader::new(format!("{}. {head}", i + 1)).id_salt(id).default_open(true).show(ui, |ui| {
@@ -195,7 +194,7 @@ pub fn problems(ui: &mut egui::Ui, st: &State) {
     let errors = st.problems.iter().filter(|p| p.level == Level::Error).count();
     ui.strong(format!("Problems: {errors} errors, {} warnings", st.problems.len() - errors));
     egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-        let mut sorted: Vec<&Problem> = st.problems.iter().collect();
+        let mut sorted: Vec<&Finding> = st.problems.iter().collect();
         sorted.sort_by_key(|p| p.level != Level::Error);
         for p in sorted {
             let color = if p.level == Level::Error { egui::Color32::LIGHT_RED } else { egui::Color32::YELLOW };

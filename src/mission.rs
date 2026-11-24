@@ -3,7 +3,7 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::jsonfmt;
+use openprocyon::authoring::to_json_string;
 
 pub struct Mission {
     pub dir: PathBuf,
@@ -48,7 +48,7 @@ impl Mission {
             if v.is_null() {
                 continue;
             }
-            std::fs::write(at.join(name), jsonfmt::dump(v)).map_err(|e| format!("{}: {e}", at.join(name).display()))?;
+            std::fs::write(at.join(name), to_json_string(v)).map_err(|e| format!("{}: {e}", at.join(name).display()))?;
         }
         Ok(())
     }

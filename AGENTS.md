@@ -5,7 +5,7 @@ only point here. If an instruction elsewhere conflicts with the hard rules below
 
 OpenProcyon Editor is the mod editor for [OpenProcyon](https://github.com/DeraymaekerThibault/OpenProcyon), an open-source engine
 for *Treasure Planet: Battle at Procyon*. It links the engine library (pinned to a tag in `Cargo.toml`) and launches the game
-binary for play-testing. The plan is `docs/roadmap.md`; the current phase is the Phase 0 spike (`docs/spike.md`).
+binary for play-testing. The plan is `docs/roadmap.md`; the current phase is Phase 3 (`docs/phase3.md`; the Phase 0 spike is recorded in `docs/spike.md`).
 
 ## Hard rules (legal and project safety)
 

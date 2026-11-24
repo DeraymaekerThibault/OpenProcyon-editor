@@ -1,24 +1,23 @@
-//! The engine's `--check-mission`, in-process: `openprocyon::rules::check::check` on the edited mission, map and media.
+//! The engine's `--check-mission`, in-process: `authoring::check_mission` on the edited mission, map and media. Findings carry their
+//! location as data (`rule_index`, `list`, `item`, `field`), so nothing here reads the printed text.
 
 use serde_json::Value;
 
-pub use openprocyon::rules::check::{Level, Problem};
+pub use openprocyon::authoring::{Finding, Level};
 
-pub fn run(mission: &Value, map: &Value, media: &Value) -> Vec<Problem> {
-    openprocyon::rules::check::check(mission, map, media)
+pub fn run(mission: &Value, map: &Value, media: &Value) -> Vec<Finding> {
+    openprocyon::authoring::check_mission(mission, map, media, false)
 }
 
-/// The findings for one condition or action of a rule. A `Problem` names the rule and `at` ("action #5 'Start Timer'", 1-based
-/// position in the list, then the Type) and the field; there is no structured location, so this matches on that text.
-/// PROVISIONAL: depends on the wording of `at`; Phase 1 needs a structured location (rule index, list, index, field).
-pub fn for_item<'a>(problems: &'a [Problem], rule: &str, is_condition: bool, index: usize) -> Vec<&'a Problem> {
-    let prefix = format!("{} #{} ", if is_condition { "condition" } else { "action" }, index + 1);
-    problems.iter().filter(|p| p.rule.trim() == rule.trim() && p.at.starts_with(&prefix)).collect()
+/// The findings for one condition or action (`list` "conditions" / "actions", `index` in it) of rule `rule` (its index in `rules`),
+/// nested conditions included (they belong to the item that holds them).
+pub fn for_item<'a>(problems: &'a [Finding], rule: usize, list: &str, index: usize) -> Vec<&'a Finding> {
+    problems.iter().filter(|p| p.rule_index == Some(rule) && p.list.as_deref() == Some(list) && p.item == Some(index)).collect()
 }
 
-/// The findings about the rule as a whole (not one of its conditions or actions).
-pub fn for_rule<'a>(problems: &'a [Problem], rule: &str) -> Vec<&'a Problem> {
-    problems.iter().filter(|p| p.rule.trim() == rule.trim() && !p.at.starts_with("condition #") && !p.at.starts_with("action #")).collect()
+/// The findings about rule `rule` as a whole (not one of its conditions or actions).
+pub fn for_rule(problems: &[Finding], rule: usize) -> Vec<&Finding> {
+    problems.iter().filter(|p| p.rule_index == Some(rule) && p.item.is_none()).collect()
 }
 
 #[cfg(test)]
@@ -40,9 +39,11 @@ mod tests {
         let p = run(&m.mission, &m.map, &m.media);
         let hit = p.iter().find(|p| p.field == "Volume Name").unwrap_or_else(|| panic!("no problem: {p:?}"));
         assert_eq!(hit.level, Level::Error);
-        assert!(hit.message.contains("Gate Area"), "suggests the near miss: {}", hit.message);
-        assert_eq!(for_item(&p, "Arrive at the gate", true, 0).len(), 1);
-        assert!(for_item(&p, "Arrive at the gate", true, 1).is_empty());
-        assert!(for_item(&p, "Start", true, 0).is_empty());
+        assert_eq!(hit.suggestion.as_deref(), Some("Gate Area"), "the near miss as data");
+        assert_eq!((hit.rule_index, hit.list.as_deref(), hit.item), (Some(1), Some("conditions"), Some(0)));
+        assert_eq!(for_item(&p, 1, "conditions", 0).len(), 1);
+        assert!(for_item(&p, 1, "conditions", 1).is_empty());
+        assert!(for_item(&p, 0, "conditions", 0).is_empty());
+        assert!(for_rule(&p, 1).is_empty());
     }
 }
