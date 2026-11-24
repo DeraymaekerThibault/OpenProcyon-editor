@@ -24,15 +24,34 @@ compare against a web stack before Phase 3. Record what was found under each ite
     `campaign::user_dir()/assets`, status from `setup::imported`). Phase 1's `authoring` API should expose the lookup without
     side effects, plus the engine version (the editor repeats `0.2.0` by hand).
 
-- [ ] **2. Load one imported map through the engine's loaders.**
+- [x] **2. Load one imported map through the engine's loaders.**
 
   Findings:
-  - Not attempted in this session: must be run on a machine with an import (needs the player's imported assets).
+  - Works, on a machine with a full import (engine `main`, 2026-11-24): `map_view::load` reads `maps/red_rover/map.json` of the
+    import with `openprocyon::data::try_json` (public at `v0.2.0`, the reader behind `data::map_json`); the plan shows its 20
+    `objects` (islands and the two bases) at `pos` x, y in game axes. No dependency change was needed: `v0.2.0` suffices.
+  - Gap: the engine has no public, side-effect-free map loader. `data::map_json(id)` goes through `assets_dir()`, which rebuilds the
+    shared overlay (#136), and there is no typed map document (`scenario` reads `serde_json::Value` field by field). The `authoring`
+    API on branch `claude/exciting-lamport-zxdqra` adds `base_assets()` and `overlay_into()` but no `map(root, id)`; the editor
+    composes the path itself (PROVISIONAL). Requirement: `authoring::map_json(root, id)` (and later a typed map).
+  - Gap: the import here is reported "Imported by engine version unknown, this editor links 0.2.0. Import again": the import
+    carries no version stamp that `setup::imported` accepts, so the status line is wrong for a working import.
+  - Only a 2D top-down plan was built (egui painter); the 3D scene (scenery GLBs through the engine's spawners) was not attempted.
 
-- [ ] **3. Move one island with the mouse and save `map.json`.**
+- [x] **3. Move one island with the mouse and save `map.json`.**
 
   Findings:
-  - Not attempted in this session: must be run on a machine with an import (needs the player's imported assets).
+  - Works. Dragging Island02 #3 in the plan (mouse down within 12 px, drag, release) moved it from [-350.8, -617.8] to
+    [-369.2, -332.3]; "Save map.json" wrote `<scratch>/maps/red_rover/map.json` (whole file: a mod `map.json` without `extends`
+    replaces the base one) and a `mod.json`, with `jsonfmt::dump`. Compared by meaning with the import, only that `pos` differs.
+    Driven with xdotool on Xvfb (software Vulkan) and seen on the real display under X11; screenshots in `local/` (not committed).
+  - egui needs no Bevy picking for this: the plan is an egui widget with its own drag sense, so the `bevy_egui/picking` warning of
+    item 1 can be settled by turning that default feature off.
+  - Writer differences found on real engine data: (a) the exponent form: the import writes `2e-06` (Python), the Rust writer `2e-6`,
+    so red_rover's `players[].forward` and `teams` lines change text (not value) on save; item 5's "no engine file has such numbers"
+    was wrong. (b) A dragged position is f32 pointer maths widened to f64: `-369.23077392578125`. Round edited coordinates
+    (PROVISIONAL: to 1e-3) and have the engine own the writer.
+  - Gap: no undo, no snapping, no height (z) or rotation editing; the scratch folder is a text field, not a project concept.
 
 - [x] **4. Edit one rule through a form generated from `openprocyon --dump-rule-schema`.**
 
@@ -60,7 +79,7 @@ compare against a web stack before Phase 3. Record what was found under each ite
     `edge/` once; the unit tests check the Rust writer is byte-identical on the gate-ambush files and a synthetic edge file, and
     that read-then-write is stable.
   - Known difference (PROVISIONAL): number text is serde_json's; exponent forms differ from Python (`1e-5` vs `1e-05`). No
-    engine file has such numbers. Requirement: the `authoring` API should own the one writer so tools cannot drift.
+    engine file has such numbers (wrong: imported maps do, see item 3). Requirement: the `authoring` API should own the one writer so tools cannot drift.
 
 - [x] **6. Show `--check-mission` findings inline.**
 
@@ -73,12 +92,15 @@ compare against a web stack before Phase 3. Record what was found under each ite
     list (conditions/actions), item index and field, plus the suggested replacement as data (it is only inside `message`).
     Also `Level`/`Problem` have no serde, so a JSON export for other tools needs the same gap closed.
 
-- [ ] **7. Launch the game with `--mod <folder> --map <id>` on the result.**
+- [x] **7. Launch the game with `--mod <folder> --map <id>` on the result.**
 
   Findings:
-  - Module written and unit-tested for argument building (`--mod <folder> --map <id>`), the binary lookup
-    (`PROCYON_GAME_BIN`, else `openprocyon` on PATH) and that a missing binary is an `Err`, not a panic. The UI spawns it with
-    `Command::spawn` and polls `try_wait`, so it never blocks. NOT verified: no game binary or assets exist in this container, so
-    nothing was launched and the item stays unticked; the window was not opened either (no display, and no GPU for a headless run).
-  - Gap: the game offers no way to ask which engine version it is, nor `--check-mod`; Phase 1 should add both. `rfd` folder
-    dialogs block the UI thread while open (acceptable in the spike).
+  - Works. The map section's "Play-test map" button spawned `openprocyon --mod <abs>/local/spike-mod --map red_rover`
+    (`PROCYON_GAME_BIN` = the engine checkout's `fast` build); the battle loaded with the mod report `Editor scratch 0.0 ...
+    overrides 1: maps/red_rover/map.json`. A fixed-step screenshot with and without the mod (frame 300) shows Island02 beside the
+    player's start instead of behind it. The editor stays responsive while the game runs (`try_wait`).
+  - The relative scratch path must be made absolute before spawning (done): the game resolves `--mod` against its own working folder.
+  - Gap: the game accepts a `--mod` folder that does not exist without an error (it lists the folder with no files and carries on);
+    a typo in a path from a tool silently tests the unmodded game. Requirement: `--mod <missing>` is an error, plus `--check-mod`.
+  - Unchanged from before: no way to ask the game binary its engine version; `rfd` folder dialogs block the UI thread while open
+    (acceptable in the spike).

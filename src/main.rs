@@ -4,6 +4,7 @@
 mod checks;
 mod jsonfmt;
 mod launch;
+mod map_view;
 mod mission;
 mod mission_panel;
 mod schema_form;
@@ -38,6 +39,7 @@ fn main() {
     App::new()
         .insert_resource(find_assets())
         .init_resource::<mission_panel::State>()
+        .init_resource::<map_view::State>()
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
         .add_systems(Startup, |mut commands: Commands| {
@@ -47,7 +49,7 @@ fn main() {
         .run();
 }
 
-fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mission_panel::State>) -> Result {
+fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mission_panel::State>, mut map: ResMut<map_view::State>) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(ctx.viewport_rect()));
     egui::Panel::left("side").resizable(true).show(&mut root, |ui| {
@@ -69,7 +71,12 @@ fn panel(mut contexts: EguiContexts, assets: Res<Assets>, mut mission: ResMut<mi
     });
     egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| mission_panel::problems(ui, &mission));
     egui::CentralPanel::default().show(&mut root, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| mission_panel::show(ui, &mut mission));
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::CollapsingHeader::new("Map (spike items 2, 3, 7)").default_open(true).show(ui, |ui| {
+                map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir()));
+            });
+            mission_panel::show(ui, &mut mission);
+        });
     });
     Ok(())
 }
