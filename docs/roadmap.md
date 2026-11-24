@@ -137,6 +137,7 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 
 - Waits on `mission.json` and `media.json` format 1 (v0.3).
 - Ships and groups, paths, volumes, points, tasks, rules, speech and messages, campaign order; detailed in the next section.
+- Open a retail mission from the import and save the changes as a diff, as for ships and maps (backlog B5).
 - **Gate:** the worked example `gate-ambush` is rebuilt in the editor from an empty folder and its file matches the hand-written one in meaning.
 
 ### Phase 6. Live tools (about 4 to 6 weeks, engine)
@@ -252,9 +253,9 @@ it, and save only the difference. Nothing retail is written into the mod (princi
   and cannot add an entry. PROVISIONAL: whether `set` can append.
 - Engine ask: merge arrays of entries that have a stable key (map `objects` by `id`, mission `rules` by `name`, `ships` by `id`) so
   a diff can change, add or remove one entry.
-- Retail missions: the engine docs say "do not copy or edit a retail mission, which is game content". A diff over a retail mission
-  is still a derivative of it. This needs the maintainer's decision (open decisions below); until then the editor opens retail
-  missions read-only, as examples to learn from.
+- Retail missions and skirmish maps are edited like retail ships (maintainer's decision, 24 November 2026): a mod ships only the
+  diff, never a copy. The engine's `docs/missions.md` still says "do not copy or edit a retail mission"; reword it there to "do not
+  copy" so the two repositories agree.
 
 ## Risks and mitigations
 
@@ -280,7 +281,6 @@ These need an answer in Phase 0; the first two are dependency approvals that AGE
 - [ ] Name and owner of the editor repository; GPL-3.0 licence confirmed.
 - [ ] Which formats v0.3 freezes: `map.json`, `mission.json`, `media.json`, `script.json`.
 - [ ] Whether the editor ships inside the game download or as its own download.
-- [ ] Whether a mod may ship a diff over a retail mission (`extends` + changes), or retail missions stay read-only examples in the
-  editor (backlog B5).
+- [x] A mod may ship a diff over a retail mission or skirmish map, exactly as over a retail ship (backlog B5).
 - [ ] The engine asks from the backlog: origin and default annotations in the schemas (B1, B2), the HUD-art preview in
   `authoring` (B1), `map.json` and `script.json` schemas in the v0.3 freeze (B4), keyed array merge for maps and missions (B5).
