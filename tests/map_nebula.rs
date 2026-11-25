@@ -226,7 +226,8 @@ fn a_retail_nebula_edits_as_a_diff_and_a_new_one_is_refused_where_the_missions_l
     let (map_file, mission_file) = (read(&m, "maps/red/map.json"), read(&m, "maps/red/mission.json"));
     let text = map_file.to_string();
     assert!(!text.contains("Isle_A") && !text.contains("StarMine"), "nothing of the retail map is restated: {text}");
-    assert!(text.contains("/nebulae/0/sound_distance") && text.contains("/nebulae/0/polygon/2/0"), "{text}");
+    assert!(!text.contains("/nebulae/0"), "a keyed list is written as entries, never as index pointers: {text}");
+    assert_eq!(map_file["nebulae"], json!([{"name": "Clarke", "polygon": [[0.0, 0.0], [50.0, 0.0], [60.0, 70.0]], "sound_distance": 500.0}]), "{text}");
     assert!(!mission_file.to_string().contains("Gate"), "the retail volumes are not restated: {mission_file}");
     assert!(mission_file["volumes"]["Clarke"].is_array() && !mission_file.to_string().contains("New Nebula Name"), "only the volume is written: {mission_file}");
     // a fresh project reads both files back as the same documents

@@ -985,6 +985,38 @@ mod tests {
     }
 
     #[test]
+    fn a_height_drag_on_a_retail_object_saves_a_keyed_entry_and_leaves_x_alone() {
+        use crate::map::project as maps;
+        use crate::project::Project;
+        let root = std::env::temp_dir().join(format!("ope-view3d-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (assets, modr) = (root.join("assets"), root.join("mod"));
+        std::fs::create_dir_all(assets.join("maps/red")).unwrap();
+        std::fs::create_dir_all(&modr).unwrap();
+        let base = json!({"name": "Red", "objects": [{"type": "Isle", "id": 7, "pos": [1.0, 2.0, 3.0], "scene": "Isle"}, {"type": "Isle", "id": 8, "pos": [1077.426548, 12.5, 0.0], "scene": "Isle"}]});
+        std::fs::write(assets.join("maps/red/map.json"), base.to_string()).unwrap();
+        let mut project = Project::open(&modr, Some(assets)).unwrap();
+        maps::open_map(&mut project, "red").unwrap();
+        let (map, scene) = {
+            let m = maps::merged_view(&project, "red").unwrap().clone();
+            let s = view2d::build_scene(&m);
+            (m, s)
+        };
+        let mut sel = Selection::new();
+        sel.add(1);
+        // The drag hands over x and y as f64 of the f32 the plan holds: not the digits the file has.
+        let mut changes = height_changes(&map, &scene, &sel, 110.0);
+        changes[0].pos = Some([f64::from(1077.4265f32), 12.5, 110.0]);
+        maps::change_entries(&mut project, "red", "Set height of Isle", &changes).unwrap();
+        let report = project.save();
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        let file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(modr.join("maps/red/map.json")).unwrap()).unwrap();
+        assert!(file.get("set").is_none(), "no index pointer into the keyed list: {file}");
+        assert_eq!(file["objects"], json!([{"id": 8, "pos": [1077.426548, 12.5, 110.0]}]), "{file}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_height_edit_is_one_undo_step_through_the_project() {
         use crate::map::project as maps;
         use crate::project::Project;

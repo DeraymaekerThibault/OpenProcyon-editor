@@ -101,7 +101,7 @@ fn a_retail_map_opens_as_the_import_has_it_and_a_mod_file_opens_merged() {
 }
 
 #[test]
-fn moves_are_set_pointers_in_an_extends_diff_undone_and_saved_through_the_overlay() {
+fn moves_are_keyed_entries_in_an_extends_diff_undone_and_saved_through_the_overlay() {
     let (_root, assets, m) = setup("move");
     let before_import = files_under(&assets);
     let mut p = Project::open(&m, Some(assets.clone())).unwrap();
@@ -127,11 +127,11 @@ fn moves_are_set_pointers_in_an_extends_diff_undone_and_saved_through_the_overla
     let file = read(&m, "maps/red/map.json");
     assert_eq!(
         file,
-        json!({"extends": "red", "set": {
-            "/objects/1/pos/0": 11.5, "/objects/1/pos/1": 22.5,
-            "/objects/2/pos/0": 31.0, "/objects/2/pos/1": 41.0, "/objects/2/pos/2": 6.0,
-            "/players/0/start/0": 101.0, "/players/0/start/1": 1.0
-        }})
+        json!({"extends": "red",
+            "objects": [{"id": 2, "pos": [11.5, 22.5]}, {"id": 3, "pos": [31.0, 41.0, 6.0]}],
+            "players": [{"name": "P1", "start": [101.0, 1.0, 0.0]}]
+        }),
+        "keyed lists are written as entries, never as index pointers"
     );
     // the engine's overlay agrees with the document
     let merged = read_merged(&p.root, "maps/red/map.json").unwrap();
@@ -292,6 +292,7 @@ fn add_and_delete_are_refused_where_a_keyed_merge_cannot_say_it_and_nothing_chan
     move_entry(&mut p, "blue", Array::Objects, 0, [0.0; 3]).unwrap_err();
     move_entry(&mut p, "red", Array::Objects, 0, [1.0, 1.0, 1.0]).unwrap();
     assert_eq!(p.save().written, ["maps/red/map.json"]);
+    // this map's objects have no ids, so the list cannot be keyed: the move is a set pointer as before
     assert_eq!(read(&m, "maps/red/map.json"), json!({"extends": "red", "set": {"/objects/0/pos/0": 1.0, "/objects/0/pos/1": 1.0, "/objects/0/pos/2": 1.0}}));
 }
 
@@ -318,7 +319,7 @@ fn a_mod_inside_the_import_is_refused_by_the_guard() {
 }
 
 #[test]
-fn a_group_move_and_turn_is_one_undo_step_and_saves_as_set_pointers() {
+fn a_group_move_and_turn_is_one_undo_step_and_saves_as_keyed_entries() {
     let (_root, assets, m) = setup("group");
     let mut p = Project::open(&m, Some(assets)).unwrap();
     let turned = [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -339,9 +340,11 @@ fn a_group_move_and_turn_is_one_undo_step_and_saves_as_set_pointers() {
     assert!(p.save().errors.is_empty());
     let file = read(&m, "maps/red/map.json");
     assert_eq!(file["extends"], "red");
-    // an entry that gains a key (a rock that had no `rot`) is set whole; one that only moves is set per number
-    assert_eq!(file["set"]["/objects/2"]["rot"], json!(turned));
-    assert_eq!(file["set"]["/objects/0/pos/0"], 5.0, "{file}");
+    // keyed entries (by id): an entry that gains a key (a rock that had no `rot`) carries it, one that only moves carries its `pos`
+    assert!(file.get("set").is_none(), "{file}");
+    let by_id = |id: i64| file["objects"].as_array().unwrap().iter().find(|e| e["id"] == id).cloned().unwrap_or_default();
+    assert_eq!(by_id(3)["rot"], json!(turned), "{file}");
+    assert_eq!(by_id(1)["pos"][0], 5.0, "{file}");
     p.undo();
     assert!(p.undo_label().is_none(), "one step took all of it back");
     assert_eq!(doc::pos(&doc::objects(merged_view(&p, "red").unwrap())[0]), Some([0.0, 0.0, 0.0]));

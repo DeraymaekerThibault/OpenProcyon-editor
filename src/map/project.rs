@@ -168,9 +168,14 @@ impl Change {
 
 /// `to` as the number list an entry already has under `key`: two numbers stay two while z is 0 (a height, T9, makes it three), anything else is three.
 fn like(entry: &Value, key: &str, to: [f64; 3]) -> Value {
-    let two = entry.get(key).and_then(Value::as_array).is_some_and(|a| a.len() == 2) && to[2] == 0.0;
-    let num = |x: f64| crate::map_view::short(x as f32);
-    if two { Value::Array(vec![num(to[0]), num(to[1])]) } else { Value::Array(to.iter().map(|&x| num(x)).collect()) }
+    let old = entry.get(key).and_then(Value::as_array);
+    let two = old.is_some_and(|a| a.len() == 2) && to[2] == 0.0;
+    // A component the entry has already, to f32 precision, keeps its own digits: moving z must not rewrite x and y.
+    let num = |i: usize| match old.and_then(|a| a.get(i)) {
+        Some(o) if o.as_f64().is_some_and(|o| o as f32 == to[i] as f32) => o.clone(),
+        _ => crate::map_view::short(to[i] as f32),
+    };
+    if two { Value::Array(vec![num(0), num(1)]) } else { Value::Array((0..3).map(num).collect()) }
 }
 
 /// Places any number of entries (several arrays) in ONE undo step labelled `label`: a group move or turn from the plan view. The

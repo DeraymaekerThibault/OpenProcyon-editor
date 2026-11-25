@@ -231,8 +231,8 @@ fn changed(base: Option<&Value>, edited: &Value, path: &mut Vec<String>, cx: &mu
     }
 }
 
-/// A list that merges by key, changed: what to write for it (`None`: nothing, or `set` pointers). The same entries in the same order
-/// (a move) become `set` pointers; added or deleted entries become diff entries ([`keyed::diff_list`]); a
+/// A list that merges by key, changed: what to write for it (`None`: nothing, or `set` pointers). Changed, added or deleted entries
+/// become diff entries ([`keyed::diff_list`]); a
 /// list that cannot be said that way is written whole, with `merge: false` and a warning (unless it has the same length, where
 /// `set` pointers say what changed).
 fn keyed_array(field: &str, base: Option<&Value>, edited: &[Value], path: &mut Vec<String>, cx: &mut Cx) -> Option<Value> {
@@ -240,17 +240,9 @@ fn keyed_array(field: &str, base: Option<&Value>, edited: &[Value], path: &mut V
     let b: &[Value] = base.and_then(Value::as_array).map_or(&[], Vec::as_slice);
     match keyed::diff_list(field, b, edited, &ptr) {
         ListDiff::Equal => None,
-        ListDiff::SameKeys { entries, warnings } => {
-            cx.warnings.extend(warnings);
-            // The same entries in the same order, some changed (a move): `set` pointers, as for any list of the same length.
-            if !entries.is_empty() {
-                let mut found = vec![];
-                collect_sets(b, edited, path, &mut found);
-                cx.sets.extend(found);
-            }
-            None
-        }
-        ListDiff::Entries { entries, warnings } => {
+        // The same entries in the same order, some changed: still keyed entries (a list the file already writes by key must not turn
+        // into index pointers, whose index may name another entry after the parent changes).
+        ListDiff::SameKeys { entries, warnings } | ListDiff::Entries { entries, warnings } => {
             cx.warnings.extend(warnings);
             (!entries.is_empty()).then_some(Value::Array(entries))
         }
@@ -560,24 +552,52 @@ mod tests {
             json!({
                 "extends": "red",
                 "objects": [{"id": 2, "$remove": true}, {"id": 3, "pos": [10, 10, 0]}, {"id": 4, "type": "D", "pos": [1, 2, 3]}],
-                "set": {"/players/0/start/0": 7}
+                "players": [{"name": "P1", "start": [7, 1, 0]}]
             }),
-            "a move with the same entries stays a set pointer"
+            "a change in place is a keyed entry too"
         );
     }
 
     #[test]
-    fn keyed_lists_same_keys_use_set_pointers() {
+    fn keyed_lists_same_keys_stay_keyed_entries() {
         let base = red();
         let mut edited = base.clone();
         edited["objects"][2]["pos"][1] = json!(8);
         let d = keyed_file(&base, &edited, &Value::Null);
-        assert_eq!(d.file.unwrap(), json!({"extends": "red", "set": {"/objects/2/pos/1": 8}}));
-        // an entry that gains a field: the pointer to the entry replaces it whole
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "objects": [{"id": 3, "pos": [9, 8, 0]}]}));
+        // an entry that gains a field: only the field is written
         let mut edited = base.clone();
         edited["objects"][0] = json!({"id": 1, "type": "Z", "pos": [4, 4, 4], "scene": "S"});
         let d = keyed_file(&base, &edited, &Value::Null);
-        assert_eq!(d.file.unwrap(), json!({"extends": "red", "set": {"/objects/0": {"id": 1, "type": "Z", "pos": [4, 4, 4], "scene": "S"}}}));
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "objects": [{"id": 1, "type": "Z", "pos": [4, 4, 4], "scene": "S"}]}));
+    }
+
+    #[test]
+    fn keyed_lists_a_height_change_writes_a_keyed_entry_with_the_other_values_untouched() {
+        let mut base = red();
+        base["objects"][1]["pos"] = json!([1077.426548, 12.5, 0.0]);
+        let mut edited = base.clone();
+        edited["objects"][1]["pos"][2] = json!(110.0);
+        let d = keyed_file(&base, &edited, &Value::Null);
+        let file = d.file.unwrap();
+        assert!(file.get("set").is_none(), "{file}");
+        assert_eq!(file["objects"], json!([{"id": 2, "pos": [1077.426548, 12.5, 110.0]}]));
+    }
+
+    #[test]
+    fn keyed_lists_an_existing_keyed_rule_edit_stays_keyed_after_an_unrelated_change() {
+        const SCRIPT: &str = "maps/mission10/script.json";
+        let base = json!({"name": "m10", "rules": [{"name": "start", "Run Once": true}, {"name": "setup rules", "Run Once": true}], "players": [{"name": "A"}]});
+        let own = json!({"extends": "mission10", "rules": [{"name": "setup rules", "Run Once": false}]});
+        let (mut edited, _) = keyed::engine_extend(SCRIPT, &base, &own).unwrap();
+        assert_eq!(edited["rules"][1]["Run Once"], json!(false));
+        edited["name"] = json!("m10b");
+        let d = compute_with(&keyed::EngineRule, SCRIPT, DocKind::Extends, &base, &edited, &own, Some("mission10"));
+        let file = d.file.unwrap();
+        assert!(file.get("set").is_none(), "{file}");
+        assert_eq!(file["rules"], json!([{"name": "setup rules", "Run Once": false}]));
+        let (merged, _) = keyed::engine_extend(SCRIPT, &base, &file).unwrap();
+        assert_eq!(merged, edited);
     }
 
     #[test]
@@ -661,7 +681,7 @@ mod tests {
         saved["objects"][2]["pos"] = json!([1, 1, 1]);
         saved["objects"][1]["pos"] = json!([2, 2, 2]);
         let first = keyed_file(&base, &saved, &Value::Null).file.unwrap();
-        assert!(first["set"].as_object().unwrap().keys().all(|k| k.starts_with("/objects/")), "{first}");
+        assert!(first.get("set").is_none() && first["objects"].as_array().unwrap().len() == 2, "{first}");
         let mut edited = saved.clone();
         edited["objects"].as_array_mut().unwrap().remove(0);
         edited["objects"].as_array_mut().unwrap().push(json!({"id": 4, "type": "D", "pos": [1, 2, 3]}));
@@ -684,7 +704,7 @@ mod tests {
         saved["rules"][2]["do"] = json!(30);
         let d = compute_with(&keyed::EngineRule, SCRIPT, DocKind::Extends, &base, &saved, &Value::Null, Some("red"));
         let first = d.file.unwrap();
-        assert!(first["set"].get("/rules/2/do").is_some(), "{first}");
+        assert_eq!(first["rules"], json!([{"name": "C", "do": 30}]), "{first}");
         let mut edited = saved.clone();
         edited["rules"].as_array_mut().unwrap().remove(0);
         edited["rules"].as_array_mut().unwrap().push(json!({"name": "D", "do": 4}));

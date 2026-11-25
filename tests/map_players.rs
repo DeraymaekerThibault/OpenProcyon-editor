@@ -49,7 +49,7 @@ fn save(p: &mut Project) {
 }
 
 #[test]
-fn a_start_move_and_a_field_edit_are_set_pointers_and_a_fresh_open_reads_them() {
+fn a_start_move_and_a_field_edit_are_keyed_entries_and_a_fresh_open_reads_them() {
     let (root, m, mut p) = setup("set");
     set_start(&mut p, "red", 1, [250.0, 40.0]).unwrap();
     set_field(&mut p, "red", 0, PlayerField::Playable, json!(false)).unwrap();
@@ -57,11 +57,12 @@ fn a_start_move_and_a_field_edit_are_set_pointers_and_a_fresh_open_reads_them() 
     save(&mut p);
     let file = read(&m, "maps/red/map.json");
     assert_eq!(file["extends"], "red");
-    let set = file["set"].as_object().unwrap();
-    assert_eq!(set.get("/players/0/playable"), Some(&json!(false)), "{file}");
-    assert_eq!(set.get("/players/1/formation"), Some(&json!(6)));
-    assert!(set.keys().any(|k| k.starts_with("/players/1/start")), "{file}");
-    assert!(file.get("players").is_none(), "the parent's list is not restated: {file}");
+    assert!(file.get("set").is_none(), "no index pointers into the keyed players list: {file}");
+    let players = file["players"].as_array().unwrap();
+    assert_eq!(players.len(), 2, "only the two changed players, by name: {file}");
+    assert_eq!(players[0]["playable"], json!(false), "{file}");
+    assert_eq!(players[1]["formation"], json!(6), "{file}");
+    assert!(players[1].get("start").is_some(), "{file}");
     let merged = reopened(&m);
     let b = &doc::players(&merged)[1];
     assert_eq!((doc::player_start(b), doc::player_formation(b)), (Some([250.0, 40.0, 0.0]), Some(6)));

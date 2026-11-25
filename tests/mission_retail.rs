@@ -76,7 +76,7 @@ impl Rig {
 }
 
 #[test]
-fn changing_one_action_alone_is_one_set_pointer() {
+fn changing_one_action_alone_is_one_keyed_rule_entry() {
     let mut r = rig("action", retail());
     r.p.do_step(&r.rel, "Change action", vec![Edit::set(format!("{}/1/text", mdoc::rule_list_pointer(0, false)), json!("B!"))]).unwrap();
     let want = r.shown();
@@ -84,8 +84,8 @@ fn changing_one_action_alone_is_one_set_pointer() {
     let file = read(&r.m, &r.rel);
     assert_eq!(
         file,
-        json!({"extends": ID, "set": {"/rules/0/actions/1/text": "B!"}}),
-        "with the rule list otherwise unchanged the edit is one set pointer, not the restated actions list"
+        json!({"extends": ID, "rules": [{"name": "Start", "actions": [{"Type": "Say", "text": "a"}, {"Type": "Say", "text": "B!"}]}]}),
+        "the rule is a keyed entry (by name) carrying its changed actions list, never an index pointer"
     );
     let (got, skipped) = r.engine("action");
     assert!(skipped.is_empty(), "{skipped:?}");
@@ -124,13 +124,13 @@ fn a_deleted_rule_is_a_remove_entry_and_a_renamed_one_is_remove_plus_append() {
 }
 
 #[test]
-fn moving_a_ship_saves_one_set_pointer_and_the_engine_agrees() {
+fn moving_a_ship_saves_one_keyed_entry_and_the_engine_agrees() {
     let mut r = rig("ship", retail());
     r.p.do_step(&r.rel, "Move ship", vec![Edit::set(mdoc::ship_pointer(1, Some("pos")), json!([9.0, 5.0, 0.0]))]).unwrap();
     let want = r.shown();
     assert!(r.p.save().errors.is_empty());
     let file = read(&r.m, &r.rel);
-    assert_eq!(file, json!({"extends": ID, "set": {"/ships/1/pos/0": 9.0}}));
+    assert_eq!(file, json!({"extends": ID, "ships": [{"id": 2, "pos": [9.0, 5.0, 0.0]}]}));
     let (got, skipped) = r.engine("ship");
     assert!(skipped.is_empty());
     assert_eq!(got, want);
