@@ -1,5 +1,5 @@
 //! Phase 4 (map editor), the pieces that do not depend on `map.json` format 1: a top-down plan view and the maths and widgets
-//! behind it. Nothing here is wired into a tab, panel or the startup yet.
+//! behind it. The Maps tab ([`crate::maps_panel`], logic in [`crate::map::view2d`]) is what uses it.
 //!
 //! Format-independent, and tested headless:
 //!

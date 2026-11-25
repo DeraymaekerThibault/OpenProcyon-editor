@@ -5,7 +5,9 @@
 //! - [`doc`]: accessors over a `map.json` held as a `serde_json::Value`.
 //! - [`catalogue`]: scenery types, scenes and skies found by scanning an overlay folder.
 //! - [`project`]: maps as project documents: list, open (merged over the import), new, move, add, delete.
+//! - [`view2d`]: what the Maps tab's plan view shows and what its drags, turns, placements and deletes write (no drawing).
 
 pub mod catalogue;
 pub mod doc;
 pub mod project;
+pub mod view2d;

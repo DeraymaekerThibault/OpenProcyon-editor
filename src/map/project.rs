@@ -46,7 +46,8 @@ fn scan(root: &Path) -> Vec<String> {
     rd.flatten().filter(|e| e.path().join(doc::MAP_FILE).is_file()).filter_map(|e| e.file_name().into_string().ok()).collect()
 }
 
-/// The maps of the mod and of the import, by id. A mod file is listed as the mod's even when it only changes a retail map.
+/// The maps of the mod and of the import, by id, and a new map not saved yet. A mod file is listed as the mod's even when it only
+/// changes a retail map.
 pub fn list_maps(project: &Project) -> Vec<MapEntry> {
     let mut by_id: BTreeMap<String, MapEntry> = BTreeMap::new();
     let mut note = |root: &Path, in_mod: bool| {
@@ -65,6 +66,13 @@ pub fn list_maps(project: &Project) -> Vec<MapEntry> {
     note(&project.dir, true);
     if let Some(import) = &project.import {
         note(import, false);
+    }
+    // A new map is only in the project until the next save: it is listed too, so it can be switched back to.
+    for d in &project.docs {
+        let id = d.rel.strip_prefix("maps/").and_then(|r| r.strip_suffix(&format!("/{}", doc::MAP_FILE)));
+        if let Some(id) = id.filter(|id| !id.contains('/') && !by_id.contains_key(*id)) {
+            by_id.insert(id.to_string(), MapEntry { id: id.to_string(), in_mod: true, in_import: false, name: doc::name(&d.edited).map(str::to_string) });
+        }
     }
     by_id.into_values().collect()
 }
@@ -141,6 +149,55 @@ pub fn move_entry(project: &mut Project, id: &str, which: Array, index: usize, t
     let label = format!("Move {}", entry_label(map, which, index));
     let ptr = pointer(&[which.key(), &index.to_string(), doc::pos_key(which)]);
     project.do_step(&rel, &label, vec![Edit::set(ptr, value)])
+}
+
+/// A new placement for one entry: any of its position (`pos`, a player's `start`), its `rot` and, for a player, its `forward`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change {
+    pub which: Array,
+    pub index: usize,
+    pub pos: Option<[f64; 3]>,
+    pub rot: Option<[f64; 9]>,
+    pub forward: Option<[f64; 3]>,
+}
+
+impl Change {
+    pub fn new(which: Array, index: usize) -> Change {
+        Change { which, index, pos: None, rot: None, forward: None }
+    }
+}
+
+/// `to` as the number list an entry already has under `key`: two numbers stay two, anything else is three.
+fn like(entry: &Value, key: &str, to: [f64; 3]) -> Value {
+    let two = entry.get(key).and_then(Value::as_array).is_some_and(|a| a.len() == 2);
+    let num = |x: f64| crate::map_view::short(x as f32);
+    if two { Value::Array(vec![num(to[0]), num(to[1])]) } else { Value::Array(to.iter().map(|&x| num(x)).collect()) }
+}
+
+/// Places any number of entries (several arrays) in ONE undo step labelled `label`: a group move or turn from the plan view. The
+/// numbers are written as the f32's shortest decimals (the engine reads f32). No change at all pushes no step.
+pub fn change_entries(project: &mut Project, id: &str, label: &str, changes: &[Change]) -> Result<(), String> {
+    let rel = map_rel(id)?;
+    let i = open_map(project, id)?;
+    let map = &project.docs[i].edited;
+    let mut edits = Vec::new();
+    for c in changes {
+        let entry = doc::array_entries(map, c.which).get(c.index).ok_or_else(|| format!("{rel}: no entry {} in {}", c.index, c.which.key()))?;
+        let at = |key: &str| pointer(&[c.which.key(), &c.index.to_string(), key]);
+        if let Some(p) = c.pos {
+            edits.push(Edit::set(at(doc::pos_key(c.which)), like(entry, doc::pos_key(c.which), p)));
+        }
+        if let Some(r) = c.rot {
+            edits.push(Edit::set(at("rot"), Value::Array(r.iter().map(|&x| crate::map_view::short(x as f32)).collect())));
+        }
+        if let Some(f) = c.forward {
+            edits.push(Edit::set(at("forward"), like(entry, "forward", f)));
+        }
+    }
+    if edits.is_empty() {
+        return Ok(());
+    }
+    project.do_step(&rel, label, edits)
 }
 
 /// Adds `entry` to the end of `which` as one undo step and returns its index. An entry of an id-bearing array with no `id` gets

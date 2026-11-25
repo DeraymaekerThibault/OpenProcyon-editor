@@ -4,7 +4,7 @@
 
 use openprocyon::authoring::read_merged;
 use openprocyon_editor::map::doc::{self, Array};
-use openprocyon_editor::map::project::{add_entry, delete_entry, list_maps, map_rel, merged_view, move_entry, new_map, open_map};
+use openprocyon_editor::map::project::{Change, add_entry, change_entries, delete_entry, list_maps, map_rel, merged_view, move_entry, new_map, open_map};
 use openprocyon_editor::project::{Project, keyed};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -315,4 +315,34 @@ fn a_mod_inside_the_import_is_refused_by_the_guard() {
     assert!(Project::open(&assets.join("maps"), Some(assets.clone())).is_err());
     assert!(Project::create(&assets.join("mymod"), Some(assets.clone())).is_err());
     assert!(!assets.join("mymod").exists());
+}
+
+#[test]
+fn a_group_move_and_turn_is_one_undo_step_and_saves_as_set_pointers() {
+    let (_root, assets, m) = setup("group");
+    let mut p = Project::open(&m, Some(assets)).unwrap();
+    let turned = [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    let changes = [
+        Change { pos: Some([5.0, 6.0, 0.0]), ..Change::new(Array::Objects, 0) },
+        Change { pos: Some([7.0, 8.0, 9.0]), rot: Some(turned), ..Change::new(Array::Objects, 2) },
+        Change { pos: Some([1.0, 2.0, 3.0]), forward: Some([1.0, 0.0, 0.0]), ..Change::new(Array::Players, 0) },
+    ];
+    change_entries(&mut p, "red", "Turn 3 entries", &changes).unwrap();
+    assert_eq!(p.undo_label(), Some("Turn 3 entries"));
+    change_entries(&mut p, "red", "Nothing", &[]).unwrap();
+    assert_eq!(p.undo_label(), Some("Turn 3 entries"), "no change, no step");
+    assert!(change_entries(&mut p, "red", "Bad", &[Change::new(Array::Mines, 4)]).is_err());
+    let v = merged_view(&p, "red").unwrap();
+    assert_eq!(doc::pos(&doc::objects(v)[0]), Some([5.0, 6.0, 0.0]));
+    assert_eq!(doc::rot(&doc::objects(v)[2]), Some(turned));
+    assert_eq!(doc::player_forward(&doc::players(v)[0]), Some([1.0, 0.0, 0.0]));
+    assert!(p.save().errors.is_empty());
+    let file = read(&m, "maps/red/map.json");
+    assert_eq!(file["extends"], "red");
+    // an entry that gains a key (a rock that had no `rot`) is set whole; one that only moves is set per number
+    assert_eq!(file["set"]["/objects/2"]["rot"], json!(turned));
+    assert_eq!(file["set"]["/objects/0/pos/0"], 5.0, "{file}");
+    p.undo();
+    assert!(p.undo_label().is_none(), "one step took all of it back");
+    assert_eq!(doc::pos(&doc::objects(merged_view(&p, "red").unwrap())[0]), Some([0.0, 0.0, 0.0]));
 }

@@ -1,6 +1,6 @@
 //! Command-line flags of the editor, for scripted runs and screenshots (the editor's counterpart of the game's `--shot`):
 //! `--mod <dir>` opens a mod project at start, `--tab <name>` shows a tab, `--ship <id>` selects a ship (and fills the 3D view when the
-//! tab is `3d`), `--screenshot <file.png> [--frame N]` saves the window at frame N (default 120) and exits. Nothing here is needed for
+//! tab is `3d`), `--map <id>` shows a map in the Maps tab, `--screenshot <file.png> [--frame N]` saves the window at frame N (default 120) and exits. Nothing here is needed for
 //! normal use: the editor opens with no flags.
 
 use std::path::PathBuf;
@@ -11,6 +11,7 @@ pub struct Args {
     pub mod_dir: Option<PathBuf>,
     pub tab: Option<String>,
     pub ship: Option<String>,
+    pub map: Option<String>,
     pub screenshot: Option<PathBuf>,
     pub frame: u32,
 }
@@ -35,9 +36,10 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
                 out.tab = Some(t);
             }
             "--ship" => out.ship = Some(value()?),
+            "--map" => out.map = Some(value()?),
             "--screenshot" => out.screenshot = Some(absolute(value()?)),
             "--frame" => out.frame = value()?.parse().map_err(|_| "--frame needs a whole number".to_string())?,
-            other => return Err(format!("unknown flag {other} (flags: --mod <dir>, --tab <{}>, --ship <id>, --screenshot <file.png>, --frame N)", TABS.join("|"))),
+            other => return Err(format!("unknown flag {other} (flags: --mod <dir>, --tab <{}>, --ship <id>, --map <id>, --screenshot <file.png>, --frame N)", TABS.join("|"))),
         }
     }
     Ok(out)
@@ -62,9 +64,9 @@ mod tests {
 
     #[test]
     fn every_flag_and_absolute_paths() {
-        let a = p(&["--mod", "rel/mod", "--tab", "3D", "--ship", "Ship_X", "--screenshot", "out.png", "--frame", "30"]).unwrap();
+        let a = p(&["--mod", "rel/mod", "--tab", "3D", "--ship", "Ship_X", "--map", "red", "--screenshot", "out.png", "--frame", "30"]).unwrap();
         assert!(a.mod_dir.as_ref().unwrap().is_absolute() && a.mod_dir.as_ref().unwrap().ends_with("rel/mod"));
-        assert_eq!((a.tab.as_deref(), a.ship.as_deref(), a.frame), (Some("3d"), Some("Ship_X"), 30));
+        assert_eq!((a.tab.as_deref(), a.ship.as_deref(), a.map.as_deref(), a.frame), (Some("3d"), Some("Ship_X"), Some("red"), 30));
         assert!(a.screenshot.unwrap().is_absolute());
     }
 
