@@ -4,6 +4,8 @@
 //!
 //! - [`doc`]: accessors over a `map.json` held as a `serde_json::Value`.
 //! - [`catalogue`]: scenery types, scenes and skies found by scanning an overlay folder.
+//! - [`project`]: maps as project documents: list, open (merged over the import), new, move, add, delete.
 
 pub mod catalogue;
 pub mod doc;
+pub mod project;
