@@ -843,6 +843,136 @@ pub fn map_text_pointer(index: usize, key: Option<&str>) -> String {
     }
 }
 
+// T6
+// ---- players, ships and groups: raw list entries and the keys of `player_start` the ships section writes through ----
+
+/// The raw `players` entries (not only the strings), for editing by index.
+pub fn player_entries(mission: &Value) -> &[Value] {
+    list(mission, KEY_PLAYERS)
+}
+
+/// The pointer of player `index`.
+pub fn player_pointer(index: usize) -> String {
+    pointer(&[KEY_PLAYERS, &index.to_string()])
+}
+
+/// The raw `alliances` entries.
+pub fn alliance_entries(mission: &Value) -> &[Value] {
+    list(mission, KEY_ALLIANCES)
+}
+
+/// The pointer of alliance `index`, or of one of its two names (`side` 0 or 1).
+pub fn alliance_pointer(index: usize, side: Option<usize>) -> String {
+    let i = index.to_string();
+    match side {
+        Some(s) => pointer(&[KEY_ALLIANCES, &i, &s.to_string()]),
+        None => pointer(&[KEY_ALLIANCES, &i]),
+    }
+}
+
+/// The pointer of `player_start`, or of one of its keys.
+pub fn player_start_pointer(key: Option<&str>) -> String {
+    match key {
+        Some(k) => pointer(&[KEY_PLAYER_START, k]),
+        None => pointer(&[KEY_PLAYER_START]),
+    }
+}
+
+/// The `id` of one entry of `environment.animals` (an animal a group lists), when it has one.
+pub fn animal_id(animal: &Value) -> Option<i64> {
+    animal.get(SHIP_ID)?.as_i64()
+}
+
+/// The raw members of group `name` as written (to put back what is not a number).
+pub fn group_entries<'a>(mission: &'a Value, name: &str) -> &'a [Value] {
+    groups(mission).and_then(|g| g.get(name)).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+// T8
+// ---- tasks and the end (docs/phase5.md T8) ----
+
+/// `required`: a JSON boolean (a missing key reads as `false`).
+pub fn task_required(task: &Value) -> bool {
+    task.get(TASK_REQUIRED).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// A new task: active, not required, no text and no conditions (`Active` and `required` are JSON booleans, docs/missions.md section 6).
+pub fn new_task(name: &str) -> Value {
+    let mut o = Map::new();
+    o.insert(TASK_NAME.into(), name.into());
+    o.insert(TASK_TEXT.into(), "".into());
+    o.insert(TASK_ACTIVE.into(), Value::Bool(true));
+    o.insert(TASK_REQUIRED.into(), Value::Bool(false));
+    Value::Object(o)
+}
+
+/// The pointer of one of the mission's own top-level keys (`victory`, `victory_message`, `defeat_message`).
+pub fn top_pointer(key: &str) -> String {
+    pointer(&[key])
+}
+
+/// The pointer of condition `item` of a task's `complete_when` or `fail_when`.
+pub fn task_condition_pointer(index: usize, key: &str, item: usize) -> String {
+    pointer(&[KEY_TASKS, &index.to_string(), key, &item.to_string()])
+}
+
+// T10
+// ---- speech entries (docs/phase5.md T10) ----
+
+/// The other fields of a speech entry (`text` is [`SPEECH_TEXT`]).
+pub const SPEECH_FILE: &str = "file";
+pub const SPEECH_DURATION: &str = "duration";
+pub const SPEECH_FACE: &str = "face";
+
+/// A speech entry's `text`, `file` and `face` (`None` when missing or not a string).
+pub fn speech_text(entry: &Value) -> Option<&str> {
+    entry.get(SPEECH_TEXT)?.as_str()
+}
+
+pub fn speech_file(entry: &Value) -> Option<&str> {
+    entry.get(SPEECH_FILE)?.as_str()
+}
+
+pub fn speech_face(entry: &Value) -> Option<&str> {
+    entry.get(SPEECH_FACE)?.as_str()
+}
+
+/// A speech entry's `duration` in seconds.
+pub fn speech_duration(entry: &Value) -> Option<f64> {
+    entry.get(SPEECH_DURATION)?.as_f64()
+}
+
+/// The folder of a mission's speech files, inside the mod (`maps/<id>/speech`, docs/missions.md section 5).
+pub fn speech_dir(mission_id: &str) -> String {
+    format!("maps/{mission_id}/speech")
+}
+
+/// The sound file name of an event: its `file`, else the event's own name, with `.ogg`.
+pub fn speech_file_name(event: &str, entry: &Value) -> String {
+    format!("{}.ogg", speech_file(entry).filter(|f| !f.is_empty()).unwrap_or(event))
+}
+
+// T12
+// ---- the campaign order of `mod.json` (docs/phase5.md T12) ----
+
+/// The key of `mod.json` that lists the mod's missions in order.
+pub const MOD_MISSIONS: &str = "missions";
+
+/// The pointer of `mod.json` `missions`.
+pub fn mod_missions_pointer() -> String {
+    pointer(&[MOD_MISSIONS])
+}
+
+/// The ids in `mod.json` `missions` (strings only; empty when missing or not a list).
+pub fn mod_missions(mod_json: &Value) -> Vec<&str> {
+    list(mod_json, MOD_MISSIONS).iter().filter_map(Value::as_str).collect()
+}
+
+/// Whether `mod.json` has a `missions` that is not a list.
+pub fn mod_missions_malformed(mod_json: &Value) -> bool {
+    mod_json.get(MOD_MISSIONS).is_some_and(|v| !v.is_array())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

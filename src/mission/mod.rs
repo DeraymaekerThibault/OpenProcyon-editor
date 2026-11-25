@@ -11,6 +11,7 @@ pub mod campaign;
 pub mod catalogue;
 pub mod doc;
 pub mod geometry;
+pub mod groups;
 pub mod plan;
 pub mod project;
 pub mod report;
@@ -23,5 +24,7 @@ pub mod tasks;
 pub mod media;
 pub mod refs;
 pub mod rules;
+// T10
+pub mod ogg;
 
 pub use spike::{Mission, fixture_dir};

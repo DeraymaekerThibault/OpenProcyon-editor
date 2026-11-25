@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use super::doc::{self as mdoc, GeoTable};
 use super::geometry::{self as geo, Item, Kind};
-use super::project::{list_missions, merged_map, merged_mission, open_mission};
+use super::project::{merged_map, merged_mission, open_mission};
 use crate::map::doc as mapdoc;
 use crate::map::view2d;
 use crate::map_edit::canvas::{MarkerIn, MarkerKind, plan_canvas};
@@ -203,32 +203,17 @@ fn note(st: &mut State, r: Result<(), String>) {
 }
 
 fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) {
-    let ids: Vec<String> = list_missions(project).into_iter().map(|m| m.id).collect();
-    let mut choose = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Mission");
-        egui::ComboBox::from_id_salt("plan-mission").selected_text(st.mission.clone().unwrap_or_else(|| "choose...".into())).show_ui(ui, |ui| {
-            for id in &ids {
-                if ui.selectable_label(st.mission.as_deref() == Some(id), id).clicked() {
-                    choose = Some(id.clone());
-                }
-            }
-        });
-    });
-    if let Some(id) = choose {
-        match open_mission(project, &id) {
-            Ok(_) => {
-                st.mission = Some(id);
-                st.sel.clear();
-                st.active = None;
-                st.fit = true;
-                st.message = None;
-            }
-            Err(e) => st.message = Some(e),
-        }
+    // The Missions tab has one picker (rules_view); a change of mission resets what is selected here.
+    let picked = super::rules_view::selected_mission(ui.ctx());
+    if picked != st.mission {
+        st.mission = picked;
+        st.sel.clear();
+        st.active = None;
+        st.fit = true;
+        st.message = None;
     }
     let Some(id) = st.mission.clone() else {
-        ui.label(if ids.is_empty() { "No missions in the mod or the import." } else { "Choose a mission to see its plan." });
+        ui.label("Choose a mission at the top of the tab to see its plan.");
         return;
     };
     if merged_mission(project, &id).is_none()
