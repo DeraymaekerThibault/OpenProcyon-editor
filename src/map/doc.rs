@@ -309,6 +309,261 @@ pub fn duplicate_ids(map: &Value) -> Vec<i64> {
     dup.into_iter().collect()
 }
 
+// T8: nebulae and mines, and the two other records of a nebula in `mission.json`. Names here are read from the engine
+// (`game/src/nebula.rs` spawn, storms, polygons; `scenario/spawn.rs` spawn_mines; `rules/eval/schema.rs` Setup Nebula) and the
+// exporter's layout (`tools/export_nebulae.py`); the whole layout stays PROVISIONAL as a format until the freeze.
+
+/// The mission file next to `map.json` (`maps/<id>/mission.json`).
+pub const MISSION_FILE: &str = "mission.json";
+
+/// The nebula's polygon key (`nebulae[].polygon`, `[[x, y], ...]`, the same as a mission volume).
+pub const NEBULA_POLYGON: &str = "polygon";
+/// The nebula's name key (the entry's key when a map extends another).
+pub const NEBULA_NAME: &str = "name";
+/// The nebula's `sound_distance` key.
+pub const NEBULA_SOUND_DISTANCE: &str = "sound_distance";
+/// The engine's fallback `sound_distance` (`nebula.rs` spawn: `unwrap_or(300.0)`).
+pub const DEFAULT_SOUND_DISTANCE: f64 = 300.0;
+/// The "no effect" word the exporter writes.
+pub const NO_EFFECT: &str = "EFFECT";
+
+/// A switch of a nebula entry, as the form shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NebulaFlag {
+    /// `cloud.effect` is `Nebula` (the engine draws the cloud) rather than `EFFECT` (none).
+    Cloud,
+    /// `cloud.drain`: a ship inside is slowed (`nebula.rs` slowdown).
+    Drain,
+    /// `cloud.occlusion`: the map side's copy of the mission record's `Nebula Occlusion On/Off` (PROVISIONAL: the engine reads the
+    /// mission's, `environment.rs`; this one only mirrors it, as the exporter writes it).
+    Occlusion,
+    /// `storm.effect` is `SolarStorm`.
+    Storm,
+    /// `storm.lightning`.
+    Lightning,
+    /// `storm.winds`.
+    Winds,
+    /// `meteors.on`.
+    Meteors,
+}
+
+impl NebulaFlag {
+    pub const ALL: [NebulaFlag; 7] =
+        [NebulaFlag::Cloud, NebulaFlag::Drain, NebulaFlag::Occlusion, NebulaFlag::Storm, NebulaFlag::Lightning, NebulaFlag::Winds, NebulaFlag::Meteors];
+
+    /// The pointer tokens under the entry.
+    pub fn path(self) -> [&'static str; 2] {
+        match self {
+            NebulaFlag::Cloud => ["cloud", "effect"],
+            NebulaFlag::Drain => ["cloud", "drain"],
+            NebulaFlag::Occlusion => ["cloud", "occlusion"],
+            NebulaFlag::Storm => ["storm", "effect"],
+            NebulaFlag::Lightning => ["storm", "lightning"],
+            NebulaFlag::Winds => ["storm", "winds"],
+            NebulaFlag::Meteors => ["meteors", "on"],
+        }
+    }
+
+    /// The value to write for `on`.
+    pub fn value(self, on: bool) -> Value {
+        match self {
+            NebulaFlag::Cloud => Value::from(if on { "Nebula" } else { NO_EFFECT }),
+            NebulaFlag::Storm => Value::from(if on { "SolarStorm" } else { NO_EFFECT }),
+            _ => Value::from(on),
+        }
+    }
+
+    /// Whether the entry has the switch on.
+    pub fn get(self, nebula: &Value) -> bool {
+        let [a, b] = self.path();
+        let v = nebula.get(a).and_then(|o| o.get(b));
+        match self {
+            NebulaFlag::Cloud => v.and_then(Value::as_str) == Some("Nebula"),
+            NebulaFlag::Storm => v.and_then(Value::as_str) == Some("SolarStorm"),
+            _ => v.and_then(Value::as_bool).unwrap_or(false),
+        }
+    }
+
+    /// The key of the point list this switch needs filled to show anything (the engine spawns one effect per point).
+    pub fn points_key(self) -> Option<&'static str> {
+        match self {
+            NebulaFlag::Cloud => Some("cloud"),
+            NebulaFlag::Storm => Some("storm"),
+            NebulaFlag::Meteors => Some("meteors"),
+            _ => None,
+        }
+    }
+}
+
+/// `nebulae[].sound_distance`, the engine's fallback when missing.
+pub fn nebula_sound_distance(nebula: &Value) -> f64 {
+    nebula.get(NEBULA_SOUND_DISTANCE).and_then(Value::as_f64).unwrap_or(DEFAULT_SOUND_DISTANCE)
+}
+
+/// How many effect points the nebula has under `cloud`, `storm` or `meteors` (`points[]`, each `{pos, magnitude}`).
+pub fn nebula_point_count(nebula: &Value, key: &str) -> usize {
+    nebula.get(key).and_then(|o| o.get("points")).and_then(Value::as_array).map_or(0, Vec::len)
+}
+
+/// One effect point: `{pos: [x, y, 0], magnitude: radius}` (the magnitude is the cloud radius in world units, PROVISIONAL, see
+/// `docs/re/nebula-landmark.md`).
+pub fn effect_point(centre: [f64; 2], radius: f64) -> Value {
+    serde_json::json!({"pos": [centre[0], centre[1], 0.0], "magnitude": radius})
+}
+
+/// The pointer of the effect point list `key` (`cloud`, `storm`, `meteors`) of nebula `index`.
+pub fn nebula_points_pointer(index: usize, key: &str) -> String {
+    crate::edit::pointer(&[Array::Nebulae.key(), &index.to_string(), key, "points"])
+}
+
+/// The pointer of a field of nebula `index` (`name`, `polygon`, `sound_distance`, or a [`NebulaFlag`] path).
+pub fn nebula_pointer(index: usize, path: &[&str]) -> String {
+    let mut t = vec![Array::Nebulae.key().to_string(), index.to_string()];
+    t.extend(path.iter().map(|s| s.to_string()));
+    crate::edit::pointer(&t)
+}
+
+/// A point as the file writes it: `[x, y]`, in the shortest decimals of an f32 (the engine reads f32).
+pub fn xy(p: [f64; 2]) -> Value {
+    Value::Array(p.iter().map(|&x| crate::map_view::short(x as f32)).collect())
+}
+
+/// A polygon as the file writes it.
+pub fn polygon_value(points: &[[f64; 2]]) -> Value {
+    Value::Array(points.iter().map(|&p| xy(p)).collect())
+}
+
+/// A new nebula entry: the polygon, a plain cloud with one effect point at the polygon's middle, no storm, no meteors. PROVISIONAL:
+/// the layout is the exporter's (`tools/export_nebulae.py`); which keys a hand-made entry needs is not verified, only that the engine
+/// reads `name`, `polygon`, `cloud`, `storm`, `meteors` and `sound_distance` and defaults the rest.
+pub fn new_nebula(name: &str, polygon: &[[f64; 2]], centre: [f64; 2], radius: f64) -> Value {
+    serde_json::json!({
+        "name": name,
+        "groups": [],
+        "polygon": polygon_value(polygon),
+        "cloud": {"effect": "Nebula", "points": [effect_point(centre, radius)], "drain": false, "occlusion": false},
+        "storm": {"effect": NO_EFFECT, "points": [], "lightning": false, "winds": false},
+        "meteors": {"effect": NO_EFFECT, "points": [], "on": false},
+        "sound_distance": DEFAULT_SOUND_DISTANCE,
+    })
+}
+
+// ---- the mission's records of a nebula (`mission.json`) ----
+
+/// The pointer of the list of nebula setups in `mission.json` (`environment.nebulae`).
+pub fn mission_nebulae_pointer() -> String {
+    crate::edit::pointer(&["environment", "nebulae"])
+}
+
+/// The raw `Setup Nebula` records (`environment.nebulae`).
+pub fn mission_nebulae(mission: &Value) -> &[Value] {
+    mission.get("environment").and_then(|e| e.get("nebulae")).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+/// A mission record's own name (`New Nebula Name`), the link to `nebulae[].name`.
+pub fn record_name(record: &Value) -> Option<&str> {
+    record.get(RecordField::Name.key())?.as_str()
+}
+
+/// A mission record's `Polygon Name`, the link to a key of `volumes`.
+pub fn record_polygon_name(record: &Value) -> Option<&str> {
+    record.get(RecordField::PolygonName.key())?.as_str()
+}
+
+/// Which field of a mission nebula record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordField {
+    Name,
+    PolygonName,
+    Occlusion,
+    CloudEffect,
+}
+
+impl RecordField {
+    pub fn key(self) -> &'static str {
+        match self {
+            RecordField::Name => "New Nebula Name",
+            RecordField::PolygonName => "Polygon Name",
+            RecordField::Occlusion => "Nebula Occlusion On/Off",
+            RecordField::CloudEffect => "Nebula Cloud Effect Name",
+        }
+    }
+}
+
+/// `TRUE` / `FALSE`, as the rule records write a flag (`wot_flag` in the engine).
+pub fn flag_text(on: bool) -> Value {
+    Value::from(if on { "TRUE" } else { "FALSE" })
+}
+
+/// Whether the record's occlusion flag is `TRUE`.
+pub fn record_occlusion(record: &Value) -> bool {
+    record.get(RecordField::Occlusion.key()).and_then(Value::as_str) == Some("TRUE")
+}
+
+/// The pointer of a field of mission record `index`.
+pub fn record_pointer(index: usize, field: RecordField) -> String {
+    crate::edit::pointer(&["environment", "nebulae", &index.to_string(), field.key()])
+}
+
+/// A new mission record for the nebula `name` whose polygon is the volume `polygon_name`. PROVISIONAL: the keys written are the ones
+/// the engine reads (`New Nebula Name`, `Polygon Name`, `Nebula Occlusion On/Off`, `Nebula Cloud Effect Name`, `crew.rs`); the rule
+/// record's other fields (`World Object ID` and the point-set names) are left out because the engine ignores them here.
+pub fn new_record(name: &str, polygon_name: &str) -> Value {
+    serde_json::json!({
+        "New Nebula Name": name,
+        "Polygon Name": polygon_name,
+        "Nebula Cloud Effect Name": "Nebula",
+        "Nebula Occlusion On/Off": "FALSE",
+    })
+}
+
+/// A new mine entry: `{type, pos}`; the id is the project's to give. PROVISIONAL: z 0 (the engine reads `pos` as game x, y, z).
+pub fn new_mine(ty: &str, at: [f64; 2]) -> Value {
+    serde_json::json!({"type": ty, "pos": [at[0], at[1], 0.0]})
+}
+
+/// The pointer of the mission's `volumes` object.
+pub fn volumes_pointer() -> String {
+    crate::edit::pointer(&["volumes"])
+}
+
+/// The pointer of the volume `name`.
+pub fn volume_pointer(name: &str) -> String {
+    crate::edit::pointer(&["volumes", name])
+}
+
+/// The volume `name` of a mission as `[x, y]` points.
+pub fn mission_volume(mission: &Value, name: &str) -> Option<Vec<[f64; 2]>> {
+    let pts = mission.get("volumes")?.get(name)?.as_array()?;
+    Some(pts.iter().filter_map(|p| Some([p.get(0)?.as_f64()?, p.get(1)?.as_f64()?])).collect())
+}
+
+/// Whether the mission has a volume called `name`.
+pub fn has_volume(mission: &Value, name: &str) -> bool {
+    mission.get("volumes").and_then(|v| v.get(name)).is_some()
+}
+
+/// Whether anything of `mission` other than its `volumes` and its nebula records names `name`: a string equal to it anywhere, or an
+/// object key equal to it (a point set, a group). Another nebula record (not `skip`) that names it as its `Polygon Name` counts too.
+pub fn mission_mentions(mission: &Value, name: &str, skip: Option<usize>) -> bool {
+    fn walk(v: &Value, name: &str) -> bool {
+        match v {
+            Value::String(s) => s == name,
+            Value::Array(a) => a.iter().any(|x| walk(x, name)),
+            Value::Object(o) => o.iter().any(|(k, x)| k == name || walk(x, name)),
+            _ => false,
+        }
+    }
+    let Some(o) = mission.as_object() else { return false };
+    o.iter().filter(|(k, _)| k.as_str() != "volumes").any(|(k, v)| match (k.as_str(), v.as_object()) {
+        ("environment", Some(env)) => env.iter().any(|(ek, ev)| match (ek.as_str(), ev.as_array()) {
+            ("nebulae", Some(list)) => list.iter().enumerate().any(|(i, r)| Some(i) != skip && record_polygon_name(r) == Some(name)),
+            _ => walk(ev, name) || ek == name,
+        }),
+        _ => walk(v, name) || k == name,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

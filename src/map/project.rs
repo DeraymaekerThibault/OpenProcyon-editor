@@ -103,7 +103,7 @@ pub fn new_map(project: &mut Project, id: &str) -> Result<usize, String> {
     project.open_new_doc(&rel, None, doc::new_map(id)).map_err(|e| if e.ends_with("exists already") { format!("the mod has a map '{id}' already: open it") } else { e })
 }
 
-fn is_whole(project: &Project, rel: &str) -> bool {
+pub(super) fn is_whole(project: &Project, rel: &str) -> bool {
     project.doc(rel).is_some_and(|d| d.kind == DocKind::Replaced || d.parent.is_none())
 }
 
@@ -111,7 +111,7 @@ fn is_whole(project: &Project, rel: &str) -> bool {
 /// (`Ok(None)`). A map that extends another can when the list merges by key ([`keyed`], PROVISIONAL: it restates the engine's keyed
 /// merge until the pin moves) and the list below has a unique key on every entry; the key field is returned, an added entry must
 /// carry it. Otherwise the error says why: adding or deleting one entry would write the parent's whole list into the mod.
-fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<Option<String>, String> {
+pub(super) fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<Option<String>, String> {
     if is_whole(project, rel) {
         return Ok(None);
     }
@@ -122,7 +122,7 @@ fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<Option
 }
 
 /// `entry` can be added to `list` under `field`: it has the key and no entry of `list` has the same.
-fn check_key(entry: &Value, list: &[Value], field: &str, which: Array) -> Result<(), String> {
+pub(super) fn check_key(entry: &Value, list: &[Value], field: &str, which: Array) -> Result<(), String> {
     let key = keyed::key_text(entry.get(field)).ok_or_else(|| format!("an entry of {} in a map that extends another needs a '{field}' to be told apart", which.key()))?;
     if list.iter().any(|e| keyed::key_text(e.get(field)).as_deref() == Some(key.as_str())) {
         return Err(format!("{} already has an entry with '{field}' {key}", which.key()));

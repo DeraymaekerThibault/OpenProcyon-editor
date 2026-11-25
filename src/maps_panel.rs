@@ -47,6 +47,9 @@ pub struct State {
     rect: Rect,
     /// [`project_panel::State::opened`] last seen: another mod folder resets the tab.
     seen_opened: u64,
+    // T8 begin
+    t8: crate::map_edit::t8_tools::Tools,
+    // T8 end
 }
 
 impl Default for State {
@@ -70,6 +73,7 @@ impl Default for State {
             info: String::new(),
             rect: Rect::NOTHING,
             seen_opened: 0,
+            t8: Default::default(), // T8
         }
     }
 }
@@ -82,6 +86,7 @@ impl State {
         self.fit = true;
         self.place = None;
         self.turning = None;
+        self.t8 = Default::default(); // T8
     }
 
     /// Shows the map `id` of `project` (opening it over the import): errors go to the tab's message line.
@@ -218,6 +223,9 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     });
     ui.label(selection_text);
     message(ui, st);
+    // T8 begin
+    crate::map_edit::t8_tools::toolbar(ui, &mut st.t8, project, &id);
+    // T8 end
 
     if std::mem::take(&mut st.fit) {
         st.view.fit_world(ui.available_rect_before_wrap(), st.view.world_half, 24.0);
@@ -247,16 +255,18 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     }
 
     // At most one change per frame, against the scene that was drawn.
+    // T8: the toolbar above took the project mutably, so the map is read again here (only when a change happens)
+    let map_now = || maps::merged_view(project, &id).cloned().unwrap_or_default();
     if let Some(delta) = out.committed {
-        let changes = view2d::move_changes(map, &scene, &st.sel, delta);
+        let changes = view2d::move_changes(&map_now(), &scene, &st.sel, delta);
         let label = change_label("Move", &scene, &st.sel);
         done(st, maps::change_entries(project, &id, &label, &changes), "");
     } else if let Some(yaw) = turn {
-        let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
+        let changes = view2d::turn_changes(&map_now(), &scene, &st.sel, yaw);
         let label = change_label("Turn", &scene, &st.sel);
         done(st, maps::change_entries(project, &id, &label, &changes), "");
     } else if let Some(Act::Turn(yaw)) = act {
-        let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
+        let changes = view2d::turn_changes(&map_now(), &scene, &st.sel, yaw);
         let label = change_label("Turn", &scene, &st.sel);
         done(st, maps::change_entries(project, &id, &label, &changes), "");
     } else if act == Some(Act::Delete) {
@@ -269,6 +279,9 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     {
         place_at(st, project, &id, &scene, &ty, at, ui.input(|i| i.modifiers.shift));
     }
+    // T8 begin: nebula polygons and the nebula and mine tools, on top of the plan (they take the pointer only while a tool is on)
+    crate::map_edit::t8_tools::overlay(ui, &mut st.t8, project, &id, &st.view, rect);
+    // T8 end
     save
 }
 
@@ -693,6 +706,51 @@ mod tests {
         p.undo();
         p.undo();
         assert_eq!(doc::objects(maps::merged_view(p, "red").unwrap()).len(), 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn t8_draw_a_nebula_by_clicks_drag_a_point_insert_one_and_place_a_mine() {
+        let (root, mut rig) = Rig::new("t8");
+        rig.open_red();
+        rig.st.t8.start_draw("Storm");
+        rig.frame(vec![]); // the toolbar changes, the canvas moves: let it settle
+        rig.frame(vec![]);
+        for w in [[-100.0, -100.0], [100.0, -100.0], [100.0, -200.0]] {
+            let at = rig.at(w);
+            rig.click(at);
+        }
+        assert_eq!(rig.st.t8.error, None);
+        let first = rig.at([-100.0, -100.0]);
+        rig.click(first); // the first point again closes it
+        let m = rig.map();
+        assert_eq!(doc::nebulae(&m).len(), 1, "{:?} {:?}", rig.st.t8.error, rig.st.t8.info);
+        assert_eq!(doc::nebula_polygon(&doc::nebulae(&m)[0]), vec![[-100.0, -100.0], [100.0, -100.0], [100.0, -200.0]]);
+        assert_eq!(rig.project().undo_label(), Some("New nebula Storm"));
+        // drag point 1 (now editing) 30 units right
+        let (from, k) = (rig.at([100.0, -100.0]), rig.st.view.scale);
+        rig.drag(from, from + vec2(30.0 * k, 0.0));
+        let poly = doc::nebula_polygon(&doc::nebulae(&rig.map())[0]);
+        assert!((poly[1][0] - 130.0).abs() < 0.2 && (poly[1][1] + 100.0).abs() < 0.2, "{poly:?}");
+        assert_eq!(rig.project().undo_label(), Some("Move point 1 of nebula Storm"));
+        // a click on an edge adds a point
+        let mid = rig.at([0.0, -100.0]);
+        rig.click(mid);
+        assert_eq!(doc::nebula_polygon(&doc::nebulae(&rig.map())[0]).len(), 4, "{:?}", rig.st.t8.error);
+        // a mine
+        rig.st.t8.arm_mine("Bullet_StarMine_Med");
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        let at = rig.at([0.0, 150.0]);
+        rig.click(at);
+        let m = rig.map();
+        assert_eq!(doc::mines(&m).len(), 1, "{:?}", rig.st.t8.error);
+        assert_eq!((doc::kind(&doc::mines(&m)[0]), doc::id(&doc::mines(&m)[0])), (Some("Bullet_StarMine_Med"), Some(3)));
+        // with no tool on, a click on the plan selects as before
+        rig.st.t8.start_edit(0, "Storm");
+        rig.st.t8.start_draw("x");
+        rig.st.t8.arm_mine("x");
+        rig.frame(vec![]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -25,3 +25,4 @@ pub mod orient;
 pub mod plan_view;
 pub mod select;
 pub mod snap;
+pub mod t8_tools;
