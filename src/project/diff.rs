@@ -6,6 +6,7 @@
 use serde_json::{Map, Value};
 
 use super::DocKind;
+use super::keyed::{self, KeyedRule, ListDiff, NoKeyed};
 use crate::edit::pointer;
 
 /// What to write for one document.
@@ -21,7 +22,14 @@ pub struct Diff {
 /// The file for a document of `kind`. `parent` is the id an `Extends` file names when `own` has no `extends` of its own (`None`: the
 /// file is whole, nothing is inherited, so no `extends` is written). `own` is `Value::Null` when the mod has no such file yet.
 pub fn compute(kind: DocKind, base: &Value, edited: &Value, own: &Value, parent: Option<&str>) -> Diff {
-    let mut cx = Cx { sets: vec![], warnings: vec![], allow_set: false };
+    compute_with(&NoKeyed, "", kind, base, edited, own, parent)
+}
+
+/// [`compute`] for the file `rel`, with lists that merge by key ([`keyed`]) written entry by entry in an `extends` file instead of
+/// whole: an entry added, deleted or changed is one diff entry; a list that cannot be written that way (an entry with no key, an
+/// order the merge cannot give) is written whole with `"merge": {"<list>": false}` and a warning.
+pub fn compute_with(rule: &dyn KeyedRule, rel: &str, kind: DocKind, base: &Value, edited: &Value, own: &Value, parent: Option<&str>) -> Diff {
+    let mut cx = Cx { sets: vec![], warnings: vec![], allow_set: false, keyed: vec![], merge_false: vec![] };
     if edited.is_null() {
         return Diff { file: None, warnings: vec![] };
     }
@@ -31,20 +39,25 @@ pub fn compute(kind: DocKind, base: &Value, edited: &Value, own: &Value, parent:
             let body = body(base, edited, own.as_object(), &mut cx);
             (!(body.is_empty() && own.is_null())).then_some(Value::Object(body))
         }
-        DocKind::Extends => extends_file(base, edited, own, parent, &mut cx),
+        DocKind::Extends => extends_file(rule, rel, base, edited, own, parent, &mut cx),
     };
     Diff { file, warnings: cx.warnings }
 }
 
-fn extends_file(base: &Value, edited: &Value, own: &Value, parent: Option<&str>, cx: &mut Cx) -> Option<Value> {
+fn extends_file(rule: &dyn KeyedRule, rel: &str, base: &Value, edited: &Value, own: &Value, parent: Option<&str>, cx: &mut Cx) -> Option<Value> {
     cx.allow_set = true;
     let own_map = own.as_object();
     let own_parent = own_map.and_then(|m| m.get("extends")).and_then(Value::as_str);
     let parent = own_parent.or(parent);
-    // `extends` and `set` are written by this function; the other own keys are kept.
+    // `extends`, `merge` and `set` are written by this function; the other own keys are kept.
     let mut kept = own_map.cloned().unwrap_or_default();
     kept.shift_remove("extends");
     let own_set = kept.shift_remove("set");
+    let own_merge = kept.shift_remove("merge");
+    // A file that inherits nothing is not merged with anything: nothing is keyed.
+    if parent.is_some() {
+        cx.keyed = keyed::effective(rule, rel, own_merge.as_ref());
+    }
     let body = body(base, edited, own_map.map(|_| &kept), cx);
     let mut sets: Vec<(String, Value)> = vec![];
     // Hand-written `set` entries stay while the pointer exists; their value follows the document.
@@ -71,6 +84,17 @@ fn extends_file(base: &Value, edited: &Value, own: &Value, parent: Option<&str>,
     if let Some(p) = parent {
         out.insert("extends".into(), Value::String(p.into()));
     }
+    // The file's own `merge` choices stay; a list written whole although it merges by key is said to replace.
+    let mut merge = match own_merge {
+        Some(Value::Object(m)) => m,
+        _ => Map::new(),
+    };
+    for ptr in std::mem::take(&mut cx.merge_false) {
+        merge.insert(ptr, Value::Bool(false));
+    }
+    if !merge.is_empty() {
+        out.insert("merge".into(), Value::Object(merge));
+    }
     out.extend(body);
     if !sets.is_empty() {
         out.insert("set".into(), Value::Object(sets.into_iter().collect()));
@@ -83,6 +107,17 @@ struct Cx {
     sets: Vec<(String, Value)>,
     warnings: Vec<String>,
     allow_set: bool,
+    /// `(pointer, key field)` of the lists written entry by entry (an `extends` file with a parent).
+    keyed: Vec<(String, String)>,
+    /// Keyed lists that had to be written whole: their pointers go in the file's `merge` as `false`.
+    merge_false: Vec<String>,
+}
+
+impl Cx {
+    fn key_field(&self, path: &[String]) -> Option<String> {
+        let ptr = pointer(path);
+        self.keyed.iter().find(|(p, _)| *p == ptr).map(|(_, f)| f.clone())
+    }
 }
 
 /// The top-level object of a file: `edited` against `base` and the kept keys of `own`.
@@ -103,6 +138,15 @@ fn diff_obj(base: Option<&Map<String, Value>>, edited: &Map<String, Value>, own:
                 // A key the mod wrote that now equals what is below it was reset to the parent: it is dropped (a key that always
                 // equalled the parent stays, as the author wrote it).
                 if bv == Some(ev) && ov != bv {
+                    path.pop();
+                    continue;
+                }
+                if let (Some(field), Value::Array(e)) = (cx.key_field(path), ev)
+                    && bv.is_none_or(Value::is_array)
+                {
+                    if let Some(v) = keyed_array(&field, bv, e, path, cx) {
+                        out.insert(key.clone(), v);
+                    }
                     path.pop();
                     continue;
                 }
@@ -158,6 +202,10 @@ fn kept(base: Option<&Value>, edited: &Value, own: Option<&Value>, path: &mut Ve
 /// (only removals below it, or the array change went into `set`).
 fn changed(base: Option<&Value>, edited: &Value, path: &mut Vec<String>, cx: &mut Cx) -> Option<Value> {
     match (base, edited) {
+        (_, Value::Array(e)) if cx.key_field(path).is_some() && base.is_none_or(Value::is_array) => {
+            let field = cx.key_field(path).expect("checked");
+            keyed_array(&field, base, e, path, cx)
+        }
         (Some(Value::Object(b)), Value::Object(e)) => {
             let sub = diff_obj(Some(b), e, None, path, cx);
             (!sub.is_empty()).then_some(Value::Object(sub))
@@ -175,6 +223,44 @@ fn changed(base: Option<&Value>, edited: &Value, path: &mut Vec<String>, cx: &mu
             }
         }
         _ => Some(edited.clone()),
+    }
+}
+
+/// A list that merges by key, changed: what to write for it (`None`: nothing, or `set` pointers). The same entries in the same order
+/// (a move) become `set` pointers; added or deleted entries become diff entries ([`keyed::diff_list`]); a
+/// list that cannot be said that way is written whole, with `merge: false` and a warning (unless it has the same length, where
+/// `set` pointers say what changed).
+fn keyed_array(field: &str, base: Option<&Value>, edited: &[Value], path: &mut Vec<String>, cx: &mut Cx) -> Option<Value> {
+    let ptr = pointer(path);
+    let b: &[Value] = base.and_then(Value::as_array).map_or(&[], Vec::as_slice);
+    match keyed::diff_list(field, b, edited, &ptr) {
+        ListDiff::Equal => None,
+        ListDiff::SameKeys { entries, warnings } => {
+            cx.warnings.extend(warnings);
+            // The same entries in the same order, some changed (a move): `set` pointers, as for any list of the same length.
+            if !entries.is_empty() {
+                let mut found = vec![];
+                collect_sets(b, edited, path, &mut found);
+                cx.sets.extend(found);
+            }
+            None
+        }
+        ListDiff::Entries { entries, warnings } => {
+            cx.warnings.extend(warnings);
+            (!entries.is_empty()).then_some(Value::Array(entries))
+        }
+        ListDiff::Unkeyable(_) if base.is_some() && b.len() == edited.len() => {
+            // Entries changed in place: `set` pointers say it without the keys.
+            let mut found = vec![];
+            collect_sets(b, edited, path, &mut found);
+            cx.sets.extend(found);
+            None
+        }
+        ListDiff::Unkeyable(why) => {
+            cx.warnings.push(format!("{ptr} is written whole ({why}): the file replaces the list below instead of changing entries"));
+            cx.merge_false.push(ptr);
+            Some(Value::Array(edited.to_vec()))
+        }
     }
 }
 
@@ -431,5 +517,152 @@ mod tests {
         assert_eq!(d.file, Some(json!({"Gun_B": {"range": 2}})), "Gun_A is back at retail: no entry of it remains");
         let d = compute(DocKind::Merged, &base, &base, &own, None);
         assert_eq!(d.file, Some(json!({})), "an empty file: the project deletes it");
+    }
+
+    // ---- keyed lists (T4): checked against the rule's own merge, [`keyed::extend`] ----
+
+    const MAP: &str = "maps/red/map.json";
+
+    fn red() -> Value {
+        json!({
+            "name": "Red",
+            "objects": [{"id": 1, "type": "A", "pos": [0, 0, 0]}, {"id": 2, "type": "B", "pos": [5, 5, 0]}, {"id": 3, "type": "C", "pos": [9, 9, 0]}],
+            "players": [{"name": "P1", "start": [1, 1, 0]}, {"name": "P2", "start": [2, 2, 0]}],
+            "teams": [{"name_id": "T1"}]
+        })
+    }
+
+    fn keyed_file(base: &Value, edited: &Value, own: &Value) -> Diff {
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, base, edited, own, Some("red"));
+        let file = d.file.clone().expect("a file");
+        let (merged, _) = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &file).unwrap();
+        assert_eq!(merged, *edited, "the rule merges {file} back to the edited document");
+        d
+    }
+
+    #[test]
+    fn keyed_lists_write_added_deleted_and_changed_entries_only() {
+        let base = red();
+        let mut edited = base.clone();
+        edited["objects"].as_array_mut().unwrap().remove(1);
+        edited["objects"][1]["pos"] = json!([10, 10, 0]);
+        edited["objects"].as_array_mut().unwrap().push(json!({"id": 4, "type": "D", "pos": [1, 2, 3]}));
+        edited["players"][0]["start"][0] = json!(7);
+        let d = keyed_file(&base, &edited, &Value::Null);
+        assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+        assert_eq!(
+            d.file.unwrap(),
+            json!({
+                "extends": "red",
+                "objects": [{"id": 2, "$remove": true}, {"id": 3, "pos": [10, 10, 0]}, {"id": 4, "type": "D", "pos": [1, 2, 3]}],
+                "set": {"/players/0/start/0": 7}
+            }),
+            "a move with the same entries stays a set pointer"
+        );
+    }
+
+    #[test]
+    fn keyed_lists_same_keys_use_set_pointers() {
+        let base = red();
+        let mut edited = base.clone();
+        edited["objects"][2]["pos"][1] = json!(8);
+        let d = keyed_file(&base, &edited, &Value::Null);
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "set": {"/objects/2/pos/1": 8}}));
+        // an entry that gains a field: the pointer to the entry replaces it whole
+        let mut edited = base.clone();
+        edited["objects"][0] = json!({"id": 1, "type": "Z", "pos": [4, 4, 4], "scene": "S"});
+        let d = keyed_file(&base, &edited, &Value::Null);
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "set": {"/objects/0": {"id": 1, "type": "Z", "pos": [4, 4, 4], "scene": "S"}}}));
+    }
+
+    #[test]
+    fn keyed_lists_nothing_changed_writes_nothing_and_a_list_new_to_the_parent_is_its_entries() {
+        let base = red();
+        assert_eq!(compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &base, &Value::Null, Some("red")).file, None);
+        let mut edited = base.clone();
+        edited["ships"] = json!([{"id": 9, "type": "S"}]);
+        let d = keyed_file(&base, &edited, &Value::Null);
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "ships": [{"id": 9, "type": "S"}]}));
+    }
+
+    #[test]
+    fn keyed_lists_a_list_that_cannot_be_keyed_is_written_whole_and_said_to_replace() {
+        let mut base = red();
+        base["objects"].as_array_mut().unwrap().push(json!({"type": "Decor", "pos": [0, 0, 0]}));
+        let mut edited = base.clone();
+        edited["objects"].as_array_mut().unwrap().remove(0);
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &edited, &Value::Null, Some("red"));
+        let file = d.file.unwrap();
+        assert_eq!(file["merge"], json!({"/objects": false}));
+        assert_eq!(file["objects"], edited["objects"]);
+        assert_eq!(d.warnings.len(), 1);
+        assert!(d.warnings[0].starts_with("/objects is written whole"), "{:?}", d.warnings);
+        let (merged, _) = keyed::extend(&keyed::EngineRule, MAP, base, &file).unwrap();
+        assert_eq!(merged, edited);
+        // a moved decoration in the same list is a set pointer, not a restated list
+        let mut edited = red();
+        edited["objects"][0]["pos"][0] = json!(3);
+        let mut base = red();
+        base["objects"].as_array_mut().unwrap().push(json!({"type": "Decor"}));
+        edited["objects"].as_array_mut().unwrap().push(json!({"type": "Decor"}));
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &edited, &Value::Null, Some("red"));
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "set": {"/objects/0/pos/0": 3}}));
+    }
+
+    #[test]
+    fn keyed_lists_a_file_with_no_parent_and_a_file_below_a_non_keyed_rule_are_written_as_before() {
+        let edited = red();
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &Value::Null, &edited, &Value::Null, None);
+        assert_eq!(d.file, Some(edited.clone()), "a whole map has no merge to speak of");
+        let mut with_extra = red();
+        with_extra["objects"].as_array_mut().unwrap().push(json!({"id": 4}));
+        let d = compute_with(&keyed::EngineRule, "ships/X/ship.json", DocKind::Extends, &red(), &with_extra, &Value::Null, Some("X"));
+        assert_eq!(d.file.unwrap()["objects"].as_array().unwrap().len(), 4, "another file: the list is written whole");
+        let d = compute(DocKind::Extends, &red(), &with_extra, &Value::Null, Some("red"));
+        assert_eq!(d.file.unwrap()["objects"].as_array().unwrap().len(), 4, "compute() keys nothing");
+    }
+
+    #[test]
+    fn keyed_lists_the_files_own_entries_and_merge_choices_stay() {
+        let base = red();
+        // own file: one hand-written entry change and a merge override of another list
+        let own = json!({"extends": "red", "merge": {"/teams": "name_id"}, "objects": [{"id": 2, "type": "Bee"}], "teams": [{"name_id": "T2"}]});
+        let (mut edited, _) = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &own).unwrap();
+        assert_eq!(edited["teams"], json!([{"name_id": "T1"}, {"name_id": "T2"}]));
+        edited["objects"][2]["pos"] = json!([0, 0, 1]);
+        edited["objects"].as_array_mut().unwrap().remove(0);
+        let d = keyed_file(&base, &edited, &own);
+        let file = d.file.unwrap();
+        assert_eq!(file["merge"], json!({"/teams": "name_id"}));
+        assert_eq!(file["teams"], json!([{"name_id": "T2"}]), "the team the mod added is still its own entry");
+        assert_eq!(file["objects"], json!([{"id": 1, "$remove": true}, {"id": 2, "type": "Bee"}, {"id": 3, "pos": [0, 0, 1]}]));
+        // a list the file replaces whole by choice is written whole as before
+        let own = json!({"extends": "red", "merge": {"/objects": false}, "objects": [{"id": 1}]});
+        let mut edited = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &own).unwrap().0;
+        edited["objects"][0]["pos"] = json!([1, 1, 1]);
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &edited, &own, Some("red"));
+        assert_eq!(d.file.unwrap(), json!({"extends": "red", "merge": {"/objects": false}, "objects": [{"id": 1, "pos": [1, 1, 1]}]}));
+        // everything back at the parent's: the entries go, the merge choice stays
+        let own = json!({"extends": "red", "objects": [{"id": 2, "type": "Bee"}]});
+        let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &base, &own, Some("red"));
+        assert_eq!(d.file, Some(json!({"extends": "red"})));
+    }
+
+    #[test]
+    fn keyed_lists_follow_any_rule_the_trait_gives() {
+        struct Fake;
+        impl KeyedRule for Fake {
+            fn lists(&self, rel: &str) -> Vec<(String, String)> {
+                (rel == "x.json").then(|| ("/items".to_string(), "k".to_string())).into_iter().collect()
+            }
+        }
+        let base = json!({"items": [{"k": "a", "v": 1}, {"k": "b", "v": 2}]});
+        let edited = json!({"items": [{"k": "a", "v": 1}, {"k": "b", "v": 3}, {"k": "c"}]});
+        let d = compute_with(&Fake, "x.json", DocKind::Extends, &base, &edited, &Value::Null, Some("p"));
+        let file = d.file.unwrap();
+        assert_eq!(file, json!({"extends": "p", "items": [{"k": "b", "v": 3}, {"k": "c"}]}));
+        assert_eq!(keyed::extend(&Fake, "x.json", base.clone(), &file).unwrap().0, edited);
+        let d = compute_with(&Fake, "y.json", DocKind::Extends, &base, &edited, &Value::Null, Some("p"));
+        assert_eq!(d.file.unwrap()["items"], edited["items"], "another file: whole list");
     }
 }

@@ -1,11 +1,11 @@
 //! Maps as project documents on synthetic data made here (no game content): list, open merged, new, move, undo, save as a diff,
-//! the refusal of add and delete on an extending map, and the write guard. The saved files are checked against the engine's own
+//! keyed add and delete on an extending map (T4) and its refusals, and the write guard. Saved files are checked against the engine's own
 //! overlay, as Phase 3's diff tests are.
 
 use openprocyon::authoring::read_merged;
 use openprocyon_editor::map::doc::{self, Array};
 use openprocyon_editor::map::project::{add_entry, delete_entry, list_maps, map_rel, merged_view, move_entry, new_map, open_map};
-use openprocyon_editor::project::Project;
+use openprocyon_editor::project::{Project, keyed};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -208,17 +208,105 @@ fn a_new_map_is_the_mods_own_and_saves_whole_leaving_mod_json_alone() {
 }
 
 #[test]
-fn add_and_delete_are_refused_on_a_map_that_extends_another_and_nothing_changes() {
+fn add_and_delete_on_a_retail_map_are_keyed_entries_not_the_whole_list() {
+    let (_root, assets, m) = setup("keyed");
+    let before_import = files_under(&assets);
+    let mut p = Project::open(&m, Some(assets.clone())).unwrap();
+    assert_eq!(add_entry(&mut p, "red", Array::Objects, json!({"type": "X", "pos": [0.0, 0.0, 0.0]})).unwrap(), 3);
+    delete_entry(&mut p, "red", Array::Objects, 1).unwrap();
+    move_entry(&mut p, "red", Array::Objects, 1, [31.0, 41.0, 6.0]).unwrap();
+    add_entry(&mut p, "red", Array::Players, json!({"name": "P2", "start": [1.0, 2.0, 3.0]})).unwrap();
+    add_entry(&mut p, "blue", Array::Objects, json!({"type": "Y", "pos": [1.0, 1.0, 1.0]})).unwrap();
+    let view = merged_view(&p, "red").unwrap().clone();
+    let ids: Vec<_> = doc::objects(&view).iter().map(|e| doc::id(e).unwrap()).collect();
+    assert_eq!(ids, [1, 3, 4], "the new id is the next free one");
+
+    let r = p.save();
+    assert!(r.errors.is_empty() && r.warnings.is_empty(), "{r:?}");
+    let file = read(&m, "maps/red/map.json");
+    assert_eq!(
+        file,
+        json!({
+            "extends": "red",
+            "objects": [{"id": 2, "$remove": true}, {"id": 3, "pos": [31.0, 41.0, 6.0]}, {"id": 4, "type": "X", "pos": [0.0, 0.0, 0.0]}],
+            "players": [{"name": "P2", "start": [1.0, 2.0, 3.0]}]
+        }),
+        "nothing of the retail map is restated"
+    );
+    assert_eq!(read(&m, "maps/blue/map.json"), json!({"extends": "blue", "objects": [{"id": 1, "type": "Y", "pos": [1.0, 1.0, 1.0]}]}));
+    // the merge rule applied to the file gives the document (the pinned engine's overlay cannot merge by key yet)
+    let (merged, warnings) = keyed::extend(&keyed::EngineRule, "maps/red/map.json", red(), &file).unwrap();
+    assert!(warnings.is_empty());
+    assert_eq!(merged, view);
+    // a fresh project opens the file as the same map, and has nothing to save
+    drop(p);
+    let mut p = Project::open(&m, Some(assets.clone())).unwrap();
+    open_map(&mut p, "red").unwrap();
+    assert_eq!(merged_view(&p, "red"), Some(&view));
+    assert!(p.save().written.is_empty() && p.dirty_rels().is_empty());
+    // undo and redo of an add and a delete
+    delete_entry(&mut p, "red", Array::Objects, 2).unwrap();
+    assert_eq!(doc::objects(merged_view(&p, "red").unwrap()).len(), 2);
+    p.undo();
+    assert_eq!(merged_view(&p, "red"), Some(&view));
+    assert!(p.dirty_rels().is_empty(), "undone back to what is saved");
+    // deleting a mod's own addition takes it out of the file again
+    delete_entry(&mut p, "red", Array::Objects, 2).unwrap();
+    p.save();
+    assert_eq!(read(&m, "maps/red/map.json")["objects"], json!([{"id": 2, "$remove": true}, {"id": 3, "pos": [31.0, 41.0, 6.0]}]));
+    // a deleted retail entry added back with the same id comes last: removal and entry, not the list
+    let (id1, id3) = (doc::objects(&red())[0].clone(), doc::objects(&red())[2].clone());
+    delete_entry(&mut p, "red", Array::Objects, 0).unwrap();
+    add_entry(&mut p, "red", Array::Objects, id1.clone()).unwrap();
+    p.save();
+    let file = read(&m, "maps/red/map.json");
+    let (merged, _) = keyed::extend(&keyed::EngineRule, "maps/red/map.json", red(), &file).unwrap();
+    assert_eq!(&merged, merged_view(&p, "red").unwrap());
+    assert!(file.get("merge").is_none(), "no list is written whole: {file}");
+    let _ = id3;
+    assert_eq!(files_under(&assets), before_import);
+}
+
+#[test]
+fn add_and_delete_are_refused_where_a_keyed_merge_cannot_say_it_and_nothing_changes() {
     let (_root, assets, m) = setup("refuse");
+    // retail has decoration with no id (not keyable), and teams (not keyed by the engine's rule)
+    let mut map = red();
+    map["objects"].as_array_mut().unwrap().push(json!({"type": "Decor", "pos": [0, 0, 0]}));
+    map["teams"] = json!([{"name_id": "T1"}]);
+    put(&assets, "maps/red/map.json", &map);
     let mut p = Project::open(&m, Some(assets)).unwrap();
     let e = add_entry(&mut p, "red", Array::Objects, json!({"type": "X", "pos": [0, 0, 0]})).unwrap_err();
-    assert!(e.contains("extends another map"), "{e}");
+    assert!(e.contains("has no 'id'") && e.contains("restating the whole list"), "{e}");
     assert!(delete_entry(&mut p, "red", Array::Objects, 0).is_err());
-    assert!(add_entry(&mut p, "blue", Array::Objects, json!({"id": 5})).is_err());
-    assert!(p.dirty_rels().is_empty() && p.undo_label().is_none());
-    // a move is still fine
+    let e = add_entry(&mut p, "red", Array::Teams, json!({"name_id": "T2"})).unwrap_err();
+    assert!(e.contains("not merged by key"), "{e}");
+    assert!(delete_entry(&mut p, "red", Array::Teams, 0).is_err());
+    // an entry with no key, or a key the map has
+    assert!(add_entry(&mut p, "red", Array::Players, json!({"start": [0, 0, 0]})).unwrap_err().contains("needs a 'name'"));
+    assert!(add_entry(&mut p, "red", Array::Players, json!({"name": "P1"})).unwrap_err().contains("already"));
+    assert!(add_entry(&mut p, "blue", Array::Objects, json!({"id": 5})).is_ok(), "an empty retail list is fine");
+    p.undo();
+    assert!(p.dirty_rels().is_empty() && p.undo_label().is_none(), "a refusal changes nothing");
+    // a move is still fine, also in the list that cannot take adds
     move_entry(&mut p, "blue", Array::Objects, 0, [0.0; 3]).unwrap_err();
     move_entry(&mut p, "red", Array::Objects, 0, [1.0, 1.0, 1.0]).unwrap();
+    assert_eq!(p.save().written, ["maps/red/map.json"]);
+    assert_eq!(read(&m, "maps/red/map.json"), json!({"extends": "red", "set": {"/objects/0/pos/0": 1.0, "/objects/0/pos/1": 1.0, "/objects/0/pos/2": 1.0}}));
+}
+
+#[test]
+fn a_file_that_replaces_a_list_whole_by_its_own_merge_choice_keeps_it_and_refuses_adds() {
+    let (_root, assets, m) = setup("mergefalse");
+    put(&m, "maps/red/map.json", &json!({"extends": "red", "merge": {"/objects": false}, "objects": [{"id": 1, "pos": [0, 0, 0]}]}));
+    let mut p = Project::open(&m, Some(assets)).unwrap();
+    open_map(&mut p, "red").unwrap();
+    assert_eq!(doc::objects(merged_view(&p, "red").unwrap()).len(), 1, "the list replaces the retail one");
+    assert!(add_entry(&mut p, "red", Array::Objects, json!({"id": 2})).unwrap_err().contains("not merged by key"));
+    move_entry(&mut p, "red", Array::Objects, 0, [5.0, 5.0, 5.0]).unwrap();
+    p.save();
+    let file = read(&m, "maps/red/map.json");
+    assert_eq!(file["merge"], json!({"/objects": false}), "the choice stays in the file");
 }
 
 #[test]

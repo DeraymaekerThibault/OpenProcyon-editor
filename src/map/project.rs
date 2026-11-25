@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use super::doc::{self, Array};
 use crate::edit::{Edit, pointer};
-use crate::project::{DocKind, Project};
+use crate::project::{DocKind, Project, keyed};
 
 /// A map found in the mod or the import.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,17 +99,27 @@ fn is_whole(project: &Project, rel: &str) -> bool {
     project.doc(rel).is_some_and(|d| d.kind == DocKind::Replaced || d.parent.is_none())
 }
 
-/// Why `which` of the map document cannot take an added or a deleted entry, or `Ok`. A map that is whole in the mod (a new map)
-/// can; a map that extends another cannot: the engine this editor is built on replaces a list whole, so adding or deleting one
-/// entry would restate the parent map's content in the mod. PROVISIONAL until keyed lists (docs/phase4.md requirement 1) land.
-fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<(), String> {
+/// Whether `which` of the map document can take an added or a deleted entry. A map that is whole in the mod (a new map) always can
+/// (`Ok(None)`). A map that extends another can when the list merges by key ([`keyed`], PROVISIONAL: it restates the engine's keyed
+/// merge until the pin moves) and the list below has a unique key on every entry; the key field is returned, an added entry must
+/// carry it. Otherwise the error says why: adding or deleting one entry would write the parent's whole list into the mod.
+fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<Option<String>, String> {
     if is_whole(project, rel) {
-        return Ok(());
+        return Ok(None);
     }
-    Err(format!(
-        "{rel} extends another map, and adding or deleting one entry of {} would write the whole list into the mod (the engine cannot merge lists by key yet); moving entries is fine",
-        which.key()
-    ))
+    let d = project.doc(rel).ok_or_else(|| format!("{rel}: not open"))?;
+    let (merge, ptr) = (d.own.get("merge"), keyed::list_pointer(which.key()));
+    keyed::can_add_delete(&keyed::EngineRule, rel, merge, &ptr, d.base.get(which.key()))?;
+    Ok(keyed::key_field(&keyed::EngineRule, rel, merge, &ptr))
+}
+
+/// `entry` can be added to `list` under `field`: it has the key and no entry of `list` has the same.
+fn check_key(entry: &Value, list: &[Value], field: &str, which: Array) -> Result<(), String> {
+    let key = keyed::key_text(entry.get(field)).ok_or_else(|| format!("an entry of {} in a map that extends another needs a '{field}' to be told apart", which.key()))?;
+    if list.iter().any(|e| keyed::key_text(e.get(field)).as_deref() == Some(key.as_str())) {
+        return Err(format!("{} already has an entry with '{field}' {key}", which.key()));
+    }
+    Ok(())
 }
 
 fn entry_label(map: &Value, which: Array, index: usize) -> String {
@@ -134,14 +144,17 @@ pub fn move_entry(project: &mut Project, id: &str, which: Array, index: usize, t
 }
 
 /// Adds `entry` to the end of `which` as one undo step and returns its index. An entry of an id-bearing array with no `id` gets
-/// the next free one ([`doc::next_id`]). Refused on a map that extends another (see the module doc).
+/// the next free one ([`doc::next_id`]). Refused on a map that extends another unless the list merges by key ([`check_add_delete`]).
 pub fn add_entry(project: &mut Project, id: &str, which: Array, mut entry: Value) -> Result<usize, String> {
     let rel = map_rel(id)?;
     let i = open_map(project, id)?;
-    check_add_delete(project, &rel, which)?;
+    let field = check_add_delete(project, &rel, which)?;
     let map = &project.docs[i].edited;
     if which.layer().is_some() && doc::id(&entry).is_none() {
         doc::set_id(&mut entry, doc::next_id(map, &[]));
+    }
+    if let Some(field) = field {
+        check_key(&entry, doc::array_entries(map, which), &field, which)?;
     }
     let at = doc::array_entries(map, which).len();
     let label = format!("Add {}", entry_label(&serde_json::json!({which.key(): [entry.clone()]}), which, 0));
@@ -154,7 +167,7 @@ pub fn add_entry(project: &mut Project, id: &str, which: Array, mut entry: Value
     Ok(at)
 }
 
-/// Deletes entry `index` of `which` as one undo step and returns it. Refused on a map that extends another (see the module doc).
+/// Deletes entry `index` of `which` as one undo step and returns it. Refused on a map that extends another unless the list merges by key ([`check_add_delete`]).
 pub fn delete_entry(project: &mut Project, id: &str, which: Array, index: usize) -> Result<Value, String> {
     let rel = map_rel(id)?;
     let i = open_map(project, id)?;
