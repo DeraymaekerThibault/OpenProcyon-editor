@@ -74,7 +74,8 @@ pub fn rows(entry: Option<&ModEntry>, dirty: &[String]) -> Vec<LayerRow> {
     let Some(e) = entry else { return out };
     out.extend(e.skipped.iter().map(|(f, why)| row(LayerKind::Skipped, f, why)));
     for (kind, files) in [(LayerKind::Overridden, &e.overrides), (LayerKind::Merged, &e.merged), (LayerKind::Extends, &e.extends), (LayerKind::Added, &e.added)] {
-        out.extend(files.iter().map(|f| row(kind, f, "")));
+        // a file with unsaved edits already has its row: one row per file
+        out.extend(files.iter().filter(|f| !dirty.contains(f)).map(|f| row(kind, f, "")));
     }
     out.extend(e.textures.iter().map(|f| {
         let unused = e.unused_textures.contains(f);
@@ -109,7 +110,6 @@ mod tests {
                 (LayerKind::Skipped, "data/x.json"),
                 (LayerKind::Overridden, "data/render/look.json"),
                 (LayerKind::Merged, "data/weapons/guns.json"),
-                (LayerKind::Extends, "ships/A/ship.json"),
                 (LayerKind::Extends, "ships/B/ship.json"),
                 (LayerKind::Added, "ships/New/ship.json"),
                 (LayerKind::Texture, "textures/Hull.png"),
@@ -117,7 +117,15 @@ mod tests {
             ]
         );
         assert_eq!(r[1].note, "extends unknown 'Q'");
-        assert_eq!((r[7].note.as_str(), r[8].note.as_str()), ("", "no model uses this texture"));
+        assert_eq!((r[6].note.as_str(), r[7].note.as_str()), ("", "no model uses this texture"));
+    }
+
+    #[test]
+    fn an_unsaved_file_the_report_also_lists_is_one_row() {
+        let entry = ModEntry { name: "m".into(), merged: vec!["data/weapons/bullets.json".into(), "data/weapons/guns.json".into()], ..Default::default() };
+        let r = rows(Some(&entry), &["data/weapons/bullets.json".to_string()]);
+        let kinds: Vec<_> = r.iter().map(|r| (r.kind, r.file.as_str())).collect();
+        assert_eq!(kinds, [(LayerKind::Unsaved, "data/weapons/bullets.json"), (LayerKind::Merged, "data/weapons/guns.json")]);
     }
 
     #[test]

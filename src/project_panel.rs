@@ -79,8 +79,12 @@ impl State {
 
     /// Starts the mod check on a thread (`authoring::check_mod`).
     pub fn check(&mut self) {
-        if let Some(p) = &self.project {
-            self.checker.start(p.dir.clone(), p.import.clone());
+        if let Some(p) = &mut self.project {
+            // Unsaved documents are part of the check (the engine reads a scratch copy that has them written), not only the folder.
+            match p.check_dir() {
+                Ok(dir) => self.checker.start(dir, p.import.clone()),
+                Err(e) => self.status = format!("cannot prepare the check: {e}"),
+            }
         }
     }
 
@@ -264,18 +268,10 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
                 _ => ui.visuals().text_color(),
             };
             let text = if r.note.is_empty() { format!("{}: {}", r.kind.label(), r.file) } else { format!("{}: {} ({})", r.kind.label(), r.file, r.note) };
-            ui.horizontal(|ui| {
-                ui.colored_label(color, text);
-                let can = matches!(r.kind, LayerKind::Extends | LayerKind::Merged | LayerKind::Unsaved) && p.open_doc(&r.file).is_ok_and(|i| p.docs[i].can_revert());
-                if can
-                    && ui
-                        .small_button("Revert file")
-                        .on_hover_text("Take every change of the mod in this file back (one undo step); saving deletes the file when nothing is left")
-                        .clicked()
-                {
-                    revert = Some(r.file.clone());
-                }
-            });
+            let can = matches!(r.kind, LayerKind::Extends | LayerKind::Merged | LayerKind::Unsaved) && p.open_doc(&r.file).is_ok_and(|i| p.docs[i].can_revert());
+            if layer_row(ui, color, &text, can) {
+                revert = Some(r.file.clone());
+            }
         }
     });
     if let Some(rel) = revert
@@ -286,6 +282,21 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
     if do_save {
         st.save();
     }
+}
+
+/// One Layers row: the text (wrapped inside the panel, so a long path never widens it) and, when `can_revert`, the "Revert file"
+/// button. Returns whether the button was clicked.
+fn layer_row(ui: &mut egui::Ui, color: egui::Color32, text: &str, can_revert: bool) -> bool {
+    let mut clicked = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.add(egui::Label::new(egui::RichText::new(text).color(color)).wrap_mode(egui::TextWrapMode::Wrap));
+        clicked = can_revert
+            && ui
+                .small_button("Revert file")
+                .on_hover_text("Take every change of the mod in this file back (one undo step); saving deletes the file when nothing is left")
+                .clicked();
+    });
+    clicked
 }
 
 /// The bottom panel's mod problems: errors first, a click sets [`Focus`].
@@ -341,7 +352,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
                 ui,
                 &schema,
                 &p.docs[i].edited,
-                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] },
+                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[], choices: &[] },
                 egui::Id::new("mod.json form"),
             );
             if !edits.is_empty()
@@ -439,5 +450,25 @@ mod tests {
         assert_eq!(suggestion_line(&f).as_deref(), Some("    did you mean \"Gun\"?"));
         f.suggestion = None;
         assert_eq!(suggestion_line(&f), None);
+    }
+
+    #[test]
+    fn a_long_layer_row_wraps_inside_the_panel_instead_of_widening_it() {
+        let ctx = egui::Context::default();
+        let mut widest = 0.0f32;
+        for _ in 0..2 {
+            let mut full = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::Frame::NONE.show(ui, |ui| {
+                    ui.set_max_width(280.0);
+                    let r = ui.scope(|ui| {
+                        layer_row(ui, egui::Color32::YELLOW, "unsaved: ships/Ship_With_A_Rather_Long_Identifier/ship.json", true);
+                        layer_row(ui, egui::Color32::WHITE, "merged: data/weapons/bullets.json", false);
+                    });
+                    widest = r.response.rect.width();
+                });
+            });
+            full.textures_delta.clear();
+        }
+        assert!(widest <= 281.0, "the rows are {widest} px wide");
     }
 }
