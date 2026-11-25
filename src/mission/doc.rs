@@ -683,6 +683,51 @@ pub fn media_new_entry(which: MediaTable) -> Value {
     }
 }
 
+// T6
+// ---- players, ships and groups: raw list entries and the keys of `player_start` the ships section writes through ----
+
+/// The raw `players` entries (not only the strings), for editing by index.
+pub fn player_entries(mission: &Value) -> &[Value] {
+    list(mission, KEY_PLAYERS)
+}
+
+/// The pointer of player `index`.
+pub fn player_pointer(index: usize) -> String {
+    pointer(&[KEY_PLAYERS, &index.to_string()])
+}
+
+/// The raw `alliances` entries.
+pub fn alliance_entries(mission: &Value) -> &[Value] {
+    list(mission, KEY_ALLIANCES)
+}
+
+/// The pointer of alliance `index`, or of one of its two names (`side` 0 or 1).
+pub fn alliance_pointer(index: usize, side: Option<usize>) -> String {
+    let i = index.to_string();
+    match side {
+        Some(s) => pointer(&[KEY_ALLIANCES, &i, &s.to_string()]),
+        None => pointer(&[KEY_ALLIANCES, &i]),
+    }
+}
+
+/// The pointer of `player_start`, or of one of its keys.
+pub fn player_start_pointer(key: Option<&str>) -> String {
+    match key {
+        Some(k) => pointer(&[KEY_PLAYER_START, k]),
+        None => pointer(&[KEY_PLAYER_START]),
+    }
+}
+
+/// The `id` of one entry of `environment.animals` (an animal a group lists), when it has one.
+pub fn animal_id(animal: &Value) -> Option<i64> {
+    animal.get(SHIP_ID)?.as_i64()
+}
+
+/// The raw members of group `name` as written (to put back what is not a number).
+pub fn group_entries<'a>(mission: &'a Value, name: &str) -> &'a [Value] {
+    groups(mission).and_then(|g| g.get(name)).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
