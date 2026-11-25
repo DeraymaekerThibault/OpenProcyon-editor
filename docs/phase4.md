@@ -14,8 +14,8 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
   `claude/map-schema`. When this plan was written the branch had no commit
   beyond engine main (`42083e4`) and a clean worktree, so there was nothing to read. Treat its shape as unknown (PROVISIONAL).
 - **Engine checked.** Everything below about the engine was read from engine main `42083e4` (and its uncommitted `authoring` work).
-  The editor still pins `b2c01f5`, which is not in the local engine clone, so a point can differ at the pin (PROVISIONAL). Re-check
-  against the pin before relying on a "present" below; the pin moves to a tag that holds the map schema anyway.
+  The editor now pins engine main `f91542f` (OpenProcyon#626), which holds the keyed merge, `map.schema.json` and `--only-mod`.
+  The editor-side restatements marked "until the pin moves" can now switch to the engine.
 - **Rule while the format moves:** build everything, but keep key names behind one small module per file (`map_doc`), so a format
   change touches one place. Anything that names a key (`players[].start`, `nebulae[].cloud`) is re-checked at the freeze.
 

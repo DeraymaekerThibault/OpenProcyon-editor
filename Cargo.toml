@@ -16,9 +16,10 @@ name = "procyon-editor"
 path = "src/main.rs"
 
 [dependencies]
-# OpenProcyon#620 (authoring API, Phase 1) merged on main as b2c01f5; pinned to that commit until a release tag includes it.
-openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "b2c01f5" }
-# Same version and features as the engine's game/Cargo.toml at b2c01f5; keep them equal on every engine upgrade.
+# OpenProcyon#626 (editor authoring, play-test flags, keyed merge, typed map.json) merged on main as f91542f; pinned to that commit until a
+# release tag includes it.
+openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "f91542f" }
+# Same version and features as the engine's game/Cargo.toml at f91542f; keep them equal on every engine upgrade.
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 # bevy_egui defaults minus `picking` (map dragging uses egui's own drag sense; the engine does not build bevy_picking).
 bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }
