@@ -43,6 +43,79 @@ impl Layer {
     }
 }
 
+/// Every array of `map.json` that holds entries an editor adds, deletes or moves: the id-bearing [`Layer`]s and the lobby and
+/// scenery setups. The name is the array's key and the first pointer segment of an edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Array {
+    Objects,
+    Ships,
+    Mines,
+    Players,
+    Teams,
+    Nebulae,
+}
+
+impl Array {
+    pub const ALL: [Array; 6] = [Array::Objects, Array::Ships, Array::Mines, Array::Players, Array::Teams, Array::Nebulae];
+
+    /// The array's key in `map.json`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Array::Objects => Layer::Objects.key(),
+            Array::Ships => Layer::Ships.key(),
+            Array::Mines => Layer::Mines.key(),
+            Array::Players => "players",
+            Array::Teams => "teams",
+            Array::Nebulae => "nebulae",
+        }
+    }
+
+    /// The layer when this is one of the id-bearing arrays.
+    pub fn layer(self) -> Option<Layer> {
+        match self {
+            Array::Objects => Some(Layer::Objects),
+            Array::Ships => Some(Layer::Ships),
+            Array::Mines => Some(Layer::Mines),
+            _ => None,
+        }
+    }
+}
+
+impl From<Layer> for Array {
+    fn from(l: Layer) -> Array {
+        match l {
+            Layer::Objects => Array::Objects,
+            Layer::Ships => Array::Ships,
+            Layer::Mines => Array::Mines,
+        }
+    }
+}
+
+/// The entries of any of the arrays (empty when the key is missing or not an array).
+pub fn array_entries(map: &Value, which: Array) -> &[Value] {
+    array(map, which.key())
+}
+
+/// The key an entry's position is written under: `pos`, and `start` for a player.
+pub fn pos_key(which: Array) -> &'static str {
+    match which {
+        Array::Players => "start",
+        _ => "pos",
+    }
+}
+
+/// A map to start from: a name and the engine's default `world_half` (PROVISIONAL: nothing else is needed to load).
+pub fn new_map(name: &str) -> Value {
+    serde_json::json!({"name": name, "world_half": DEFAULT_WORLD_HALF})
+}
+
+/// Gives `entry` (an object; anything else is left alone) the `id` `id`.
+pub fn set_id(entry: &mut Value, id: i64) {
+    if let Some(o) = entry.as_object_mut() {
+        o.insert("id".into(), Value::from(id));
+    }
+}
+
 fn array<'a>(map: &'a Value, key: &str) -> &'a [Value] {
     map.get(key).and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }

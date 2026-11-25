@@ -52,6 +52,12 @@ would warn). Moving an object is fine (`set`), adding, deleting or reordering is
 teams), with a way to remove an entry (engine requirement 1); (b) the editor writes the whole array and the export warns. Build (a)
 in `diff` behind a trait the engine's rule fills; until then P1 saves moves as `set` and refuses add/delete on an `extends` map
 with a message (a map whole in the mod is fine: a new map is one's own).
+Built (T3, T4): `src/map/project.rs` and `src/project/keyed.rs`. `project::keyed::KeyedRule` carries the engine's rule as its default
+(PROVISIONAL, it restates the engine's keyed merge until the pin moves: `objects`/`ships`/`mines` by `id`, `nebulae`/`players` by
+`name`, `"merge"` overrides, `{"<key>": X, "$remove": true}`), so add and delete on an extending map are keyed entries; they are
+refused only where the list below has an entry with no key (retail decoration), the list is not keyed (`teams`), or the file says
+`"merge": {"<list>": false}`. The pinned engine replaces a list whole, so the editor merges such a file itself (`keyed::extend`)
+and its play-test through the pinned overlay does not see keyed entries until the pin moves.
 Engine needs: 1 (keyed merge), 2 (schemas), 13 (`merge_rule`, already requirement 3 of Phase 3).
 Before freeze: documents, map list, new map, undo, diff of moves, the refusal. After freeze: keyed arrays (needs the engine's rule).
 

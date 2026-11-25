@@ -5,6 +5,7 @@
 
 pub mod diff;
 pub mod guard;
+pub mod keyed;
 pub mod layers;
 pub mod licence;
 pub mod problems;
@@ -122,7 +123,7 @@ impl Doc {
     /// The file this document is saved as (see [`diff`]), and the changes a mod file cannot express. A file that holds nothing but what
     /// is below it is deleted: a retail ship's `extends`-itself file with no key left, a merged table with no entry left.
     pub fn plan(&self) -> (Plan, Vec<String>) {
-        let d = diff::compute(self.kind, &self.base, &self.edited, &self.own, self.parent.as_deref());
+        let d = diff::compute_with(&keyed::EngineRule, &self.rel, self.kind, &self.base, &self.edited, &self.own, self.parent.as_deref());
         let in_place = self.parent.as_deref() == Some(own_id(&self.rel).as_str());
         let empty = |f: &Value, keep: &[&str]| f.as_object().is_some_and(|m| m.keys().all(|k| keep.contains(&k.as_str())));
         let plan = match d.file {
@@ -377,7 +378,14 @@ impl Project {
             base.clone()
         } else {
             // PROVISIONAL: when the engine skipped the file (bad `extends`), show the file itself; the problems list says why.
-            read_merged(&self.root, rel).unwrap_or_else(|_| own.clone())
+            // PROVISIONAL: a file whose lists merge by key is merged here ([`keyed::extend`]); the pinned engine replaces a list whole.
+            let keyed = (kind == DocKind::Extends && parent.is_some() && !keyed::effective(&keyed::EngineRule, rel, own.get("merge")).is_empty())
+                .then(|| keyed::extend(&keyed::EngineRule, rel, base.clone(), &own).ok())
+                .flatten();
+            match keyed {
+                Some((merged, _)) => merged,
+                None => read_merged(&self.root, rel).unwrap_or_else(|_| own.clone()),
+            }
         };
         Ok(Doc { rel: rel.to_string(), kind, base, own, clean: edited.clone(), edited, dirty: false, disk, parent, conflict: None })
     }
