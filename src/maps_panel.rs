@@ -273,7 +273,7 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
             act = Some(Act::Turn(f64::from(st.turn_deg).to_radians()));
         }
     });
-    ui.label(selection_text);
+    ui.add(egui::Label::new(selection_text.as_str()).truncate()).on_hover_text(selection_text.as_str());
     message(ui, st);
     // T7: the players and teams section; what it asks for is done below with the other changes
     st.players.follow_plan(&view2d::selected_refs(&scene, &st.sel));
@@ -424,16 +424,22 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     save
 }
 
+/// The status line (error or info). It always takes one line of height, empty or not, and is cut with "..." when long (the whole text
+/// on hover), so that the plan or the 3D view below does not jump when a message comes or goes.
 fn message(ui: &mut egui::Ui, st: &State) {
-    match (&st.error, st.info.is_empty()) {
-        (Some(e), _) => {
-            ui.colored_label(Color32::LIGHT_RED, e);
+    let (text, colour) = match (&st.error, st.info.is_empty()) {
+        (Some(e), _) => (e.as_str(), Some(Color32::LIGHT_RED)),
+        (None, false) => (st.info.as_str(), None),
+        _ => ("", None),
+    };
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        let mut rich = egui::RichText::new(text);
+        if let Some(c) = colour {
+            rich = rich.color(c);
         }
-        (None, false) => {
-            ui.label(&st.info);
-        }
-        _ => {}
-    }
+        ui.add(egui::Label::new(rich).truncate()).on_hover_text(text);
+    });
 }
 
 /// The result of a change: the error line, or the info line with `ok`.
@@ -521,7 +527,9 @@ fn placer(ui: &mut egui::Ui, st: &mut State, project: &Project) {
     // The catalogue is scanned when the list is first opened; the closure cannot borrow `st` twice, so it is taken out for it.
     let cat_now = st.cat.take();
     let mut cat = cat_now.filter(|(root, _)| *root == project.root);
-    egui::ComboBox::from_id_salt("place-picker").selected_text(text).width(220.0).show_ui(ui, |ui| {
+    // The filter box and "Rescan" are inside the popup: the default `CloseOnClick` would close it on a click in the box. A pick closes
+    // it by `ui.close()` below; a click outside or Esc closes it too.
+    egui::ComboBox::from_id_salt("place-picker").selected_text(text).width(220.0).close_behavior(egui::containers::PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
         let (_, c) = cat.get_or_insert_with(|| (project.root.clone(), catalogue::scan(&project.root)));
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(filter).hint_text("filter").desired_width(120.0));
@@ -748,6 +756,27 @@ mod tests {
 
     fn button(p: Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn the_status_line_takes_the_same_height_empty_or_full() {
+        let height = |error: Option<&str>, info: &str| {
+            let st = State { error: error.map(str::to_string), info: info.to_string(), ..State::default() };
+            let ctx = egui::Context::default();
+            let mut h = 0.0;
+            ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() }, |ui| {
+                let before = ui.cursor().min.y;
+                message(ui, &st);
+                h = ui.cursor().min.y - before;
+            })
+            .textures_delta
+            .clear();
+            h
+        };
+        let empty = height(None, "");
+        assert!(empty > 5.0);
+        assert_eq!(height(None, "Click on the plan to place Rock."), empty);
+        assert_eq!(height(Some(&"a very long refusal ".repeat(40)), ""), empty, "a long text is cut, not wrapped onto more lines");
     }
 
     #[test]
