@@ -356,7 +356,7 @@ fn renaming_a_group_leaves_its_section_open() {
     use bevy_egui::egui::{self, collapsing_header::CollapsingState};
     let (mut p, _) = opened("grouprename");
     let ctx = egui::Context::default();
-    let mut frame = |p: &mut Project| {
+    let frame = |p: &mut Project| {
         let mut open = false;
         let mut err = None;
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))), ..Default::default() };
@@ -369,7 +369,7 @@ fn renaming_a_group_leaves_its_section_open() {
         open
     };
     assert!(!frame(&mut p), "closed to begin with");
-    let mut set_open = |on: bool| {
+    let set_open = |on: bool| {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))), ..Default::default() };
         ctx.run_ui(raw, |ui| {
             let mut s = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(groups::header_salt(0)), false);
