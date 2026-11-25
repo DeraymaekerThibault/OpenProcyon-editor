@@ -46,13 +46,30 @@ fn from_model(ship: &Value, facts: Option<&Facts>, hp: &Hardpoint, new_pos: [f64
             list[at]["pos"] = pos_value(new_pos);
             Ok(vec![Edit::set("/flags", Value::Array(list))])
         }
-        Kind::Engine => Err(key("engine")),
+        Kind::Engine => {
+            // The engine fills an engines entry's missing pos, rot and fx from the model node of the same label (game/src/data/ships/derive.rs:316-324),
+            // so the whole array can be written as labels, with the moved one carrying its pos.
+            let mut list = engines_from_model(facts);
+            let at = list.iter().position(|e| e["label"] == hp.label.as_str()).ok_or_else(|| format!("engine {} is not in the model", hp.label))?;
+            list[at]["pos"] = pos_value(new_pos);
+            Ok(vec![Edit::set("/engines", Value::Array(list))])
+        }
         Kind::Wake => Err(key("wake")),
         Kind::Boarding => {
             Err("boarding points come only from the model; ship.json has no key for them (PROVISIONAL, engine requirement: a ship.json key for boarding points)".into())
         }
         Kind::Crew(_) => Err("crew places are ship.json entries; this one has none".into()),
     }
+}
+
+/// One `{"label"}` entry per model engine port: the engine derives pos, rot, fx and layer of an entry from the node of that name.
+fn engines_from_model(facts: Option<&Facts>) -> Vec<Value> {
+    facts.into_iter().flat_map(|f| f.points.iter()).filter(|p| p.kind == "EnginePortPlacement").map(|p| json!({"label": p.name})).collect()
+}
+
+/// Why a click-to-add of `kind` would be refused right now, whatever the position: shown before the click. `None` when it can work.
+pub fn add_refusal(ship: &Value, facts: Option<&Facts>, kind: Kind) -> Option<String> {
+    add_point(ship, facts, kind, "probe", [0.0; 3]).err()
 }
 
 fn flags_from_model(facts: Option<&Facts>) -> Vec<Value> {
@@ -116,8 +133,15 @@ pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, p
                     list.push(entry);
                     Ok(vec![Edit::set("/flags", Value::Array(list))])
                 }
+                // The engine fills an entry's pos, rot and fx from the model node of the same label, so the nodes can be listed by label.
+                (false, true, Kind::Engine) => {
+                    let mut list = engines_from_model(facts);
+                    list.push(entry);
+                    Ok(vec![Edit::set("/engines", Value::Array(list))])
+                }
+                // A wake entry needs pos and fx and has no node lookup (ships.rs WakeDoc); the fx comes from the hull size, unknown here.
                 (false, true, _) => Err(format!(
-                    "the model has {key} nodes; ship.json's {key} array would replace them all and needs values only the engine derives (PROVISIONAL, engine requirement: a ship.json way to move one derived point without restating all)"
+                    "the model has {key} nodes and ship.json's {key} array replaces all of them; each entry needs an fx the engine derives from the hull size, which the editor does not know (PROVISIONAL, engine requirement: wake entries that fill pos and fx from the node, as engines do)"
                 )),
             }
         }
@@ -248,15 +272,22 @@ mod tests {
     }
 
     #[test]
-    fn model_only_engines_wakes_and_boarding_are_refused_with_a_reason() {
+    fn model_only_wakes_and_boarding_are_refused_with_a_reason() {
         let f = facts();
-        for (kind, label) in [(Kind::Engine, "Engine_1"), (Kind::Wake, "Wake_1"), (Kind::Boarding, "Boarding_1")] {
+        for (kind, label) in [(Kind::Wake, "Wake_1"), (Kind::Boarding, "Boarding_1")] {
             let hp = pick(&json!({}), Some(&f), kind, label);
             let err = move_point(&json!({}), Some(&f), &hp, [1.0, 1.0, 1.0]).unwrap_err();
-            assert!(err.contains("engine") || err.contains("boarding"), "{err}");
+            assert!(err.contains("wake") || err.contains("boarding"), "{err}");
         }
         let hp = pick(&json!({}), Some(&f), Kind::Wake, "Wake_1");
         assert!(move_point(&json!({}), Some(&f), &hp, [f64::NAN, 0.0, 0.0]).is_err());
+    }
+
+    #[test]
+    fn a_model_engine_moves_as_a_label_list_the_engine_fills_from_the_nodes() {
+        let f = facts();
+        let out = moved_only(&json!({}), Some(&f), Kind::Engine, "Engine_1", [2.0, 2.0, 2.0]);
+        assert_eq!(out["engines"], json!([{"label": "Engine_1", "pos": [2.0, 2.0, 2.0]}]));
     }
 
     #[test]
@@ -278,14 +309,28 @@ mod tests {
         let out = run(&ship, &add_point(&ship, Some(&f), Kind::Engine, "E2", [1.0, 1.0, 1.0]).unwrap());
         assert_eq!(out["engines"][1], json!({"label": "E2", "pos": [1.0, 1.0, 1.0]}));
         assert_eq!(out["engines"][0], ship["engines"][0]);
-        // no array and model nodes: engines and wakes refuse, flags restate the nodes
-        assert!(add_point(&json!({}), Some(&f), Kind::Engine, "E2", [0.0; 3]).is_err());
+        // no array and model nodes: engines list the nodes by label (the engine fills the rest from the node of that name), wakes
+        // refuse, flags restate the nodes
+        let out = run(&json!({}), &add_point(&json!({}), Some(&f), Kind::Engine, "E2", [1.0, 1.0, 1.0]).unwrap());
+        assert_eq!(out["engines"], json!([{"label": "Engine_1"}, {"label": "E2", "pos": [1.0, 1.0, 1.0]}]));
         assert!(add_point(&json!({}), Some(&f), Kind::Wake, "W2", [0.0; 3]).is_err());
         let out = run(&json!({}), &add_point(&json!({}), Some(&f), Kind::Flag, "Flag_Mid", [0.0, 0.0, 8.0]).unwrap());
         assert_eq!(out["flags"].as_array().unwrap().len(), 3);
         // no array and no model nodes: a new array of one
         let out = run(&json!({}), &add_point(&json!({}), None, Kind::Wake, "W", [0.0; 3]).unwrap());
         assert_eq!(out["wakes"], json!([{"label": "W", "pos": [0.0, 0.0, 0.0]}]));
+    }
+
+    #[test]
+    fn a_refusal_is_known_before_the_click() {
+        let f = facts();
+        let ship = json!({});
+        assert!(add_refusal(&ship, Some(&f), Kind::Wake).is_some_and(|m| m.contains("wakes")));
+        assert_eq!(add_refusal(&ship, Some(&f), Kind::Engine), None);
+        assert_eq!(add_refusal(&ship, Some(&f), Kind::Gun), None);
+        assert_eq!(add_refusal(&ship, None, Kind::Wake), None, "no model nodes: a new array");
+        assert_eq!(add_refusal(&json!({"wakes": []}), Some(&f), Kind::Wake), None, "an array in ship.json: append");
+        assert!(add_refusal(&ship, None, Kind::TowTower).is_some(), "a tow end needs the other end");
     }
 
     #[test]
