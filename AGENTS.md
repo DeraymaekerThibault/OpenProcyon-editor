@@ -36,6 +36,7 @@ engine's `game/Cargo.toml` at the pinned tag.
 - `cargo run` opens the editor; it starts without assets. It finds the import through `PROCYON_ASSETS`, else the engine's
   per-user folder (`~/.local/share/openprocyon/assets`, Windows `%APPDATA%\openprocyon\assets`).
 - `.env` (untracked) is read at startup: plain `KEY=VALUE` lines (`#` comments, optional quotes, no expansion). The environment wins: a variable that is already set is not overwritten. Put `PROCYON_ASSETS` and `PROCYON_GAME_BIN` there; play-test games inherit them.
+- `Cargo.toml` sets `debug = "line-tables-only"` for the dev and test profiles (none for dependencies): full debug info made each test binary ~2.4 GB. Set `CARGO_PROFILE_DEV_DEBUG=2` for a debugger session.
 - `tools/check.sh` is the validation gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test`. It prints
   `GATE OK` and must pass before every commit.
 - `.github/workflows/ci.yml` runs on every push and pull request: job `gate` runs `tools/check.sh` (and requires `GATE OK`); job

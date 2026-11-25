@@ -28,8 +28,18 @@ serde_json = { version = "1", features = ["preserve_order"] } # same as the engi
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 
 # Copied from the engine: dependencies optimised, our own code quick to rebuild.
+# Debug info is the bulk of a debug build here (each test binary was ~2.4 GB with full info): line tables keep backtraces readable,
+# and the dependencies carry none.
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false
