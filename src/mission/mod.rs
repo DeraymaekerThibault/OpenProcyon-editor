@@ -10,6 +10,7 @@
 pub mod campaign;
 pub mod catalogue;
 pub mod doc;
+pub mod groups;
 pub mod plan;
 pub mod project;
 pub mod report;
