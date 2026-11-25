@@ -202,6 +202,24 @@ or a rule with no name, makes the engine skip the whole file (`modding.rs:168-17
 one: no import here), and the editor then refuses keyed saves for that mission and says why. Requirement 2 covers these.
 Engine needs: 2, 3.
 
+**Built (T14), `tests/mission_retail.rs` on a synthetic retail import, each saved file checked through the engine's
+`authoring::overlay_into` + `read_merged`.** What the saves look like (observed, not assumed):
+
+- a change that touches no entry of a keyed list (an action's text, a ship's `pos`) is saved as `set` pointers by index
+  (`{"extends": "mission04", "set": {"/rules/0/actions/1/text": "B!"}}`): nothing is restated;
+- as soon as the same save adds or deletes an entry of that list, the list is written by key, and a changed rule is then written with
+  its whole `actions` (or `conditions`) list, because arrays inside an entry replace: the "restates the action list" limit shows only
+  then;
+- an added rule is appended after all retail rules (`["Start", "Middle", "End", "Late"]`); a deleted one is `{"name": ..., "$remove":
+  true}`; a rename is a removal plus an appended rule;
+- a retail list with a repeated or missing key: the editor refuses keyed adds and deletes on it (`check_add_delete`), a `set`-only
+  edit (a ship move) still saves and applies, and a hand-written file that names a rule by key is skipped whole by the engine (its
+  `skipped` list), so retail shows unchanged. Whether a real retail mission has such a list is still unchecked (no import here).
+
+The Missions tab shows these limits (`mission::project::retail_limits`, drawn by `missions_panel`) while a mission that extends
+another is open. It only says what the merge does; the engine is unchanged. Whether to change it (requirement 2: "insert after",
+whole-list restating) is the maintainer's open question 1 (Risks, 1).
+
 ### P12. The gate run (M)
 
 See "Phase 5 gate" below.
@@ -344,7 +362,8 @@ check's speed on a large mission, retail missions as diffs (duplicate rule names
 ## Risks
 
 1. Keyed merge limits on retail missions (append order, whole `actions` lists, duplicate names skipping a file): P11 may be much
-   weaker than P1 suggests until requirement 2. Mitigation: the editor says so per rule; the maintainer decides how far retail
+   weaker than P1 suggests until requirement 2. Observed in T14: edits that add or delete no list entry save as `set` pointers and are
+fine; adds, deletes and renames append or restate (P11). Mitigation: the editor says so on the Missions tab; the maintainer decides how far retail
    diffs go for v0.3.
 2. No mission or media schema (1): forms spell keys by hand in `mission/doc.rs`; a format change touches that file only.
 3. The play-test report rests on a log line until requirement 5; a change of the line's wording breaks it silently (a test pins

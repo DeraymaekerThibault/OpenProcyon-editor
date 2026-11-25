@@ -5,6 +5,7 @@
 
 use bevy_egui::egui;
 
+use crate::mission::project::retail_limits;
 use crate::mission::{campaign, plan, report, rules_view, ships, speech, tasks};
 use crate::project::Project;
 use crate::project_panel;
@@ -20,6 +21,7 @@ pub fn tab(ui: &mut egui::Ui, ps: &mut project_panel::State) {
 
 fn sections(ui: &mut egui::Ui, project: &mut Project) {
     rules_view::picker(ui, project);
+    retail_notice(ui, project);
     ui.separator();
     section(ui, "Players, ships and groups", |ui| ships::show(ui, project));
     section(ui, "Plan", |ui| plan::show(ui, project));
@@ -32,4 +34,18 @@ fn sections(ui: &mut egui::Ui, project: &mut Project) {
 
 fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
     egui::CollapsingHeader::new(title).default_open(true).show(ui, body);
+}
+
+/// The limits of a retail mission saved as a diff (docs/phase5.md P11), shown while one is open. Only says what the engine's merge does.
+fn retail_notice(ui: &mut egui::Ui, project: &Project) {
+    let Some(id) = rules_view::selected_mission(ui.ctx()) else { return };
+    let notes = retail_limits(project, &id);
+    if notes.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new(format!("{id} extends a retail mission: what saves as a diff")).default_open(true).show(ui, |ui| {
+        for n in notes {
+            ui.colored_label(egui::Color32::YELLOW, format!("- {n}"));
+        }
+    });
 }

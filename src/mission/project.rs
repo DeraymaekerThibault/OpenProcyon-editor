@@ -260,6 +260,31 @@ pub fn new_mission(project: &mut Project, id: &str, map: Option<&str>) -> Result
     result
 }
 
+// ---- the limits of a retail mission saved as a diff ----
+
+/// What the user must know before changing a mission that extends a retail one (docs/phase5.md P11, open question 1), one sentence
+/// each; empty for a mission of the mod's own and for one that is not open. The editor only SAYS these: it changes nothing about how
+/// the engine merges (`modding.rs:154-199` of the engine, PROVISIONAL until the maintainer decides on engine requirement 2).
+pub fn retail_limits(project: &Project, id: &str) -> Vec<String> {
+    let Ok(rel) = mission_rel(id) else { return vec![] };
+    let Some(d) = project.doc(&rel).filter(|d| !d.edited.is_null() && !whole(project, &rel)) else { return vec![] };
+    let mut out = vec![
+        "A rule you add runs after all retail rules (the engine appends; there is no \"insert after\" yet).".to_string(),
+        "Changing one action or condition of a retail rule saves that rule's whole actions list (or conditions list): arrays inside an entry replace.".to_string(),
+        "Renaming a retail rule is a removal plus a new rule appended at the end.".to_string(),
+    ];
+    for (ptr, field, noun) in [("/rules", "name", "rule"), ("/ships", "id", "ship"), ("/points", "Name", "point")] {
+        if let Some(list) = d.base.pointer(ptr).and_then(Value::as_array)
+            && let Err(e) = keyed::keys_of(list, field)
+        {
+            out.push(format!(
+                "The retail {noun} list has a {noun} with a repeated or missing '{field}' ({e}): the engine skips a mod file that extends this mission, so keyed edits of it are refused and the retail mission shows unchanged."
+            ));
+        }
+    }
+    out
+}
+
 // ---- list entries on an extending mission ----
 
 fn whole(project: &Project, rel: &str) -> bool {
