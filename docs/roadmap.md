@@ -4,7 +4,7 @@ Nov 24, 2026 · @Thibault
 
 ## Summary
 
-We build one editor for ships, weapons, maps and missions as a Rust app on Bevy 0.20 with egui, in its own repository. It stands on an authoring contract that lives in the engine: schemas, a mod checker, a public authoring API and versioned formats. The contract comes first because the editor, the game and hand-written mods all need it. Each part of the editor is built only once its file format is frozen, so nothing is redone.
+We build one editor for ships, weapons, maps and missions as a Rust app on Bevy 0.20 with egui, in its own repository. It stands on an authoring contract that lives in the engine: schemas, a mod checker, a public authoring API and versioned formats. The contract comes first because the editor, the game and hand-written mods all need it. Until the v0.3 release formats may change freely and the editor follows them; the formats are frozen just before that release.
 
 Modding with files keeps working the whole time; every engine phase also makes hand-written mods easier (autocomplete in VS Code, clear errors).
 
@@ -14,8 +14,8 @@ Modding with files keeps working the whole time; every engine phase also makes h
 | 1. Authoring contract | engine | typed loading, schemas, `--check-mod`, authoring API, format versions, crew points and texture overrides without retail models | Phase 0 says go |
 | 2. Freeze ships and weapons | engine | format 1 for `ship.json`, `guns.json`, `bullets.json`, `menu/strings.json`, `mod.json` | Phase 1 done |
 | 3. Editor shell, ships and weapons | editor | open a mod, edit with forms, 3D ship preview, play-test, export | Phase 2 done |
-| 4. Map editor | editor | place scenery, starts, nebulae, mines | `map.json` frozen with v0.3 |
-| 5. Mission editor | editor | ships, groups, paths, volumes, tasks, rules, speech, templates | `mission.json` frozen with v0.3 |
+| 4. Map editor | editor | place scenery, starts, nebulae, mines | now; `map.json` format 1 gates the v0.3 release |
+| 5. Mission editor | editor | ships, groups, paths, volumes, tasks, rules, speech, templates | now; `mission.json` and `media.json` format 1 gate the v0.3 release |
 | 6. Live tools | engine | hot reload, effect and look tuning in the running game | after Phase 3 |
 
 About the repository rules: AGENTS.md forbids another fidelity overview, so this plan lives outside the repository. Its work items go into the existing "Modding platform" milestone and #156.
@@ -55,7 +55,7 @@ These decisions are made once and hold for every phase.
 2. **The editor is a separate repository.** It is a Rust crate on Bevy 0.20 and bevy\_egui that links a tagged `openprocyon` release. Its dependencies, release cadence and contributors stay out of the engine's check gate.
 3. **Schema first.** Forms, dropdowns and checks are generated from the engine's schemas and the rule schema, never hand-built per file.
 4. **The editor writes diffs, not copies.** A change to a retail ship is saved as `extends` plus the changed keys, in the importer's JSON layout (`tools/jsonio.py`). Mods stay small, legal and readable by hand.
-5. **Freeze before building.** Each editor phase starts only once its formats are at a frozen, versioned format. Later changes come with a migration in the engine that upgrades old files.
+5. **Freeze before release, not before building.** We are pre-release: formats may change freely and the editor follows them. Editor phases 4 and 5 start now and do not wait on the freeze. The v0.3 freeze (format 1 for `map.json`, `mission.json`, `media.json` and `script.json`) happens just before the v0.3 release and gates that release, not the start of work. Changes after the freeze come with a migration in the engine that upgrades old files.
 6. **Play-testing uses the real game.** The editor launches the game binary with `--mod`, `--map`, `--ship` and `--fire-rule`. It never simulates a battle itself.
 7. **Modelling stays in Blender; placement moves into the editor.** Meshes, UVs and materials are made in Blender. Gun mounts, engines, wakes, flags, boarding, dock and tow points are placed in the editor on the 3D model and saved to `ship.json` and the data files, never written back into the GLB. This also works on retail hulls that a mod only extends.
 8. **Same legal rules as the engine.** No game content in either repository; the editor reads only the player's own import. Its export does not check a mod for retail content: by maintainer decision, users are responsible for what they share. The hygiene test is copied into the editor repository.
@@ -88,11 +88,11 @@ The accented box is the contract: everything the editor knows about valid data c
 
 ## Phases
 
-Seven phases, each closed by a gate that can be checked; the map and mission phases wait on the v0.3 format freeze, not on a date. Sizes are rough person-weeks for one developer working full time.
+Seven phases, each closed by a gate that can be checked; the map and mission phases start now and are not held by the v0.3 format freeze, which gates the release. Sizes are rough person-weeks for one developer working full time.
 
 &#91;embedded content: roadmap · 7 phases, 2 repositories, 1 outside gate\]
 
-Phase 6 runs in the engine beside the map and mission phases; only the v0.3 freeze sets when Phases 4 and 5 can start.
+Phase 6 runs in the engine beside the map and mission phases; Phases 4 and 5 start now; the v0.3 freeze only gates their release.
 
 ### Phase 0. Decisions and spike (about 2 weeks, both repositories)
 
@@ -133,7 +133,7 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 
 ### Phase 4. Map editor (about 8 to 12 weeks, editor)
 
-- Waits on `map.json` format 1 (v0.3).
+- Starts now; does not wait on the freeze. `map.json` format 1 (v0.3) must be frozen before the v0.3 release.
 - Scenery catalogue from the import; place, rotate and snap; top-down and 3D views; starts and teams; nebulae; mines; `world_half`; sky and lighting pickers; backdrop picture.
 - Linked pieces kept in agreement: a nebula's map entry, environment entry and volume are made together; the sun of a baked sky and the map's `lighting` share one setting.
 - A mod's own scenery: collision and dock data derived from its model (an engine tool the editor calls), instead of separate scripts per scene.
@@ -145,7 +145,7 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 
 ### Phase 5. Mission editor (about 12 to 16 weeks, editor)
 
-- Waits on `mission.json` and `media.json` format 1 (v0.3).
+- Starts now; does not wait on the freeze. `mission.json` and `media.json` format 1 (v0.3) must be frozen before the v0.3 release.
 - Ships and groups, paths, volumes, points, tasks, rules, speech and messages, campaign order; detailed in the next section.
 - Play-test report: which rules fired and which never did, so losing and optional branches are not shipped untested.
 - Open a retail mission from the import and save the changes as a diff, as for ships and maps (backlog B5).
@@ -247,7 +247,7 @@ computes; the editor only shows it at the right place.
 **B4. Skirmish maps.** Most community content is skirmish maps, so Phase 4 targets them first (see Phase 4).
 
 - The engine gaps today: there is no `map.schema.json` or `script.schema.json` yet (`--dump-schemas` writes ship, guns, bullets,
-  crew nodes and mod). The map editor needs both before it starts; add them to the v0.3 freeze list.
+  crew nodes and mod). The map editor needs both before the v0.3 release; add them to the v0.3 freeze list.
 - Multiplayer: retail plays skirmish maps in multiplayer, but the engine does not have multiplayer yet (its menu shows the retail
   button, not implemented). The editor play-tests skirmish maps against computer players through `--lobby`. A map script is
   deterministic (no wall clock, no randomness), which is what multiplayer will need; keep the editor from adding anything that
@@ -282,7 +282,7 @@ mods over the import in a separate overlay folder; switching the mod off gives p
 
 ## Risks and mitigations
 
-The biggest risk is building on formats that still move; the freeze gates and engine-side migrations are the answer to it.
+The biggest risk is building on formats that still move; the answer is that the editor follows formats while they move, the v0.3 freeze gates the release, and engine-side migrations cover later changes.
 
 | Risk | Mitigation |
 | --- | --- |

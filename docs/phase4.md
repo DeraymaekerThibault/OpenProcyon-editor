@@ -1,12 +1,13 @@
 # Phase 4: map editor, plan and work list
 
 What the map editor needs, package by package, in build order: what it reuses from the spike and Phase 3, what is new, what it needs
-from the engine, and what can be built before the format freeze. It is written so a work session can start at "Tomorrow" at once.
+from the engine, and what depends on the format freeze (which gates the release, not the start of work). It is written so a work session can start at "Tomorrow" at once.
 Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `docs/roadmap.md` (Phase 4, principles 1 to 9).
 
 ## Status
 
-- **Gate: `map.json` format 1 (v0.3 freeze).** The roadmap starts Phase 4 only when the map files are frozen. They are not: `map.json`
+- **Freeze: `map.json` format 1 (v0.3).** Policy (roadmap principle 5): we are pre-release, formats may change freely and the editor
+  follows them; Phase 4 starts now. The freeze comes just before the v0.3 release and gates the release. Today `map.json`
   has no `format` key, no schema and no typed loader. The open decision "which formats v0.3 freezes" (`map.json`, `mission.json`,
   `media.json`, `script.json`) is still unticked in the roadmap.
 - **Prototype, not merged.** A typed `map.json` with `map.schema.json` and `script.schema.json` is being prototyped on engine branch
@@ -15,9 +16,8 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
 - **Engine checked.** Everything below about the engine was read from engine main `42083e4` (and its uncommitted `authoring` work).
   The editor still pins `b2c01f5`, which is not in the local engine clone, so a point can differ at the pin (PROVISIONAL). Re-check
   against the pin before relying on a "present" below; the pin moves to a tag that holds the map schema anyway.
-- **Rule for the work before the freeze:** build only what does not depend on the file's keys: views, camera, picking, snapping math,
-  catalogue listing, the save path. Everything that names a key (`players[].start`, `nebulae[].cloud`) waits, or goes behind one
-  small module per file so the freeze changes one place.
+- **Rule while the format moves:** build everything, but keep key names behind one small module per file (`map_doc`), so a format
+  change touches one place. Anything that names a key (`players[].start`, `nebulae[].cloud`) is re-checked at the freeze.
 
 ## What the spike and Phase 3 give us
 
@@ -204,7 +204,10 @@ Present and used as is: `overlay_into`, `read_merged` / `read_map`, `to_json_str
 
 ## Before the freeze, and after
 
-| Can be built now and kept | Must wait for the freeze (or the engine) |
+Phase 4 does not wait on the freeze: the right column is what is re-checked against the frozen format (or needs the engine), not
+what is held back.
+
+| Stable whatever the format does | Re-check at the freeze (or needs the engine) |
 | --- | --- |
 | P2 plan transforms and hit tests; P3 snap math, heading to matrix, id allocation, catalogue scan; P7 camera, pick, gizmos (reuse); P1 documents, undo, moves as `set`; pure `map_doc` accessors | key names, defaults and ranges (P4 to P6, P8); keyed arrays (requirement 1); nebula linking details; collision derivation; schema-driven forms for maps |
 
