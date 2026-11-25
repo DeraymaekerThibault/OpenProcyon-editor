@@ -1,6 +1,7 @@
 //! The "Missions" tab (docs/phase5.md): the sections of the mission editor, each drawn by its own module under
 //! [`crate::mission`]. This file only lays the sections out and passes the open project; from T5 on it is owned by the rule-list
-//! task, and the other tasks fill their own module's `show` and do not edit it.
+//! task, and the other tasks fill their own module's `show` and do not edit it. The mission picker comes first; the open mission's
+//! id is [`crate::mission::rules_view::selected_mission`] for the sections below.
 
 use bevy_egui::egui;
 
@@ -18,6 +19,8 @@ pub fn tab(ui: &mut egui::Ui, ps: &mut project_panel::State) {
 }
 
 fn sections(ui: &mut egui::Ui, project: &mut Project) {
+    rules_view::picker(ui, project);
+    ui.separator();
     section(ui, "Players, ships and groups", |ui| ships::show(ui, project));
     section(ui, "Plan", |ui| plan::show(ui, project));
     section(ui, "Tasks and the end", |ui| tasks::show(ui, project));
