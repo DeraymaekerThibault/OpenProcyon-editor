@@ -7,10 +7,13 @@
 //! - [`project`]: maps as project documents: list, open (merged over the import), new, move, add, delete.
 //! - [`settings`]: the map settings form (name, description, `world_half`, sky, lighting, backdrop) and the edits it writes.
 //! - [`players`]: players, teams, starts and the formation preview (T7).
+//! - [`nebula`], [`mines`] (T8): nebula polygons and the three-record writer; mine types and placing.
 //! - [`view2d`]: what the Maps tab's plan view shows and what its drags, turns, placements and deletes write (no drawing).
 
 pub mod catalogue;
 pub mod doc;
+pub mod mines;
+pub mod nebula;
 pub mod players;
 pub mod project;
 pub mod settings;

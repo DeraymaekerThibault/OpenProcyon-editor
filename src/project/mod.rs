@@ -182,6 +182,8 @@ pub struct Command {
     /// The step came from typing or dragging a field, so the next such edit of the same field may join it. A button action (Reset,
     /// Revert, add, remove) never does, and a save ends it ([`Project::save`]).
     open: bool,
+    /// T8: steps of one group (see [`Project::do_group`]) share a number and are undone and redone together; 0 is no group.
+    group: u64,
 }
 
 /// What a save did.
@@ -535,7 +537,7 @@ impl Project {
             last.edits[0].old = first_old;
             return Ok(());
         }
-        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before, open: coalesce });
+        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before, open: coalesce, group: 0 });
         if self.undo.len() > MAX_UNDO {
             self.undo.remove(0);
         }
@@ -553,20 +555,44 @@ impl Project {
         self.redo.last().map(|c| c.label.as_str())
     }
 
-    /// Takes back the last step (in whichever document it was); returns its label.
+    /// Takes back the last step (in whichever document it was); returns its label. A step of a group ([`Project::do_group`]) takes
+    /// the rest of its group with it.
     pub fn undo(&mut self) -> Option<String> {
+        let first = self.undo_one()?;
+        let label = first.label.clone();
+        let group = first.group;
+        self.redo.push(first);
+        while group != 0 && self.undo.last().is_some_and(|c| c.group == group) {
+            let Some(next) = self.undo_one() else { break };
+            self.redo.push(next);
+        }
+        Some(label)
+    }
+
+    /// Restores the document of the last undo step and returns the step (the caller pushes it on the redo stack).
+    fn undo_one(&mut self) -> Option<Command> {
         let cmd = self.undo.pop()?;
         let Ok(i) = self.open_doc(&cmd.rel) else { return None };
         let doc = &mut self.docs[i];
         doc.edited = cmd.before.clone();
         doc.refresh_dirty();
-        let label = cmd.label.clone();
-        self.redo.push(cmd);
+        Some(cmd)
+    }
+
+    /// Applies the last undone step again (and the rest of its group); returns its label.
+    pub fn redo(&mut self) -> Option<String> {
+        let first = self.redo_one()?;
+        let label = first.label.clone();
+        let group = first.group;
+        self.undo.push(first);
+        while group != 0 && self.redo.last().is_some_and(|c| c.group == group) {
+            let Some(next) = self.redo_one() else { break };
+            self.undo.push(next);
+        }
         Some(label)
     }
 
-    /// Applies the last undone step again; returns its label.
-    pub fn redo(&mut self) -> Option<String> {
+    fn redo_one(&mut self) -> Option<Command> {
         let cmd = self.redo.pop()?;
         let Ok(i) = self.open_doc(&cmd.rel) else { return None };
         let doc = &mut self.docs[i];
@@ -578,9 +604,27 @@ impl Project {
         }
         doc.edited = next;
         doc.refresh_dirty();
-        let label = cmd.label.clone();
-        self.undo.push(cmd);
-        Some(label)
+        Some(cmd)
+    }
+
+    /// T8: edits to SEVERAL documents as one undo step (a nebula is three records in two files that must stay equal). All or
+    /// nothing: when one document refuses, the ones before it are put back. `steps` is `(document, edits)`; a step with no edits is
+    /// skipped. Undo and redo take the whole group.
+    pub fn do_group(&mut self, label: &str, steps: Vec<(String, Vec<Edit>)>) -> Result<(), String> {
+        static NEXT_GROUP: AtomicUsize = AtomicUsize::new(1);
+        let group = NEXT_GROUP.fetch_add(1, Ordering::Relaxed) as u64;
+        for (pushed, (rel, edits)) in steps.into_iter().filter(|(_, e)| !e.is_empty()).enumerate() {
+            if let Err(e) = self.push_edits(&rel, label, edits, false) {
+                for _ in 0..pushed {
+                    self.undo_one();
+                }
+                return Err(e);
+            }
+            if let Some(c) = self.undo.last_mut() {
+                c.group = group;
+            }
+        }
+        Ok(())
     }
 
     /// Writes every document with unsaved edits as a diff (see [`diff`]), then rebuilds the overlay. A document whose new file is

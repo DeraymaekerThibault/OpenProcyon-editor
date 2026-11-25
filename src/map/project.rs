@@ -103,7 +103,7 @@ pub fn new_map(project: &mut Project, id: &str) -> Result<usize, String> {
     project.open_new_doc(&rel, None, doc::new_map(id)).map_err(|e| if e.ends_with("exists already") { format!("the mod has a map '{id}' already: open it") } else { e })
 }
 
-fn is_whole(project: &Project, rel: &str) -> bool {
+pub(super) fn is_whole(project: &Project, rel: &str) -> bool {
     project.doc(rel).is_some_and(|d| d.kind == DocKind::Replaced || d.parent.is_none())
 }
 
@@ -122,7 +122,7 @@ pub(super) fn check_add_delete(project: &Project, rel: &str, which: Array) -> Re
 }
 
 /// `entry` can be added to `list` under `field`: it has the key and no entry of `list` has the same.
-fn check_key(entry: &Value, list: &[Value], field: &str, which: Array) -> Result<(), String> {
+pub(super) fn check_key(entry: &Value, list: &[Value], field: &str, which: Array) -> Result<(), String> {
     let key = keyed::key_text(entry.get(field)).ok_or_else(|| format!("an entry of {} in a map that extends another needs a '{field}' to be told apart", which.key()))?;
     if list.iter().any(|e| keyed::key_text(e.get(field)).as_deref() == Some(key.as_str())) {
         return Err(format!("{} already has an entry with '{field}' {key}", which.key()));
