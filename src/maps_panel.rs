@@ -114,6 +114,7 @@ impl State {
         self.players.reset();
         // end T7
         self.t8 = Default::default(); // T8
+        self.settings = Default::default(); // the backdrop path and its message belong to the map they were typed for
         // T10
         self.skirmish.reset();
         // end T10
@@ -1006,6 +1007,20 @@ mod tests {
         assert_eq!(rig.st.map.as_deref(), Some("mine"));
         assert!(rig.st.maps.iter().any(|m| m.id == "mine" && m.in_mod));
         assert_eq!(rig.st.view.world_half, 1000.0, "the new map's own world_half");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn switching_maps_clears_the_backdrop_path_and_its_message() {
+        let (root, mut rig) = Rig::new("switch");
+        rig.open_red();
+        rig.st.settings.picture = "/tmp/other/backdrop.png".into();
+        rig.st.settings.info = "Copied to maps/red/backdrop.png.".into();
+        maps::new_map(rig.project(), "mine").unwrap();
+        let p = rig.ps.project.as_mut().unwrap();
+        rig.st.show_map(p, "mine");
+        rig.frame(vec![]);
+        assert!(rig.st.settings.picture.is_empty() && rig.st.settings.info.is_empty(), "{:?} {:?}", rig.st.settings.picture, rig.st.settings.info);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
