@@ -152,6 +152,8 @@ enum Act {
     Duplicate,
     Delete,
     Turn(f64),
+    /// Each selected entry turned about itself.
+    TurnEach(f64),
 }
 
 /// The tab. Without a project there is nothing to edit: the left panel opens or makes a mod.
@@ -270,8 +272,21 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         }
         ui.separator();
         ui.add(egui::DragValue::new(&mut st.turn_deg).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
-        if ui.add_enabled(any, egui::Button::new("Turn")).on_hover_text("Turn the selection clockwise about its centre (or drag the handle above it)").clicked() {
-            act = Some(Act::Turn(f64::from(st.turn_deg).to_radians()));
+        let yaw = f64::from(st.turn_deg).to_radians();
+        if st.sel.len() > 1 {
+            // Several: turning each where it is is what ships and objects usually want; turning together swings them round their centre.
+            if ui.add_enabled(any, egui::Button::new("Turn each")).on_hover_text("Turn every selected entry clockwise where it stands (the positions stay)").clicked() {
+                act = Some(Act::TurnEach(yaw));
+            }
+            if ui
+                .add_enabled(any, egui::Button::new("Turn together"))
+                .on_hover_text("Turn the selection clockwise about its shared centre: the entries swing round it (or drag the handle above it)")
+                .clicked()
+            {
+                act = Some(Act::Turn(yaw));
+            }
+        } else if ui.add_enabled(any, egui::Button::new("Turn")).on_hover_text("Turn the selection clockwise about its centre (or drag the handle above it)").clicked() {
+            act = Some(Act::Turn(yaw));
         }
     });
     ui.add(egui::Label::new(selection_text.as_str()).truncate()).on_hover_text(selection_text.as_str());
@@ -335,6 +350,10 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
             let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
             let label = change_label("Turn", &scene, &st.sel);
             done(st, maps::change_entries(project, &id, &label, &changes), "");
+        } else if let Some(Act::TurnEach(yaw)) = act {
+            let changes = view2d::turn_each_changes(map, &scene, &st.sel, yaw);
+            let label = change_label("Turn each of", &scene, &st.sel);
+            done(st, maps::change_entries(project, &id, &label, &changes), "");
         } else if act == Some(Act::Delete) {
             delete_selected(st, project, &id, &scene);
         } else if act == Some(Act::Duplicate) {
@@ -397,6 +416,10 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     } else if let Some(Act::Turn(yaw)) = act {
         let changes = view2d::turn_changes(&map_now(), &scene, &st.sel, yaw);
         let label = change_label("Turn", &scene, &st.sel);
+        done(st, maps::change_entries(project, &id, &label, &changes), "");
+    } else if let Some(Act::TurnEach(yaw)) = act {
+        let changes = view2d::turn_each_changes(&map_now(), &scene, &st.sel, yaw);
+        let label = change_label("Turn each of", &scene, &st.sel);
         done(st, maps::change_entries(project, &id, &label, &changes), "");
     } else if act == Some(Act::Delete) {
         delete_selected(st, project, &id, &scene);

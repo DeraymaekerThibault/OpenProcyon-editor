@@ -267,6 +267,12 @@ pub fn turn_edits(mission: &Value, items: &[Item], yaw: f64) -> Vec<Edit> {
     out
 }
 
+/// What turning each item clockwise by `yaw` radians in place writes: every item about its own centre, so none moves (a ship or the
+/// start only changes its facing). [`turn_edits`] turns the items together about their shared centre.
+pub fn turn_each_edits(mission: &Value, items: &[Item], yaw: f64) -> Vec<Edit> {
+    items.iter().flat_map(|it| turn_edits(mission, std::slice::from_ref(it), yaw)).collect()
+}
+
 // ---- vertices (pure) ----
 
 fn vertex_xyz(table: GeoTable, v: &Value) -> Option<[f64; 3]> {
@@ -496,10 +502,21 @@ pub fn move_items(project: &mut Project, id: &str, items: &[Item], delta: [f64; 
     commit(project, id, &move_label(items), move_edits(&m, items, delta))
 }
 
-/// Turns the items clockwise by `yaw` radians about their centre as one undo step.
+/// Turns the items clockwise by `yaw` radians about their shared centre as one undo step (several items swing round it; see
+/// [`turn_each`] to turn them where they are).
 pub fn turn_items(project: &mut Project, id: &str, items: &[Item], yaw: f64) -> Result<(), String> {
     let (_, m) = mission_value(project, id)?;
     commit(project, id, &move_label(items).replacen("Move", "Turn", 1), turn_edits(&m, items, yaw))
+}
+
+/// Turns each of the items clockwise by `yaw` radians in place (about its own centre) as one undo step.
+pub fn turn_each(project: &mut Project, id: &str, items: &[Item], yaw: f64) -> Result<(), String> {
+    let (_, m) = mission_value(project, id)?;
+    let label = match items {
+        [_] | [] => move_label(items).replacen("Move", "Turn", 1),
+        _ => format!("Turn {} items in place", items.len()),
+    };
+    commit(project, id, &label, turn_each_edits(&m, items, yaw))
 }
 
 fn move_label(items: &[Item]) -> String {
@@ -607,6 +624,25 @@ mod tests {
         assert!(removed(Kind::Path, mdoc::geo_items(&v, GeoTable::Paths, "P"), 0).is_err());
         assert!(removed(Kind::PointSet, mdoc::geo_items(&v, GeoTable::PointSets, "S"), 0).is_err());
         assert_eq!(removed(Kind::Volume, &[json!([0, 0]), json!([1, 0]), json!([1, 1]), json!([0, 1])], 3).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn turning_each_in_place_keeps_every_position_and_turns_every_facing() {
+        let mission = m();
+        let items = [Item::Ship(0), Item::Start];
+        let each = turn_each_edits(&mission, &items, std::f64::consts::PI);
+        let xyz = |e: &Edit| e.new.clone().unwrap();
+        for it in &items {
+            let at = item_xyz(&mission, it).unwrap();
+            let e = each.iter().find(|e| e.pointer == it.pointer()).unwrap_or_else(|| panic!("{it:?}: {each:?}"));
+            let v: Vec<f64> = xyz(e).as_array().unwrap().iter().filter_map(Value::as_f64).collect();
+            assert!((v[0] - at[0]).abs() < 1e-6 && (v[1] - at[1]).abs() < 1e-6, "{it:?} stays: {v:?} vs {at:?}");
+        }
+        let together = turn_edits(&mission, &items, std::f64::consts::PI);
+        let moved = |edits: &[Edit]| edits.iter().find(|e| e.pointer == items[0].pointer()).map(xyz);
+        assert_ne!(moved(&each), moved(&together), "the shared-centre turn swings the ship; the in-place one does not");
+        assert!(each.iter().any(|x| x.pointer == "/ships/0/rot") && each.iter().any(|x| x.pointer == "/player_start/forward"));
+        assert!(turn_each_edits(&mission, &items, 0.0).is_empty());
     }
 
     #[test]

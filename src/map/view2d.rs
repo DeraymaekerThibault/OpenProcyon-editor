@@ -171,8 +171,12 @@ pub fn turn_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Ve
     if yaw == 0.0 || !yaw.is_finite() {
         return vec![];
     }
-    let refs = selected_refs(scene, sel);
-    let before = placements(map, &refs);
+    turn_refs(map, &selected_refs(scene, sel), yaw)
+}
+
+/// Turns `refs` together about their shared centre.
+fn turn_refs(map: &Value, refs: &[Ref], yaw: f64) -> Vec<Change> {
+    let before = placements(map, refs);
     let after = select::transform_group(&before, GroupTransform { delta: [0.0, 0.0], yaw });
     let (s, c) = yaw.sin_cos();
     after
@@ -199,6 +203,15 @@ pub fn turn_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Ve
             Some(ch)
         })
         .collect()
+}
+
+/// Like [`turn_changes`], but every selected entry turns about its own centre: none moves. The selection's own facing is all that changes.
+pub fn turn_each_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Vec<Change> {
+    if yaw == 0.0 || !yaw.is_finite() {
+        return vec![];
+    }
+    let refs = selected_refs(scene, sel);
+    refs.iter().flat_map(|r| turn_refs(map, std::slice::from_ref(r), yaw)).collect()
 }
 
 /// The turn the pointer makes about `centre` (screen) from `from` to `now`, clockwise radians in (-pi, pi], snapped to the angle
@@ -341,6 +354,18 @@ mod tests {
         // f32 noise does not reach the file
         let ch = move_changes(&m, &sc, &sel(&[1]), [0.1, 0.2]);
         assert_eq!(ch[0].pos, Some([100.1, 0.2, 0.0]));
+    }
+
+    #[test]
+    fn turning_each_in_place_moves_nothing_and_turns_every_entry() {
+        let m = map();
+        let sc = build_scene(&m);
+        let ch = turn_each_changes(&m, &sc, &sel(&[0, 1]), std::f64::consts::PI);
+        assert_eq!(ch.len(), 2);
+        assert!(ch.iter().all(|c| c.pos.is_none() && c.rot.is_some()), "no position written, a turned rot each");
+        let together = turn_changes(&m, &sc, &sel(&[0, 1]), std::f64::consts::PI);
+        assert!(together.iter().any(|c| c.pos.is_some()), "together they swap places");
+        assert!(turn_each_changes(&m, &sc, &sel(&[0, 1]), 0.0).is_empty());
     }
 
     #[test]

@@ -465,8 +465,19 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
         });
         ui.separator();
         ui.add(egui::DragValue::new(&mut st.turn_deg).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
-        if ui.add_enabled(!selected.is_empty(), egui::Button::new("Turn")).on_hover_text("Turn the selection clockwise about its centre").clicked() {
-            let r = geo::turn_items(project, id, selected, f64::from(st.turn_deg).to_radians());
+        let yaw = f64::from(st.turn_deg).to_radians();
+        if selected.len() > 1 {
+            // Several: turning each where it is is what ships want; turning together swings them round their shared centre.
+            if ui.button("Turn each").on_hover_text("Turn every selected thing clockwise where it stands (the positions stay): the one to use for ships").clicked() {
+                let r = geo::turn_each(project, id, selected, yaw);
+                note(st, r);
+            }
+            if ui.button("Turn together").on_hover_text("Turn the selection clockwise about its shared centre: the things swing round it").clicked() {
+                let r = geo::turn_items(project, id, selected, yaw);
+                note(st, r);
+            }
+        } else if ui.add_enabled(!selected.is_empty(), egui::Button::new("Turn")).on_hover_text("Turn the selection clockwise about its centre").clicked() {
+            let r = geo::turn_items(project, id, selected, yaw);
             note(st, r);
         }
         if let [Item::Vertex(t, name, i)] = selected {

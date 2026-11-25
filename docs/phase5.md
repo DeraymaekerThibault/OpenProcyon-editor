@@ -357,7 +357,7 @@ and `mod.json` of `docs/missions.md` section 1, already in this repository as `t
       `Island04` at (-300, 300) (needs the import; without one, skip it and expect the one `objects` difference).
    4. Missions tab, "Players, ships and groups": add players `Hero` and `Raiders`; the human is `Hero`, start (0, 0, 0), forward (0, 1, 0).
    5. Add three ships: `Ship_Navy_Cutter` of `Hero` named `Dauntless`, primary, at (0, 0, 0); two `Ship_Pirate_Sloop` of `Raiders`
-      named `Raider One` at (400, 600, 0) and `Raider Two` at (440, 620, 0), both turned 180 degrees on the plan (Turn, 180 deg).
+      named `Raider One` at (400, 600, 0) and `Raider Two` at (440, 620, 0), both turned 180 degrees on the plan: select both and use "Turn each" with 180 deg ("Turn together" would swing them round their shared centre and swap their places).
    6. Add group `RaiderShips`, members `Raider One` and `Raider Two`.
    7. Plan (beside the rule list): Add volume, click the plan, name `Gate Area`; add a fourth corner and drag the corners to (300, 500),
       (500, 500), (500, 700), (300, 700) (type the numbers with Grid snap at 100 or off); Add point `The Gate` at (400, 600).
