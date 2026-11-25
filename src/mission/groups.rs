@@ -237,6 +237,12 @@ enum Op {
     New(String),
 }
 
+/// The id salt of group number `index`'s collapsing header: its place in the list, not its name, so that renaming the group leaves
+/// its section open (a rename keeps the order of the groups).
+pub fn header_salt(index: usize) -> (&'static str, usize) {
+    ("group", index)
+}
+
 /// Draws the groups of mission `id`. The error of an operation that was refused is put in `error` (the caller shows it).
 pub fn show(ui: &mut egui::Ui, project: &mut Project, id: &str, error: &mut Option<String>) {
     let Ok((m, _)) = mission(project, id) else { return };
@@ -249,8 +255,8 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, id: &str, error: &mut Opti
     if !dup.is_empty() {
         ui.colored_label(egui::Color32::from_rgb(220, 150, 60), format!("Ids used more than once (a group would address all of them): {dup:?}"));
     }
-    for (name, ids) in &members {
-        egui::CollapsingHeader::new(format!("{name} ({})", ids.len())).id_salt(("group", name)).show(ui, |ui| {
+    for (index, (name, ids)) in members.iter().enumerate() {
+        egui::CollapsingHeader::new(format!("{name} ({})", ids.len())).id_salt(header_salt(index)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(new) = super::ships::text_edit(ui, egui::Id::new(("group_rename", name)), name, 160.0) {
                     ops.push(Op::Rename(name.clone(), new));
@@ -268,7 +274,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, id: &str, error: &mut Opti
                     }
                 });
             }
-            egui::ComboBox::from_id_salt(("group_add", name)).selected_text("Add member...").show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt(("group_add", index)).selected_text("Add member...").show_ui(ui, |ui| {
                 for c in cands.iter().filter(|c| !ids.contains(&c.id)) {
                     if ui.selectable_label(false, format!("{}  {:?}  {}", c.id, c.kind, c.label)).clicked() {
                         ops.push(Op::Add(name.clone(), c.id));

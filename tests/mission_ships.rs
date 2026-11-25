@@ -350,3 +350,38 @@ fn the_picker_lists_ships_first_and_a_new_ship_starts_as_a_ship_of_the_humans_si
     assert_eq!(ships::new_ship_defaults(&json!({"players": []}), &types, &[]), None);
     assert_eq!(ships::new_ship_defaults(&m, &[], &[]), None);
 }
+
+#[test]
+fn renaming_a_group_leaves_its_section_open() {
+    use bevy_egui::egui::{self, collapsing_header::CollapsingState};
+    let (mut p, _) = opened("grouprename");
+    let ctx = egui::Context::default();
+    let mut frame = |p: &mut Project| {
+        let mut open = false;
+        let mut err = None;
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))), ..Default::default() };
+        ctx.run_ui(raw, |ui| {
+            groups::show(ui, p, ID, &mut err);
+            open = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(groups::header_salt(0)), false).is_open();
+        })
+        .textures_delta
+        .clear();
+        open
+    };
+    assert!(!frame(&mut p), "closed to begin with");
+    let mut set_open = |on: bool| {
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 800.0))), ..Default::default() };
+        ctx.run_ui(raw, |ui| {
+            let mut s = CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(groups::header_salt(0)), false);
+            s.set_open(on);
+            s.store(ui.ctx());
+        })
+        .textures_delta
+        .clear();
+    };
+    set_open(true);
+    assert!(frame(&mut p), "opened");
+    groups::rename_group(&mut p, ID, "Fleet", "Navy").unwrap();
+    assert_eq!(groups::names(&view(&p)), ["Navy", "Pirates"], "a rename keeps the order");
+    assert!(frame(&mut p), "still open after the rename");
+}
