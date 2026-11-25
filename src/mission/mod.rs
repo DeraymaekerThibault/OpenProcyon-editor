@@ -11,6 +11,7 @@ pub mod campaign;
 pub mod catalogue;
 pub mod doc;
 pub mod plan;
+pub mod project;
 pub mod report;
 pub mod rules_view;
 pub mod ships;
