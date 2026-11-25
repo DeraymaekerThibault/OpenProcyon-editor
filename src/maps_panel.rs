@@ -12,6 +12,7 @@ use crate::map::doc::{self, Array};
 use crate::map::players;
 use crate::map::project::{self as maps, MapEntry};
 use crate::map::settings;
+use crate::map::skirmish;
 use crate::map::view2d::{self, Ref, Scene, Shape};
 use crate::map_edit::canvas::plan_canvas;
 use crate::map_edit::plan_view::PlanView;
@@ -57,6 +58,9 @@ pub struct State {
     // T8 begin
     t8: crate::map_edit::t8_tools::Tools,
     // T8 end
+    // T10
+    skirmish: skirmish::Panel,
+    // end T10
 }
 
 impl Default for State {
@@ -85,6 +89,9 @@ impl Default for State {
             players: players::Panel::default(),
             // end T7
             t8: Default::default(), // T8
+            // T10
+            skirmish: skirmish::Panel::default(),
+            // end T10
         }
     }
 }
@@ -101,6 +108,9 @@ impl State {
         self.players.reset();
         // end T7
         self.t8 = Default::default(); // T8
+        // T10
+        self.skirmish.reset();
+        // end T10
     }
 
     /// Shows the map `id` of `project` (opening it over the import): errors go to the tab's message line.
@@ -194,6 +204,10 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         egui::CollapsingHeader::new("Map settings").id_salt(("map-settings", &id)).show(ui, |ui| settings::show(ui, &mut st.settings, project, &id, &skies));
     }
     // end T6 hook
+    // T10 begin: the skirmish section (lobby listing, end rules, script and media forms, play in the lobby); it edits project documents,
+    // so it is drawn before the map is read for this frame
+    egui::CollapsingHeader::new("Skirmish").id_salt(("skirmish", &id)).show(ui, |ui| skirmish::show(ui, &mut st.skirmish, project, &id));
+    // T10 end
     // T7
     let t7_refusals = players::refusals(project, &id);
     // end T7
