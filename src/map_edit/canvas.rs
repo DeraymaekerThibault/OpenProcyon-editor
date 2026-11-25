@@ -248,6 +248,8 @@ fn draw_marker(p: &egui::Painter, view: &PlanView, m: &MarkerIn, c: Pos2) {
     match m.kind {
         MarkerKind::Scenery => {
             p.circle_filled(c, 4.0, col);
+            // a short tick shows which way the object faces, so a turn can be seen
+            p.line_segment([c, c + fwd * 10.0], Stroke::new(1.5, col));
         }
         MarkerKind::Point => {
             let d = 4.0;

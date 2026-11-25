@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{map_view, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
+use openprocyon_editor::{maps_panel, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -58,7 +58,7 @@ fn main() {
         .insert_resource(find_assets())
         .insert_resource(Flags(flags))
         .init_resource::<mission_panel::State>()
-        .init_resource::<map_view::State>()
+        .init_resource::<maps_panel::State>()
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
         .init_resource::<playtest_panel::State>()
@@ -85,7 +85,7 @@ fn main() {
     openprocyon_editor::overlay::remove_own();
 }
 
-/// `--mod`, `--tab` and `--ship`, once at start.
+/// `--mod`, `--tab`, `--ship` and `--map`, once at start.
 #[allow(clippy::too_many_arguments)] // a Bevy system takes one parameter per resource it sets
 fn apply_flags(
     flags: Res<Flags>,
@@ -95,6 +95,7 @@ fn apply_flags(
     mut ships: ResMut<ships_panel::State>,
     mut view: ResMut<ShipView>,
     mut link: ResMut<ships_panel::Linked>,
+    mut maps: ResMut<maps_panel::State>,
 ) {
     let f = &flags.0;
     if let Some(dir) = &f.mod_dir {
@@ -112,6 +113,11 @@ fn apply_flags(
             "map" => Tab::Map,
             _ => Tab::Project,
         };
+    }
+    if let Some(id) = &f.map
+        && let Some(p) = &mut project.project
+    {
+        maps.show_map(p, id);
     }
     if let Some(id) = &f.ship {
         ships.selected = Some(id.clone());
@@ -153,10 +159,10 @@ impl Tab {
         (Tab::Project, "Mod"),
         (Tab::Ships, "Ships"),
         (Tab::Weapons, "Weapons"),
+        (Tab::Map, "Maps"),
         (Tab::Ship3d, "3D ship"),
         (Tab::Playtest, "Play-test & export"),
         (Tab::Mission, "Mission (spike)"),
-        (Tab::Map, "Map (spike)"),
     ];
 }
 
@@ -166,7 +172,7 @@ fn panel(
     assets: Res<Assets>,
     mut tab: ResMut<Tab>,
     mut mission: ResMut<mission_panel::State>,
-    mut map: ResMut<map_view::State>,
+    mut map: ResMut<maps_panel::State>,
     mut project: ResMut<project_panel::State>,
     mut focus: ResMut<project_panel::Focus>,
     mut ship: ResMut<ShipView>,
@@ -225,6 +231,12 @@ fn panel(
         return Ok(());
     }
     ship_view::panel::hidden(&mut ship);
+    if *tab == Tab::Map {
+        // No scroll area: the plan fills the space left under its toolbars.
+        egui::CentralPanel::default().show(&mut root, |ui| maps_panel::tab(ui, &mut map, &mut project));
+        which_mod::window(ctx, &mut project, assets.dir.as_deref().filter(|d| d.is_dir()));
+        return Ok(());
+    }
     let mut go3d = false;
     egui::CentralPanel::default().show(&mut root, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| match *tab {
@@ -232,7 +244,7 @@ fn panel(
             Tab::Ships => go3d = ships_panel::tab(ui, &mut ships, &mut project, &mut focus, &mut ship, &mut link, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Mission => mission_panel::show(ui, &mut mission),
-            Tab::Map => map_view::show(ui, &mut map, assets.dir.as_deref().filter(|d| d.is_dir())),
+            Tab::Map => {}
             Tab::Ship3d => {}
             Tab::Playtest => {
                 // The mod's maps and ships too, when a mod is open (its overlay holds the import plus the mod).

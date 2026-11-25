@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Writes synthetic test data of our own (no game content) into <dir>: `assets/` (a stand-in for the player's import: one ship,
-Ship_Test, with a box hull and a sail made in code, its hardpoint nodes, a gun and a bullet, an empty map) and `mymod/` (a mod that
+Ship_Test, with a box hull and a sail made in code, its hardpoint nodes, a gun and a bullet, a map of invented scenery) and `mymod/` (a mod that
 extends that ship, with a misspelt key the checker flags). For screenshots and scripted runs without the game:
 
     python3 tools/synthetic_mod.py local/synth
@@ -63,7 +63,17 @@ put("assets/data/weapons/guns.json", json.dumps({"Gun_Test": {"MuzzleSpeed": 100
     "EffectiveRange_Range": 100, "LongRange_Range": 150, "MaximumRange_Range": 200, "EffectiveRange_AccuracyDeviation": 0.01, "LongRange_AccuracyDeviation": 0.02,
     "MaximumRange_AccuracyDeviation": 0.03, "BulletAffectedByGravity": False, "BulletTypeName_Primary": "Bullet_Test", "Mount Type": "Medium Mount"}}, indent=2))
 put("assets/data/weapons/bullets.json", json.dumps({"Bullet_Test": {"lifetime": 3, "damage": {"Wood": [5, 8, 0, 0, 0]}}}, indent=2))
-put("assets/maps/test_map/map.json", json.dumps({"name": "Test", "world_half": 500, "objects": []}))
+# Invented scenery, a ship, mines and two starts for the Maps tab's picture; every id is unique and the entries are all keyed.
+put("assets/maps/test_map/map.json", json.dumps({"name": "Test", "world_half": 500,
+    "objects": [
+        {"type": "Test_Island", "id": 1, "scene": "Test_Island", "pos": [-220, 150, 0], "rot": [1, 0, 0, 0, 1, 0, 0, 0, 1]},
+        {"type": "Test_Island", "id": 2, "scene": "Test_Island", "pos": [180, 210, 0], "rot": [0.8660254, -0.5, 0, 0.5, 0.8660254, 0, 0, 0, 1]},
+        {"type": "Test_Rock", "id": 3, "scene": "Test_Rock", "pos": [20, -60, 0]},
+        {"type": "Test_Rock", "id": 4, "scene": "Test_Rock", "pos": [70, -120, 0]},
+        {"type": "Test_Base", "id": 5, "scene": "Test_Base", "pos": [-150, -240, 0], "rot": [0, 1, 0, -1, 0, 0, 0, 0, 1]}],
+    "ships": [{"id": 6, "type": "Ship_Test", "player": 0, "pos": [-60, 20, 0]}],
+    "mines": [{"id": 7, "type": "Bullet_Test", "pos": [120, 40, 0]}, {"id": 8, "type": "Bullet_Test", "pos": [150, 70, 0]}],
+    "players": [{"name": "North", "team": 0, "start": [0, 330, 0], "forward": [0, -1, 0], "playable": True}, {"name": "South", "team": 1, "start": [0, -330, 0], "forward": [0, 1, 0], "playable": True}]}, indent=2))
 put("mymod/mod.json", json.dumps({"id": "mymod", "name": "Visual test mod", "version": "0.1.0", "description": "synthetic", "category": "Ships", "format": 1, "game_version": "0.2.0"}, indent=2))
 put("mymod/ships/Ship_Test/ship.json", json.dumps({"extends": "Ship_Test", "points": 120, "sigth": 300}, indent=2))
 print("ok", len(glb), "bytes glb")

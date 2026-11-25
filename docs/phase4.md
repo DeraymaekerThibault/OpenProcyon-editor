@@ -71,6 +71,17 @@ headless, as `ship_view::coords` and `pick` do.
 Engine needs: none. Placement of dockable scenery is not where `pos` says: the engine subtracts the first dock's height, or
 `scene_origin` (`scenario::spawn::scenery_transform`, public but not in `authoring`). In 2D only x and y matter, so no issue; in 3D it does (P7).
 Before freeze: all of it, except the kind of each key (read `pos`, `rot`, `type`, `id` through one accessor module `map_doc`).
+Built (T5): the "Maps" tab, `src/maps_panel.rs` (drawing and buttons) over `src/map/view2d.rs` (what the plan shows and what a drag,
+turn, placement, duplicate or delete writes; unit-tested) and `map::project::change_entries` (a group move or turn is one undo step).
+It shows the merged view of a project map document, never a copy: map picker (mod, retail, "retail, changed by the mod"; a new map
+not saved yet is listed too), new map, Save, Undo and Redo, snap switches, Fit, pan (right or middle drag), zoom (wheel), objects,
+ships, mines and players' starts with their headings, click, shift and box selection, drag (one step, snapped), a turn handle above the
+selection and a typed "Turn" (about the selection's centre; `rot` keeps its tilt, a start's `forward` turns), Duplicate (a copy 30
+units away with the next free id), Delete (Delete key), and "Place scenery" from the catalogue scanned over the project's overlay
+(a click places one, shift keeps placing, Esc stops). An add or delete that an extending map refuses shows the project's text.
+Not here: nebula polygons and teams (T8, T7), starts are moved and turned but not added, deleted or copied (T7), no z handle (T9),
+duplicates of several entries are one undo step each. `src/map_view.rs` is down to `short`. `--map <id>` shows a map at start
+(`tools/shot.sh ... --tab map --map test_map`; CI takes that picture of the synthetic map).
 
 ### P3. Scenery catalogue, place, rotate, snap (M)
 
