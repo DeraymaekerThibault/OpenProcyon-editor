@@ -200,8 +200,8 @@ Works (headless):
   inherits, then from the binary). PROVISIONAL: that lookup restates the pinned engine's (`launch::bundled_mods_for`); the UI names
   the folder it used and says the list can differ if the game runs from elsewhere. The real fix is the engine's `--only-mod` flag
   (engine requirement 12, being built): then the run loads nothing else and the list can go.
-- Export: when `LICENSE` is the notice the editor wrote (found by its marker line) the plan warns "LICENSE is only a notice; replace
-  it with the full licence text before sharing". Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
+- Export: a `LICENSE` that is only the notice the editor wrote is not warned about (the check was removed by the maintainer's
+  decision and can be re-added later). Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
 
 Not verified here: the panel, the save dialog, a real game run (`--version`, the `--shot` file names for a list of frames).
 

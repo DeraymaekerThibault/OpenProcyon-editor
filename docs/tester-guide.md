@@ -106,8 +106,8 @@ if you hit it, add the point again in the view instead.
 ## 7. Export
 
 1. Click "Export zip..." The panel says how many files go into `<id>/` in the zip, and lists warnings. A mod made only of your
-   own files should give no warning. The export only warns when `LICENSE` is missing; it cannot tell a notice from the full text,
-   so replace the notice yourself.
+   own files should give no warning. The export only warns when `LICENSE` is missing; it does not check whether it is the notice or
+   the full text (maintainer decision, may return), so replace the notice yourself.
 2. The export does not check what the files are (maintainer decision): you are responsible for what you share, so do not put
    game files in your mod.
 3. Click "Choose where to save..." and pick a place.
