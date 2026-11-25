@@ -157,9 +157,12 @@ impl Launch {
         a
     }
 
-    /// The environment variables the game needs besides the arguments: `PROCYON_AUTOPLAY=<seconds>` for an autoplay run.
+    /// The environment variables the game needs besides the arguments: `PROCYON_AUTOPLAY=<seconds>` for an autoplay run, and always `NO_COLOR`.
     pub fn envs(&self) -> Vec<(&'static str, String)> {
-        self.autoplay.map(|n| ("PROCYON_AUTOPLAY", n.to_string())).into_iter().collect()
+        // `NO_COLOR=1`: the output is shown as plain text in the panel, so the game's logger should not colour it.
+        let mut e = vec![("NO_COLOR", "1".to_string())];
+        e.extend(self.autoplay.map(|n| ("PROCYON_AUTOPLAY", n.to_string())));
+        e
     }
 
     /// Starts the game and returns at once; poll the child with `try_wait`.
@@ -177,10 +180,67 @@ impl Launch {
     }
 }
 
-/// The last `n` non-empty lines of `text`, trimmed, joined with newlines.
+/// `text` without ANSI escape sequences (CSI colour codes and OSC strings), which a terminal draws and a text label shows as boxes.
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match it.peek() {
+            Some('[') => {
+                it.next();
+                // Parameter and intermediate bytes, then one final byte 0x40..=0x7e.
+                for n in it.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                it.next();
+                // An OSC string ends with BEL or ESC \.
+                while let Some(n) = it.next() {
+                    if n == '\u{7}' {
+                        break;
+                    }
+                    if n == '\u{1b}' {
+                        it.next_if_eq(&'\\');
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                it.next();
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+/// The last `n` non-empty lines of `text` (escape sequences stripped), trimmed, joined with newlines.
 pub fn last_lines(text: &str, n: usize) -> String {
+    let text = strip_ansi(text);
     let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Whether a log line is a warning or an error: the level word as the game's logger prints it, or a panic.
+fn is_problem_line(line: &str) -> bool {
+    line.split_whitespace().take(4).any(|w| matches!(w.trim_end_matches(':'), "WARN" | "ERROR")) || line.contains("panicked at")
+}
+
+/// What the game says went wrong: the last `n` WARN/ERROR lines of `text` (escape sequences stripped), or, when there are none,
+/// the last `n` lines whatever they are.
+pub fn error_lines(text: &str, n: usize) -> String {
+    let text = strip_ansi(text);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let problems: Vec<&str> = lines.iter().copied().filter(|l| is_problem_line(l)).collect();
+    let pick = if problems.is_empty() { &lines } else { &problems };
+    pick[pick.len().saturating_sub(n)..].join("\n")
 }
 
 /// What to tell the player when the game ended: `None` for a clean exit (code 0), else the exit code (or that a signal ended it)
@@ -190,8 +250,8 @@ pub fn exit_report(code: Option<i32>, success: bool, output: &str) -> Option<Str
         return None;
     }
     let head = code.map_or_else(|| "The game was ended by a signal".to_string(), |c| format!("The game exited with code {c}"));
-    let tail = last_lines(output, 8);
-    Some(if tail.is_empty() { format!("{head} and printed nothing.") } else { format!("{head}. Its last lines:\n{tail}") })
+    let tail = error_lines(output, 8);
+    Some(if tail.is_empty() { format!("{head} and printed nothing.") } else { format!("{head}. What it printed last:\n{tail}") })
 }
 
 /// A game process the editor started, with its stdout and stderr in one log file so that a failure can be shown.
@@ -545,12 +605,26 @@ mod tests {
     }
 
     #[test]
+    fn escape_sequences_go_and_the_warnings_and_errors_are_what_is_shown() {
+        assert_eq!(strip_ansi("\u{1b}[2m2026\u{1b}[0m \u{1b}[31;1mERROR\u{1b}[0m x\u{1b}]0;title\u{7}y"), "2026 ERROR xy");
+        let log = "\u{1b}[32m INFO\u{1b}[0m starting\n\u{1b}[33m WARN\u{1b}[0m bevy: slow\n\u{1b}[32m INFO\u{1b}[0m loading\n\u{1b}[31mERROR\u{1b}[0m engine: bad map\n\u{1b}[32m INFO\u{1b}[0m bye";
+        assert_eq!(error_lines(log, 8), " WARN bevy: slow\nERROR engine: bad map");
+        assert_eq!(error_lines(log, 1), "ERROR engine: bad map");
+        assert_eq!(error_lines("a\nb\nc", 2), "b\nc");
+        assert!(!last_lines(log, 3).contains('\u{1b}'));
+        let l = Launch::new(Path::new("/m"), "x");
+        assert!(l.envs().contains(&("NO_COLOR", "1".to_string())));
+    }
+
+    #[test]
     fn a_failed_exit_shows_the_code_and_the_last_lines_and_a_clean_one_nothing() {
         assert_eq!(exit_report(Some(0), true, "all fine"), None);
         let out = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n") + "\n\nERROR: no such map\n";
         let r = exit_report(Some(2), false, &out).unwrap();
-        assert!(r.starts_with("The game exited with code 2. Its last lines:") && r.ends_with("ERROR: no such map"), "{r}");
-        assert!(!r.contains("line 5\n") && r.contains("line 20"), "only the last lines: {r}");
+        assert!(r.starts_with("The game exited with code 2. What it printed last:") && r.ends_with("ERROR: no such map"), "{r}");
+        let quiet = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let r = exit_report(Some(2), false, &quiet).unwrap();
+        assert!(!r.contains("line 5\n") && r.contains("line 20"), "no WARN/ERROR: the last lines: {r}");
         assert!(exit_report(None, false, "").unwrap().contains("signal"));
         assert!(exit_report(Some(1), false, "").unwrap().contains("printed nothing"));
     }

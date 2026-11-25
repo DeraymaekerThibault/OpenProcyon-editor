@@ -65,7 +65,7 @@ fn a_mission_launch_uses_the_mission_flag() {
 #[test]
 fn debug_flags_follow_in_order_and_autoplay_adds_script_and_environment() {
     let mut l = Launch { only_mod: false, ..Launch::new(Path::new("/m/gates"), "red_rover") };
-    assert!(l.envs().is_empty());
+    assert_eq!(l.envs(), vec![("NO_COLOR", "1".to_string())]);
     l.fire_rules = vec!["Open the gate".into(), "Say hi".into()];
     l.start_at = Some((100.0, -25.5));
     l.rule_trace = true;
@@ -74,7 +74,7 @@ fn debug_flags_follow_in_order_and_autoplay_adds_script_and_environment() {
         l.args(),
         os(&["--mod", "/m/gates", "--map", "red_rover", "--fire-rule", "Open the gate", "--fire-rule", "Say hi", "--start-at", "100,-25.5", "--rule-trace", "--script", "mission"])
     );
-    assert_eq!(l.envs(), vec![("PROCYON_AUTOPLAY", "600".to_string())]);
+    assert_eq!(l.envs(), vec![("NO_COLOR", "1".to_string()), ("PROCYON_AUTOPLAY", "600".to_string())]);
     l.shot = Some(openprocyon_editor::launch::Shot { file: "/s/a.png".into(), frames: vec![5], dist: None, yaw: None, pitch: None });
     let a = l.args();
     let shot = a.iter().position(|x| x == "--shot-frame").unwrap();
