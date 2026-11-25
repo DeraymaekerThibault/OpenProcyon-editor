@@ -434,6 +434,12 @@ fn type_picker(ui: &mut egui::Ui, id: egui::Id, current: &str, types: &[String])
             if r.changed() {
                 ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
             }
+            // Focused the frame the popup opens (it was not drawn the frame before), so typing filters at once.
+            let (seen_id, now) = (id.with("seen"), ui.ctx().cumulative_pass_nr());
+            if ui.data(|d| d.get_temp::<u64>(seen_id)).is_none_or(|last| now > last + 2) {
+                r.request_focus();
+            }
+            ui.data_mut(|d| d.insert_temp(seen_id, now));
             let needle = filter.trim().to_lowercase();
             egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                 // the order of `types` is kept: ships, then bases, then the rest

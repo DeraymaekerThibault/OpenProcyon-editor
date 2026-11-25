@@ -128,7 +128,9 @@ pub fn plan_canvas(ui: &mut egui::Ui, view: &mut PlanView, markers: &[MarkerIn],
         view.pan_by_screen(response.drag_delta());
     }
 
-    let screen: Vec<(usize, Pos2)> = markers.iter().map(|m| (m.index, view.to_screen(rect, m.pos))).collect();
+    // Ships last: an exact tie goes to the later point ([`select::pick`]), so a ship standing on an objective point is the one clicked.
+    let at = |m: &MarkerIn| (m.index, view.to_screen(rect, m.pos));
+    let screen: Vec<(usize, Pos2)> = markers.iter().filter(|m| m.kind != MarkerKind::Ship).map(at).chain(markers.iter().filter(|m| m.kind == MarkerKind::Ship).map(at)).collect();
     out.hovered = hover.and_then(|h| select::pick(screen.iter().copied(), h, PICK_RADIUS));
     let pointer = ui.input(|i| i.pointer.latest_pos());
 

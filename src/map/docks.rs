@@ -111,6 +111,9 @@ pub fn next_dock_label(docks: &Value, ty: &str) -> String {
     format!("DockPoint{}", max + 1)
 }
 
+/// The suffix the box shows greyed and Add takes when it is left empty.
+const CREW_HINT: &str = "P_0";
+
 /// `Crew_<kind>_<suffix>`, checked by the engine's own `crew_kind`. The suffix may not be empty.
 pub fn crew_name(kind: &str, suffix: &str) -> Result<String, String> {
     let suffix = suffix.trim();
@@ -429,7 +432,7 @@ pub fn show(ui: &mut egui::Ui, t: &mut State) {
                     ui.selectable_value(&mut t.crew_kind, i, *k);
                 }
             });
-            ui.add(egui::TextEdit::singleline(&mut t.crew_suffix).desired_width(60.0).hint_text("P_0"));
+            ui.add(egui::TextEdit::singleline(&mut t.crew_suffix).desired_width(60.0).hint_text(CREW_HINT));
             let armed = t.arm == Some(Kind::Crew);
             if ui.selectable_label(armed, "Add crew place").on_hover_text("Crew_<kind>_<suffix>; then click the model").clicked() {
                 t.arm = if armed { None } else { Some(Kind::Crew) };
@@ -554,7 +557,7 @@ fn interact(mut st: ResMut<maps_panel::State>, cam: Single<(&Camera, &GlobalTran
         let pos = to_game(local).map(|v| f64::from(v as f32));
         t.action = Some(match kind {
             Kind::Dock => Action::AddDock { pos },
-            Kind::Crew => match crew_name(openprocyon::data::crew_nodes::CREW_KINDS[t.crew_kind], &t.crew_suffix) {
+            Kind::Crew => match crew_name(openprocyon::data::crew_nodes::CREW_KINDS[t.crew_kind], if t.crew_suffix.trim().is_empty() { CREW_HINT } else { &t.crew_suffix }) {
                 Ok(name) => Action::AddCrew { name, pos },
                 Err(e) => {
                     t.note = e;

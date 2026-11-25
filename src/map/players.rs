@@ -128,6 +128,15 @@ pub fn team_label(map: &Value, index: usize) -> String {
     doc::teams(map).get(index).and_then(doc::team_name_id).filter(|n| !n.is_empty()).map_or_else(|| format!("team {index}"), str::to_string)
 }
 
+/// " to Team 1" for the team player `index` is on now, empty for a player on none.
+fn team_suffix(project: &Project, id: &str, index: usize) -> String {
+    let Ok(map) = map_of(project, id) else { return String::new() };
+    match doc::players(map).get(index).and_then(doc::player_team) {
+        Some(t) if t >= 0 => format!(" to {}", team_label(map, t as usize)),
+        _ => String::new(),
+    }
+}
+
 /// The player's name, or "player N" for a slot with none.
 pub fn player_label(map: &Value, index: usize) -> String {
     doc::players(map).get(index).and_then(doc::player_name).filter(|n| !n.is_empty()).map_or_else(|| format!("player {index}"), str::to_string)
@@ -423,7 +432,12 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
                     if ui.selectable_label(team < 0, "none").clicked() {
                         action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(-1) });
                     }
-                }
+                    for (t, name) in teams.iter().enumerate() {
+                        if ui.selectable_label(team == t as i64, if name.is_empty() { format!("team {t}") } else { (*name).to_string() }).clicked() {
+                            action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(t) });
+                        }
+                    }
+                });
             });
             let mut playable = doc::player_playable(p);
             if ui.checkbox(&mut playable, "Playable").on_hover_text("A slot a human may take").changed() {
@@ -518,7 +532,7 @@ pub fn apply(st: &mut Panel, project: &mut Project, id: &str, action: Action) ->
         Action::AddPlayerAtCentre => add_player(project, id, None, None).map(|i| {
             st.selected = Some(i);
             select = Some(Ref::new(Array::Players, i));
-            format!("Added player {}.", label_in(project, id, i, player_label))
+            format!("Added player {}{}.", label_in(project, id, i, player_label), team_suffix(project, id, i))
         }),
         Action::Arm(a) => {
             st.armed = if st.armed == Some(a) { None } else { Some(a) };
@@ -556,7 +570,8 @@ pub fn apply(st: &mut Panel, project: &mut Project, id: &str, action: Action) ->
 pub fn place_click(st: &mut Panel, project: &mut Project, id: &str, at: [f32; 2]) -> Option<Ref> {
     let arm = st.armed.take()?;
     let r = match arm {
-        Arm::NewPlayer => add_player(project, id, None, Some(at)).map(|i| (i, format!("Added player {} at {:.0}, {:.0}.", label_in(project, id, i, player_label), at[0], at[1]))),
+        Arm::NewPlayer => add_player(project, id, None, Some(at))
+            .map(|i| (i, format!("Added player {}{} at {:.0}, {:.0}.", label_in(project, id, i, player_label), team_suffix(project, id, i), at[0], at[1]))),
         Arm::StartOf(i) => set_start(project, id, i, at).map(|()| (i, format!("Start of player {} placed at {:.0}, {:.0}.", label_in(project, id, i, player_label), at[0], at[1]))),
     };
     match r {
@@ -760,7 +775,7 @@ mod tests {
         apply(&mut st, &mut p, "mine", Action::DeleteTeam(n - 1));
         assert!(st.info.starts_with("Deleted team Team"), "{}", st.info);
         apply(&mut st, &mut p, "mine", Action::AddPlayerAtCentre);
-        assert!(st.info.starts_with("Added player Player"), "{}", st.info);
+        assert!(st.info.starts_with("Added player Player") && st.info.contains(" to "), "the team is named: {}", st.info);
         let _ = std::fs::remove_dir_all(&root);
     }
 
