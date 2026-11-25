@@ -143,6 +143,8 @@ pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, p
                     Ok(vec![Edit::set(format!("/{key}/-"), entry)])
                 }
                 (true, _, _) => Ok(vec![Edit::set(format!("/{key}/-"), entry)]),
+                // A wake entry needs pos and fx and has no node lookup (ships.rs WakeDoc); the fx comes from the hull size, unknown here.
+                (false, _, Kind::Wake) => Err(no_wake_fx(key)),
                 (false, false, _) => Ok(vec![Edit::set(format!("/{key}"), Value::Array(vec![entry]))]),
                 (false, true, Kind::Flag) => {
                     let mut list = flags_from_model(facts);
@@ -155,7 +157,6 @@ pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, p
                     list.push(entry);
                     Ok(vec![Edit::set("/engines", Value::Array(list))])
                 }
-                // A wake entry needs pos and fx and has no node lookup (ships.rs WakeDoc); the fx comes from the hull size, unknown here.
                 (false, true, _) => Err(no_wake_fx(key)),
             }
         }
@@ -330,9 +331,10 @@ mod tests {
         assert!(add_point(&json!({}), Some(&f), Kind::Wake, "W2", [0.0; 3]).is_err());
         let out = run(&json!({}), &add_point(&json!({}), Some(&f), Kind::Flag, "Flag_Mid", [0.0, 0.0, 8.0]).unwrap());
         assert_eq!(out["flags"].as_array().unwrap().len(), 3);
-        // no array and no model nodes: a new array of one
-        let out = run(&json!({}), &add_point(&json!({}), None, Kind::Wake, "W", [0.0; 3]).unwrap());
-        assert_eq!(out["wakes"], json!([{"label": "W", "pos": [0.0, 0.0, 0.0]}]));
+        // no array and no model nodes: a new array of one, except for wakes (no fx to give)
+        let out = run(&json!({}), &add_point(&json!({}), None, Kind::Engine, "E", [0.0; 3]).unwrap());
+        assert_eq!(out["engines"], json!([{"label": "E", "pos": [0.0, 0.0, 0.0]}]));
+        assert!(add_point(&json!({}), None, Kind::Wake, "W", [0.0; 3]).is_err());
     }
 
     #[test]
@@ -342,7 +344,7 @@ mod tests {
         assert!(add_refusal(&ship, Some(&f), Kind::Wake).is_some_and(|m| m.contains("wakes")));
         assert_eq!(add_refusal(&ship, Some(&f), Kind::Engine), None);
         assert_eq!(add_refusal(&ship, Some(&f), Kind::Gun), None);
-        assert_eq!(add_refusal(&ship, None, Kind::Wake), None, "no model nodes: a new array");
+        assert!(add_refusal(&ship, None, Kind::Wake).is_some_and(|m| m.contains("fx")), "no list, no model nodes: no fx to give");
         assert_eq!(add_refusal(&json!({"wakes": [{"pos": [0, 0, 0], "fx": "W"}]}), Some(&f), Kind::Wake), None, "an array with an fx to copy: append");
         assert!(add_refusal(&json!({"wakes": []}), Some(&f), Kind::Wake).is_some_and(|m| m.contains("fx")), "an empty array: no fx to copy");
         assert!(add_refusal(&ship, None, Kind::TowTower).is_some(), "a tow end needs the other end");
