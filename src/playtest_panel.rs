@@ -107,8 +107,18 @@ pub fn ship_ids(import: &Path) -> Vec<String> {
 /// Ship ids offered in the pickers: those of the root (the import, or the merged overlay of a mod over it) and the open mod's own
 /// folder, sorted and without duplicates. The overlay alone can miss a ship the mod gained since it was built.
 pub fn ship_ids_with_mod(root: Option<&Path>, mod_dir: Option<&Path>) -> Vec<String> {
-    let mut ids: Vec<String> = root.map(ship_ids).unwrap_or_default();
-    ids.extend(mod_dir.map(ship_ids).unwrap_or_default());
+    ids_with_mod(root, mod_dir, ship_ids)
+}
+
+/// Map ids offered in the picker: those of the root and the open mod's own `maps/`, sorted and without duplicates (the same rule as
+/// [`ship_ids_with_mod`]: a map the mod gained since the overlay was built is still offered).
+pub fn map_ids_with_mod(root: Option<&Path>, mod_dir: Option<&Path>) -> Vec<String> {
+    ids_with_mod(root, mod_dir, map_ids)
+}
+
+fn ids_with_mod(root: Option<&Path>, mod_dir: Option<&Path>, ids_of: fn(&Path) -> Vec<String>) -> Vec<String> {
+    let mut ids: Vec<String> = root.map(ids_of).unwrap_or_default();
+    ids.extend(mod_dir.map(ids_of).unwrap_or_default());
     ids.sort();
     ids.dedup();
     ids
@@ -411,6 +421,24 @@ mod tests {
         assert_eq!(ship_ids_with_mod(Some(&imp), None), ["Ship_B", "Ship_C"]);
         assert_eq!(ship_ids_with_mod(None, Some(&m)), ["Ship_A", "Ship_B"]);
         assert!(ship_ids_with_mod(None, None).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_map_menu_lists_the_mods_own_maps_with_the_imports() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-mapmenu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for rel in ["import/maps/red_rover", "import/maps/border", "mod/maps/my_map", "mod/maps/border"] {
+            std::fs::create_dir_all(d.join(rel)).unwrap();
+            std::fs::write(d.join(rel).join("map.json"), "{}").unwrap();
+        }
+        // a folder without map.json is not a map
+        std::fs::create_dir_all(d.join("mod/maps/notes")).unwrap();
+        let (imp, m) = (d.join("import"), d.join("mod"));
+        assert_eq!(map_ids_with_mod(Some(&imp), Some(&m)), ["border", "my_map", "red_rover"]);
+        assert_eq!(map_ids_with_mod(Some(&imp), None), ["border", "red_rover"]);
+        assert_eq!(map_ids_with_mod(None, Some(&m)), ["border", "my_map"]);
+        assert!(map_ids_with_mod(None, None).is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 

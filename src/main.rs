@@ -237,7 +237,7 @@ fn panel(
             Tab::Playtest => {
                 // The mod's maps and ships too, when a mod is open (its overlay holds the import plus the mod).
                 let root = project.project.as_ref().map(|p| p.root.clone()).or_else(|| assets.dir.clone()).filter(|d| d.is_dir());
-                let maps = root.as_deref().map(playtest_panel::map_ids).unwrap_or_default();
+                let maps = playtest_panel::map_ids_with_mod(root.as_deref(), project.project.as_ref().map(|p| p.dir.as_path()));
                 let ships = playtest_panel::ship_ids_with_mod(root.as_deref(), project.project.as_ref().map(|p| p.dir.as_path()));
                 let unsaved = project.project.as_ref().map_or(0, |p| p.dirty_rels().len());
                 playtest_panel::show(ui, &mut playtest, project.project.as_ref().map(|p| p.dir.as_path()), unsaved, &maps, &ships);
