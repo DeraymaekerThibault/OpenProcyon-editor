@@ -241,10 +241,10 @@ impl Drop for Project {
         if let Some(c) = &self.check_copy {
             let _ = guard::remove_dir_all(c, self.import.as_deref());
         }
-        // The per-process folder goes too once no project of this process uses it (the guard has no remove_dir: it is empty or kept).
-        if let Some(parent) = crate::overlay::scratch(&self.scratch).parent() {
-            let _ = guard::remove_empty_dir(parent, self.import.as_deref());
-        }
+        // The per-process folder itself is NOT removed here: another project or scratch build of this process may be creating a
+        // folder inside it at the same moment (create_dir_all makes the parent, then the child), and removing the empty parent in
+        // between makes that fail with NotFound. `overlay::remove_own` removes it when the editor quits, and `overlay::remove_stale`
+        // removes a dead process's folder at the next start.
     }
 }
 
