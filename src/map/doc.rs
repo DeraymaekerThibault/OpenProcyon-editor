@@ -15,6 +15,12 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+// The mission keys Phase 4 kept here live in `mission::doc` now (docs/phase5.md T0); re-exported so older callers and tests compile.
+pub use crate::mission::doc::{
+    MEDIA_FILE, MISSION_FILE, RecordField, SCRIPT_DECIDES, SCRIPT_FILE, SCRIPT_KEY_VICTORY, flag_text, has_volume, mission_mentions, mission_nebulae, mission_nebulae_pointer,
+    mission_volume, new_record, record_name, record_occlusion, record_pointer, record_polygon_name, script_decides, script_rules, volume_pointer, volumes_pointer,
+};
+
 /// The file name of a map inside `maps/<id>/`.
 pub const MAP_FILE: &str = "map.json";
 
@@ -440,9 +446,6 @@ pub fn team_ids(map: &Value) -> Vec<&str> {
 // (`game/src/nebula.rs` spawn, storms, polygons; `scenario/spawn.rs` spawn_mines; `rules/eval/schema.rs` Setup Nebula) and the
 // exporter's layout (`tools/export_nebulae.py`); the whole layout stays PROVISIONAL as a format until the freeze.
 
-/// The mission file next to `map.json` (`maps/<id>/mission.json`).
-pub const MISSION_FILE: &str = "mission.json";
-
 /// The nebula's polygon key (`nebulae[].polygon`, `[[x, y], ...]`, the same as a mission volume).
 pub const NEBULA_POLYGON: &str = "polygon";
 /// The nebula's name key (the entry's key when a map extends another).
@@ -575,135 +578,18 @@ pub fn new_nebula(name: &str, polygon: &[[f64; 2]], centre: [f64; 2], radius: f6
     })
 }
 
-// ---- the mission's records of a nebula (`mission.json`) ----
-
-/// The pointer of the list of nebula setups in `mission.json` (`environment.nebulae`).
-pub fn mission_nebulae_pointer() -> String {
-    crate::edit::pointer(&["environment", "nebulae"])
-}
-
-/// The raw `Setup Nebula` records (`environment.nebulae`).
-pub fn mission_nebulae(mission: &Value) -> &[Value] {
-    mission.get("environment").and_then(|e| e.get("nebulae")).and_then(Value::as_array).map_or(&[], Vec::as_slice)
-}
-
-/// A mission record's own name (`New Nebula Name`), the link to `nebulae[].name`.
-pub fn record_name(record: &Value) -> Option<&str> {
-    record.get(RecordField::Name.key())?.as_str()
-}
-
-/// A mission record's `Polygon Name`, the link to a key of `volumes`.
-pub fn record_polygon_name(record: &Value) -> Option<&str> {
-    record.get(RecordField::PolygonName.key())?.as_str()
-}
-
-/// Which field of a mission nebula record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecordField {
-    Name,
-    PolygonName,
-    Occlusion,
-    CloudEffect,
-}
-
-impl RecordField {
-    pub fn key(self) -> &'static str {
-        match self {
-            RecordField::Name => "New Nebula Name",
-            RecordField::PolygonName => "Polygon Name",
-            RecordField::Occlusion => "Nebula Occlusion On/Off",
-            RecordField::CloudEffect => "Nebula Cloud Effect Name",
-        }
-    }
-}
-
-/// `TRUE` / `FALSE`, as the rule records write a flag (`wot_flag` in the engine).
-pub fn flag_text(on: bool) -> Value {
-    Value::from(if on { "TRUE" } else { "FALSE" })
-}
-
-/// Whether the record's occlusion flag is `TRUE`.
-pub fn record_occlusion(record: &Value) -> bool {
-    record.get(RecordField::Occlusion.key()).and_then(Value::as_str) == Some("TRUE")
-}
-
-/// The pointer of a field of mission record `index`.
-pub fn record_pointer(index: usize, field: RecordField) -> String {
-    crate::edit::pointer(&["environment", "nebulae", &index.to_string(), field.key()])
-}
-
-/// A new mission record for the nebula `name` whose polygon is the volume `polygon_name`. PROVISIONAL: the keys written are the ones
-/// the engine reads (`New Nebula Name`, `Polygon Name`, `Nebula Occlusion On/Off`, `Nebula Cloud Effect Name`, `crew.rs`); the rule
-/// record's other fields (`World Object ID` and the point-set names) are left out because the engine ignores them here.
-pub fn new_record(name: &str, polygon_name: &str) -> Value {
-    serde_json::json!({
-        "New Nebula Name": name,
-        "Polygon Name": polygon_name,
-        "Nebula Cloud Effect Name": "Nebula",
-        "Nebula Occlusion On/Off": "FALSE",
-    })
-}
-
 /// A new mine entry: `{type, pos}`; the id is the project's to give. PROVISIONAL: z 0 (the engine reads `pos` as game x, y, z).
 pub fn new_mine(ty: &str, at: [f64; 2]) -> Value {
     serde_json::json!({"type": ty, "pos": [at[0], at[1], 0.0]})
 }
 
-/// The pointer of the mission's `volumes` object.
-pub fn volumes_pointer() -> String {
-    crate::edit::pointer(&["volumes"])
-}
-
-/// The pointer of the volume `name`.
-pub fn volume_pointer(name: &str) -> String {
-    crate::edit::pointer(&["volumes", name])
-}
-
-/// The volume `name` of a mission as `[x, y]` points.
-pub fn mission_volume(mission: &Value, name: &str) -> Option<Vec<[f64; 2]>> {
-    let pts = mission.get("volumes")?.get(name)?.as_array()?;
-    Some(pts.iter().filter_map(|p| Some([p.get(0)?.as_f64()?, p.get(1)?.as_f64()?])).collect())
-}
-
-/// Whether the mission has a volume called `name`.
-pub fn has_volume(mission: &Value, name: &str) -> bool {
-    mission.get("volumes").and_then(|v| v.get(name)).is_some()
-}
-
-/// Whether anything of `mission` other than its `volumes` and its nebula records names `name`: a string equal to it anywhere, or an
-/// object key equal to it (a point set, a group). Another nebula record (not `skip`) that names it as its `Polygon Name` counts too.
-pub fn mission_mentions(mission: &Value, name: &str, skip: Option<usize>) -> bool {
-    fn walk(v: &Value, name: &str) -> bool {
-        match v {
-            Value::String(s) => s == name,
-            Value::Array(a) => a.iter().any(|x| walk(x, name)),
-            Value::Object(o) => o.iter().any(|(k, x)| k == name || walk(x, name)),
-            _ => false,
-        }
-    }
-    let Some(o) = mission.as_object() else { return false };
-    o.iter().filter(|(k, _)| k.as_str() != "volumes").any(|(k, v)| match (k.as_str(), v.as_object()) {
-        ("environment", Some(env)) => env.iter().any(|(ek, ev)| match (ek.as_str(), ev.as_array()) {
-            ("nebulae", Some(list)) => list.iter().enumerate().any(|(i, r)| Some(i) != skip && record_polygon_name(r) == Some(name)),
-            _ => walk(ev, name) || ek == name,
-        }),
-        _ => walk(v, name) || k == name,
-    })
-}
-
 // T10: the skirmish keys (docs/phase4.md P8, T10). `skirmish`, `assemble` and `victory` are in the engine's `map.schema.json` (held by
-// `tests/map_skirmish.rs`); the two other files of a skirmish map are named here too.
+// `tests/map_skirmish.rs`); the map's script and media files are named in `mission::doc`.
 
 /// The top-level keys the skirmish section writes.
 pub const KEY_SKIRMISH: &str = "skirmish";
 pub const KEY_ASSEMBLE: &str = "assemble";
 pub const KEY_VICTORY: &str = "victory";
-/// A map's optional script (engine extension, `docs/modding.md` "Skirmish map scripts") and its words.
-pub const SCRIPT_FILE: &str = "script.json";
-pub const MEDIA_FILE: &str = "media.json";
-/// `script.json`'s top-level key that lets the script end the game, and the value that does it.
-pub const SCRIPT_KEY_VICTORY: &str = "victory";
-pub const SCRIPT_DECIDES: &str = "script";
 
 /// `assemble`: an open map where the players assemble their fleets (`false` or missing: a historical map with pre-placed `ships`).
 pub fn assemble(map: &Value) -> bool {
@@ -738,17 +624,6 @@ pub fn victory_end(rule: &Value, winners: bool) -> Option<&str> {
 /// A condition's `Type`.
 pub fn condition_kind(cond: &Value) -> Option<&str> {
     cond.get("Type")?.as_str()
-}
-
-/// `true` when a `script.json` lets its own rules end the game (`"victory": "script"`; the engine also takes `"objectives"`, the name the
-/// campaign gives its task-driven endings: `rules/skirmish.rs` `script_decides`).
-pub fn script_decides(script: &Value) -> bool {
-    matches!(script.get(SCRIPT_KEY_VICTORY).and_then(Value::as_str), Some(SCRIPT_DECIDES | "objectives"))
-}
-
-/// The rules of a `script.json` (empty when missing).
-pub fn script_rules(script: &Value) -> &[Value] {
-    array(script, "rules")
 }
 
 #[cfg(test)]

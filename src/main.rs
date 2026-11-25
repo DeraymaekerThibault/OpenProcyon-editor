@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{maps_panel, mission_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
+use openprocyon_editor::{maps_panel, mission_panel, missions_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -111,6 +111,7 @@ fn apply_flags(
             "3d" => Tab::Ship3d,
             "playtest" => Tab::Playtest,
             "mission" => Tab::Mission,
+            "missions" => Tab::Missions,
             "map" | "map3d" => Tab::Map,
             _ => Tab::Project,
         };
@@ -153,19 +154,21 @@ enum Tab {
     Ships,
     Weapons,
     Mission,
+    Missions,
     Map,
     Ship3d,
     Playtest,
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 7] = [
+    const ALL: [(Tab, &'static str); 8] = [
         (Tab::Project, "Mod"),
         (Tab::Ships, "Ships"),
         (Tab::Weapons, "Weapons"),
         (Tab::Map, "Maps"),
         (Tab::Ship3d, "3D ship"),
         (Tab::Playtest, "Play-test & export"),
+        (Tab::Missions, "Missions"),
         (Tab::Mission, "Mission (spike)"),
     ];
 }
@@ -256,6 +259,7 @@ fn panel(
             Tab::Ships => go3d = ships_panel::tab(ui, &mut ships, &mut project, &mut focus, &mut ship, &mut link, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Mission => mission_panel::show(ui, &mut mission),
+            Tab::Missions => missions_panel::tab(ui, &mut project),
             Tab::Map => {}
             Tab::Ship3d => {}
             Tab::Playtest => {

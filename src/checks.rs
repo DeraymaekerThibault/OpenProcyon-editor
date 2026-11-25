@@ -23,7 +23,7 @@ pub fn for_rule(problems: &[Finding], rule: usize) -> Vec<&Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mission::{Mission, fixture_dir};
+    use crate::mission::spike::{Mission, fixture_dir};
 
     #[test]
     fn the_worked_example_has_no_errors() {

@@ -9,7 +9,7 @@ use std::process::Child;
 
 use crate::checks::{self, Finding, Level};
 use crate::launch;
-use crate::mission::{Mission, fixture_dir};
+use crate::mission::spike::{Mission, fixture_dir};
 use crate::schema_form::{self, Names, Schema};
 
 #[derive(Resource)]

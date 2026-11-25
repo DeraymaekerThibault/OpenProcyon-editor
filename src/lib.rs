@@ -13,6 +13,7 @@ pub mod map_view;
 pub mod maps_panel;
 pub mod mission;
 pub mod mission_panel;
+pub mod missions_panel;
 pub mod overlay;
 pub mod playtest_panel;
 pub mod preview;

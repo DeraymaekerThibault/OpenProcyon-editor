@@ -31,6 +31,7 @@ use super::project as maps;
 use crate::checks::Finding;
 use crate::edit::{Edit, pointer};
 use crate::launch::{self, Launch, Lobby};
+use crate::mission::doc as mdoc;
 use crate::project::Project;
 use crate::schema_form::{self, Names, Schema};
 
@@ -39,12 +40,12 @@ use crate::schema_form::{self, Names, Schema};
 
 /// `maps/<id>/script.json`.
 pub fn script_rel(id: &str) -> Result<String, String> {
-    maps::map_rel(id).map(|_| format!("maps/{id}/{}", doc::SCRIPT_FILE))
+    maps::map_rel(id).map(|_| format!("maps/{id}/{}", mdoc::SCRIPT_FILE))
 }
 
 /// `maps/<id>/media.json`.
 pub fn media_rel(id: &str) -> Result<String, String> {
-    maps::map_rel(id).map(|_| format!("maps/{id}/{}", doc::MEDIA_FILE))
+    maps::map_rel(id).map(|_| format!("maps/{id}/{}", mdoc::MEDIA_FILE))
 }
 
 /// Opens the document `rel` when the mod or the import has the file (a script or media the map already has); `false` when neither
@@ -438,12 +439,12 @@ pub fn format_polygon(v: &Value) -> String {
 /// Lets the script's own end rules decide (`"victory": "script"` at the top of `script.json`, creating the file when it is first
 /// needed), or hands the end back to the map's `victory` rules (the key is removed; a script nobody else uses stays as it is).
 pub fn set_script_decides(project: &mut Project, id: &str, on: bool) -> Result<(), String> {
-    if !on && script_of(project, id).is_none_or(|s| s.get(doc::SCRIPT_KEY_VICTORY).is_none()) {
+    if !on && script_of(project, id).is_none_or(|s| s.get(mdoc::SCRIPT_KEY_VICTORY).is_none()) {
         return Ok(());
     }
     let rel = ensure_script(project, id)?;
-    let at = pointer(&[doc::SCRIPT_KEY_VICTORY]);
-    let edit = if on { Edit::set(at, json!(doc::SCRIPT_DECIDES)) } else { Edit::remove(at) };
+    let at = pointer(&[mdoc::SCRIPT_KEY_VICTORY]);
+    let edit = if on { Edit::set(at, json!(mdoc::SCRIPT_DECIDES)) } else { Edit::remove(at) };
     project.do_step(&rel, if on { "Script decides the end" } else { "Map rules decide the end" }, vec![edit])
 }
 
@@ -471,8 +472,8 @@ pub fn campaign_only_types() -> BTreeSet<String> {
 pub fn add_rule(project: &mut Project, id: &str) -> Result<usize, String> {
     let rel = ensure_script(project, id)?;
     let script = view(project, &rel).ok_or("script.json is not open")?;
-    let names: Vec<&str> = doc::script_rules(script).iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
-    let at = doc::script_rules(script).len();
+    let names: Vec<&str> = mdoc::script_rules(script).iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
+    let at = mdoc::script_rules(script).len();
     let rule = json!({"name": unique_name(&names, "Rule"), "Run Once": true, "Is Active": true, "conditions": [], "actions": []});
     let edit = if script.get("rules").is_some_and(Value::is_array) { Edit::set(pointer(&["rules", &at.to_string()]), rule) } else { Edit::set(pointer(&["rules"]), json!([rule])) };
     project.do_step(&rel, "Add script rule", vec![edit])?;
@@ -480,7 +481,7 @@ pub fn add_rule(project: &mut Project, id: &str) -> Result<usize, String> {
 }
 
 fn rule_count(project: &Project, id: &str) -> usize {
-    script_of(project, id).map_or(0, |s| doc::script_rules(s).len())
+    script_of(project, id).map_or(0, |s| mdoc::script_rules(s).len())
 }
 
 /// Deletes script rule `index`.
@@ -516,7 +517,7 @@ fn list_key(is_condition: bool) -> &'static str {
 
 /// Appends `item` to the conditions or the actions of script rule `index`; returns its position.
 pub fn add_item(project: &mut Project, id: &str, index: usize, is_condition: bool, item: Value) -> Result<usize, String> {
-    let rule = script_of(project, id).and_then(|s| doc::script_rules(s).get(index)).ok_or_else(|| format!("no script rule {index}"))?;
+    let rule = script_of(project, id).and_then(|s| mdoc::script_rules(s).get(index)).ok_or_else(|| format!("no script rule {index}"))?;
     let key = list_key(is_condition);
     let at = rule.get(key).and_then(Value::as_array).map_or(0, Vec::len);
     let edit = if rule.get(key).is_some_and(Value::is_array) {
@@ -782,7 +783,7 @@ fn lobby_listing(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
 
 fn victory_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &str, map: &Value, script: &Value) {
     ui.strong("How the game ends");
-    let decides = doc::script_decides(script);
+    let decides = mdoc::script_decides(script);
     ui.label(
         "The map's own end rules (below) decide, as in the retail maps, unless the script says \"victory\": \"script\". Then the script's \
          Team X Wins, Remaining Team Wins and End Game actions (and its tasks with a team) decide, and the map's rules are still tested first.",
@@ -986,10 +987,10 @@ fn script_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: 
     if script.is_null() {
         ui.label("This map has no script. Adding a rule creates maps/<id>/script.json in the mod.");
     }
-    let count = doc::script_rules(script).len();
+    let count = mdoc::script_rules(script).len();
     st.rule = st.rule.min(count.saturating_sub(1));
     let names: Vec<String> =
-        doc::script_rules(script).iter().enumerate().map(|(i, r)| format!("{}. {}", i + 1, r.get("name").and_then(Value::as_str).unwrap_or("(unnamed)"))).collect();
+        mdoc::script_rules(script).iter().enumerate().map(|(i, r)| format!("{}. {}", i + 1, r.get("name").and_then(Value::as_str).unwrap_or("(unnamed)"))).collect();
     ui.horizontal(|ui| {
         if !names.is_empty() {
             egui::ComboBox::from_id_salt("t10-rule").selected_text(&names[st.rule]).show_ui(ui, |ui| {
@@ -1008,7 +1009,7 @@ fn script_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: 
             st.run(r);
         }
     });
-    let Some(rule) = doc::script_rules(script).get(st.rule) else { return };
+    let Some(rule) = mdoc::script_rules(script).get(st.rule) else { return };
     let ri = st.rule;
     let names_for_forms = Names::collect(script, map, media);
     let findings: Vec<Finding> = st.findings(script, map, media).to_vec();

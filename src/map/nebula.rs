@@ -19,9 +19,10 @@
 
 use serde_json::Value;
 
-use super::doc::{self, Array, NebulaFlag, RecordField};
+use super::doc::{self, Array, NebulaFlag};
 use super::project::{self as maps, check_add_delete, check_key, is_whole, map_rel};
 use crate::edit::Edit;
+use crate::mission::doc::{self as mdoc, RecordField};
 use crate::project::{Project, keyed};
 
 /// The fewest points of a polygon.
@@ -146,7 +147,7 @@ pub enum Link {
 /// The path of the map's mission inside the mod (`maps/<id>/mission.json`).
 pub fn mission_rel(id: &str) -> Result<String, String> {
     map_rel(id)?;
-    Ok(format!("maps/{id}/{}", doc::MISSION_FILE))
+    Ok(format!("maps/{id}/{}", mdoc::MISSION_FILE))
 }
 
 /// The mission of the map as the game sees it, opened as a project document; `None` when the map has none.
@@ -171,10 +172,10 @@ pub fn link(project: &mut Project, id: &str, index: usize) -> Link {
     let Some(n) = doc::nebulae(map).get(index) else { return Link::Missing };
     let (name, own) = (doc::nebula_name(n).unwrap_or("").to_string(), doc::nebula_polygon(n));
     let Some(m) = mission_view(project, id) else { return Link::NoMission };
-    match doc::mission_nebulae(m).iter().position(|r| doc::record_name(r) == Some(name.as_str())) {
+    match mdoc::mission_nebulae(m).iter().position(|r| mdoc::record_name(r) == Some(name.as_str())) {
         Some(record) => {
-            let polygon_name = doc::record_polygon_name(&doc::mission_nebulae(m)[record]).unwrap_or("").to_string();
-            let in_sync = doc::mission_volume(m, &polygon_name).is_some_and(|v| v == own);
+            let polygon_name = mdoc::record_polygon_name(&mdoc::mission_nebulae(m)[record]).unwrap_or("").to_string();
+            let in_sync = mdoc::mission_volume(m, &polygon_name).is_some_and(|v| v == own);
             Link::Linked { record, polygon_name, in_sync }
         }
         None => Link::Missing,
@@ -201,7 +202,7 @@ fn check_records(project: &Project, mission: &Mission) -> Result<(), String> {
         return Ok(());
     }
     let d = project.doc(&mission.rel).ok_or_else(|| format!("{}: not open", mission.rel))?;
-    let ptr = doc::mission_nebulae_pointer();
+    let ptr = mdoc::mission_nebulae_pointer();
     let base = d.base.pointer(&ptr);
     if base.and_then(Value::as_array).is_none_or(Vec::is_empty) {
         return Ok(());
@@ -259,21 +260,21 @@ pub fn create(project: &mut Project, id: &str, name: &str, polygon: &[[f64; 2]])
     let mission = mission_of(project, id)?;
     let mission_edits = match &mission {
         Some(m) => {
-            if doc::has_volume(&m.value, name) {
+            if mdoc::has_volume(&m.value, name) {
                 return Err(format!("the mission has a volume called '{name}' already"));
             }
-            if doc::mission_nebulae(&m.value).iter().any(|r| doc::record_name(r) == Some(name)) {
+            if mdoc::mission_nebulae(&m.value).iter().any(|r| mdoc::record_name(r) == Some(name)) {
                 return Err(format!("the mission has a nebula record '{name}' already"));
             }
             check_records(project, m)?;
-            let record = doc::new_record(name, name);
-            let n = doc::mission_nebulae(&m.value).len();
-            let list_edit = if m.value.pointer(&doc::mission_nebulae_pointer()).is_some_and(Value::is_array) {
-                Edit::set(format!("{}/{n}", doc::mission_nebulae_pointer()), record)
+            let record = mdoc::new_record(name, name);
+            let n = mdoc::mission_nebulae(&m.value).len();
+            let list_edit = if m.value.pointer(&mdoc::mission_nebulae_pointer()).is_some_and(Value::is_array) {
+                Edit::set(format!("{}/{n}", mdoc::mission_nebulae_pointer()), record)
             } else {
-                Edit::set(doc::mission_nebulae_pointer(), Value::Array(vec![record]))
+                Edit::set(mdoc::mission_nebulae_pointer(), Value::Array(vec![record]))
             };
-            Some(vec![list_edit, Edit::set(doc::volume_pointer(name), doc::polygon_value(polygon))])
+            Some(vec![list_edit, Edit::set(mdoc::volume_pointer(name), doc::polygon_value(polygon))])
         }
         None => None,
     };
@@ -295,9 +296,9 @@ pub fn set_polygon(project: &mut Project, id: &str, index: usize, polygon: &[[f6
     let mission = mission_of(project, id)?;
     let mission_edits = mission.as_ref().and_then(|m| {
         let name = doc::nebula_name(&n)?;
-        let rec = doc::mission_nebulae(&m.value).iter().find(|r| doc::record_name(r) == Some(name))?;
-        let pn = doc::record_polygon_name(rec).filter(|p| !p.is_empty())?;
-        Some(vec![Edit::set(doc::volume_pointer(pn), doc::polygon_value(polygon))])
+        let rec = mdoc::mission_nebulae(&m.value).iter().find(|r| mdoc::record_name(r) == Some(name))?;
+        let pn = mdoc::record_polygon_name(rec).filter(|p| !p.is_empty())?;
+        Some(vec![Edit::set(mdoc::volume_pointer(pn), doc::polygon_value(polygon))])
     });
     run(project, label, &rel, map_edits, mission.as_ref().zip(mission_edits))
 }
@@ -351,7 +352,7 @@ pub fn set_flag(project: &mut Project, id: &str, index: usize, flag: NebulaFlag,
     }
     let record = |m: &Mission| -> Option<usize> {
         let name = doc::nebula_name(&n)?;
-        doc::mission_nebulae(&m.value).iter().position(|r| doc::record_name(r) == Some(name))
+        mdoc::mission_nebulae(&m.value).iter().position(|r| mdoc::record_name(r) == Some(name))
     };
     let mission = mission_of(project, id)?;
     let mission_edits = mission.as_ref().and_then(|m| {
@@ -365,8 +366,8 @@ pub fn set_flag(project: &mut Project, id: &str, index: usize, flag: NebulaFlag,
         check_record_edit(project, m)?;
     }
     let mission_edits = mission_edits.and_then(|(_, ri)| match flag {
-        NebulaFlag::Cloud => Some(vec![Edit::set(doc::record_pointer(ri, RecordField::CloudEffect), flag.value(on))]),
-        NebulaFlag::Occlusion => Some(vec![Edit::set(doc::record_pointer(ri, RecordField::Occlusion), doc::flag_text(on))]),
+        NebulaFlag::Cloud => Some(vec![Edit::set(mdoc::record_pointer(ri, RecordField::CloudEffect), flag.value(on))]),
+        NebulaFlag::Occlusion => Some(vec![Edit::set(mdoc::record_pointer(ri, RecordField::Occlusion), mdoc::flag_text(on))]),
         _ => None,
     });
     let label = format!("Nebula {} {:?} {}", title(project, id, index), flag, if on { "on" } else { "off" });
@@ -410,22 +411,22 @@ pub fn rename(project: &mut Project, id: &str, index: usize, new: &str) -> Resul
     let mission = mission_of(project, id)?;
     let mission_edits = match &mission {
         Some(m) => {
-            let list = doc::mission_nebulae(&m.value);
-            if list.iter().any(|r| doc::record_name(r) == Some(new)) {
+            let list = mdoc::mission_nebulae(&m.value);
+            if list.iter().any(|r| mdoc::record_name(r) == Some(new)) {
                 return Err(format!("the mission has a nebula record '{new}' already"));
             }
-            let found = list.iter().position(|r| doc::record_name(r) == Some(old.as_str()));
+            let found = list.iter().position(|r| mdoc::record_name(r) == Some(old.as_str()));
             if found.is_some() {
                 check_record_edit(project, m)?;
             }
             found.map(|ri| {
-                let mut e = vec![Edit::set(doc::record_pointer(ri, RecordField::Name), Value::from(new))];
-                let pn = doc::record_polygon_name(&list[ri]).unwrap_or("");
-                let movable = pn == old && doc::has_volume(&m.value, &old) && !doc::has_volume(&m.value, new) && !doc::mission_mentions(&m.value, &old, Some(ri));
-                if movable && let Some(poly) = doc::mission_volume(&m.value, &old) {
-                    e.push(Edit::remove(doc::volume_pointer(&old)));
-                    e.push(Edit::set(doc::volume_pointer(new), doc::polygon_value(&poly)));
-                    e.push(Edit::set(doc::record_pointer(ri, RecordField::PolygonName), Value::from(new)));
+                let mut e = vec![Edit::set(mdoc::record_pointer(ri, RecordField::Name), Value::from(new))];
+                let pn = mdoc::record_polygon_name(&list[ri]).unwrap_or("");
+                let movable = pn == old && mdoc::has_volume(&m.value, &old) && !mdoc::has_volume(&m.value, new) && !mdoc::mission_mentions(&m.value, &old, Some(ri));
+                if movable && let Some(poly) = mdoc::mission_volume(&m.value, &old) {
+                    e.push(Edit::remove(mdoc::volume_pointer(&old)));
+                    e.push(Edit::set(mdoc::volume_pointer(new), doc::polygon_value(&poly)));
+                    e.push(Edit::set(mdoc::record_pointer(ri, RecordField::PolygonName), Value::from(new)));
                 }
                 e
             })
@@ -447,14 +448,14 @@ pub fn delete(project: &mut Project, id: &str, index: usize) -> Result<Value, St
     let map_edits = vec![Edit::remove(crate::edit::pointer(&[Array::Nebulae.key(), &index.to_string()]))];
     let mission = mission_of(project, id)?;
     let mission_edits = match &mission {
-        Some(m) => match doc::mission_nebulae(&m.value).iter().position(|r| doc::record_name(r) == Some(name.as_str())) {
+        Some(m) => match mdoc::mission_nebulae(&m.value).iter().position(|r| mdoc::record_name(r) == Some(name.as_str())) {
             Some(ri) => {
                 check_records(project, m)?;
-                let mut e = vec![Edit::remove(format!("{}/{ri}", doc::mission_nebulae_pointer()))];
+                let mut e = vec![Edit::remove(format!("{}/{ri}", mdoc::mission_nebulae_pointer()))];
                 if let Some(pn) =
-                    doc::record_polygon_name(&doc::mission_nebulae(&m.value)[ri]).filter(|p| doc::has_volume(&m.value, p) && !doc::mission_mentions(&m.value, p, Some(ri)))
+                    mdoc::record_polygon_name(&mdoc::mission_nebulae(&m.value)[ri]).filter(|p| mdoc::has_volume(&m.value, p) && !mdoc::mission_mentions(&m.value, p, Some(ri)))
                 {
-                    e.push(Edit::remove(doc::volume_pointer(pn)));
+                    e.push(Edit::remove(mdoc::volume_pointer(pn)));
                 }
                 Some(e)
             }
