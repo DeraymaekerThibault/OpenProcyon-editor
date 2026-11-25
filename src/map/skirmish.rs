@@ -32,6 +32,8 @@ use crate::checks::Finding;
 use crate::edit::{Edit, pointer};
 use crate::launch::{self, Launch, Lobby};
 use crate::mission::doc as mdoc;
+use crate::mission::media;
+use crate::mission::rules::{self, Target, unique_name};
 use crate::project::Project;
 use crate::schema_form::{self, Names, Schema};
 
@@ -298,10 +300,6 @@ pub fn new_condition(kind: &str, map: &Value) -> Value {
     Value::Object(c)
 }
 
-fn unique_name(taken: &[&str], stem: &str) -> String {
-    (1..).map(|n| format!("{stem} {n}")).find(|c| !taken.contains(&c.as_str())).expect("a free name exists")
-}
-
 fn victory_edit(project: &mut Project, id: &str, label: &str, edits: Vec<Edit>) -> Result<(), String> {
     map_step(project, id, label, edits)
 }
@@ -471,81 +469,44 @@ pub fn campaign_only_types() -> BTreeSet<String> {
 /// has nothing in it.
 pub fn add_rule(project: &mut Project, id: &str) -> Result<usize, String> {
     let rel = ensure_script(project, id)?;
-    let script = view(project, &rel).ok_or("script.json is not open")?;
-    let names: Vec<&str> = mdoc::script_rules(script).iter().filter_map(|r| r.get("name").and_then(Value::as_str)).collect();
-    let at = mdoc::script_rules(script).len();
-    let rule = json!({"name": unique_name(&names, "Rule"), "Run Once": true, "Is Active": true, "conditions": [], "actions": []});
-    let edit = if script.get("rules").is_some_and(Value::is_array) { Edit::set(pointer(&["rules", &at.to_string()]), rule) } else { Edit::set(pointer(&["rules"]), json!([rule])) };
-    project.do_step(&rel, "Add script rule", vec![edit])?;
-    Ok(at)
-}
-
-fn rule_count(project: &Project, id: &str) -> usize {
-    script_of(project, id).map_or(0, |s| mdoc::script_rules(s).len())
+    rules::add_rule(project, &Target::script(&rel))
 }
 
 /// Deletes script rule `index`.
 pub fn delete_rule(project: &mut Project, id: &str, index: usize) -> Result<(), String> {
-    if index >= rule_count(project, id) {
-        return Err(format!("no script rule {index}"));
-    }
     let rel = script_rel(id)?;
-    project.do_step(&rel, "Delete script rule", vec![Edit::remove(pointer(&["rules", &index.to_string()]))])
+    rules::delete_rule(project, &Target::script(&rel), index)
 }
 
 /// Renames script rule `index` (typing joins one step).
 pub fn rename_rule(project: &mut Project, id: &str, index: usize, name: &str) -> Result<(), String> {
-    if index >= rule_count(project, id) {
-        return Err(format!("no script rule {index}"));
-    }
     let rel = script_rel(id)?;
-    form_step(project, &rel, "Rename script rule", vec![Edit::set(pointer(&["rules", &index.to_string(), "name"]), json!(name))], true)
+    rules::rename_rule(project, &Target::script(&rel), index, name)
 }
 
 /// `Run Once` or `Is Active` of a script rule: JSON booleans (the rule loader reads them as booleans, unlike a Type's fields).
 pub fn set_rule_flag(project: &mut Project, id: &str, index: usize, key: &str, on: bool) -> Result<(), String> {
-    if index >= rule_count(project, id) {
-        return Err(format!("no script rule {index}"));
-    }
     let rel = script_rel(id)?;
-    project.do_step(&rel, &format!("Script rule {key}"), vec![Edit::set(pointer(&["rules", &index.to_string(), key]), json!(on))])
-}
-
-fn list_key(is_condition: bool) -> &'static str {
-    if is_condition { "conditions" } else { "actions" }
+    rules::set_rule_flag(project, &Target::script(&rel), index, key, on)
 }
 
 /// Appends `item` to the conditions or the actions of script rule `index`; returns its position.
 pub fn add_item(project: &mut Project, id: &str, index: usize, is_condition: bool, item: Value) -> Result<usize, String> {
-    let rule = script_of(project, id).and_then(|s| mdoc::script_rules(s).get(index)).ok_or_else(|| format!("no script rule {index}"))?;
-    let key = list_key(is_condition);
-    let at = rule.get(key).and_then(Value::as_array).map_or(0, Vec::len);
-    let edit = if rule.get(key).is_some_and(Value::is_array) {
-        Edit::set(pointer(&["rules", &index.to_string(), key, &at.to_string()]), item)
-    } else {
-        Edit::set(pointer(&["rules", &index.to_string(), key]), json!([item]))
-    };
     let rel = script_rel(id)?;
-    project.do_step(&rel, if is_condition { "Add condition" } else { "Add action" }, vec![edit])?;
-    Ok(at)
+    rules::add_item(project, &Target::script(&rel), index, is_condition, item)
 }
 
 /// Removes condition or action `item` of script rule `index`.
 pub fn remove_item(project: &mut Project, id: &str, index: usize, is_condition: bool, item: usize) -> Result<(), String> {
     let rel = script_rel(id)?;
-    project.do_step(
-        &rel,
-        if is_condition { "Remove condition" } else { "Remove action" },
-        vec![Edit::remove(pointer(&["rules", &index.to_string(), list_key(is_condition), &item.to_string()]))],
-    )
+    rules::remove_item(project, &Target::script(&rel), index, is_condition, item)
 }
 
 /// Replaces condition or action `item` of script rule `index` with what its form made. `typing`: one box was typed in, so the edit
 /// joins the typing before it.
 pub fn replace_item(project: &mut Project, id: &str, index: usize, is_condition: bool, item: usize, new: Value, typing: bool) -> Result<(), String> {
     let rel = script_rel(id)?;
-    let label = format!("Edit {}", if is_condition { "condition" } else { "action" });
-    form_step(project, &rel, &label, vec![Edit::set(pointer(&["rules", &index.to_string(), list_key(is_condition), &item.to_string()]), new)], typing)
+    rules::replace_item(project, &Target::script(&rel), index, is_condition, item, new, typing)
 }
 
 /// The engine's `--check-mission` of the map's script, as a skirmish script (a campaign-only Type is an error there).
@@ -556,74 +517,42 @@ pub fn check_script(script: &Value, map: &Value, media: &Value) -> Vec<Finding> 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // media.json
 
-/// The three tables of `media.json`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MediaTable {
-    Speech,
-    Messages,
-    ShipNames,
-}
+/// The three tables of `media.json` (the editor's one definition is [`mdoc::MediaTable`]).
+pub use mdoc::MediaTable;
 
-impl MediaTable {
-    pub const ALL: [MediaTable; 3] = [MediaTable::Speech, MediaTable::Messages, MediaTable::ShipNames];
-
-    /// The key in `media.json`.
-    pub fn key(self) -> &'static str {
-        match self {
-            MediaTable::Speech => "speech",
-            MediaTable::Messages => "messages",
-            MediaTable::ShipNames => "ship_names",
-        }
-    }
-
-    fn title(self) -> &'static str {
-        match self {
-            MediaTable::Speech => "Speech events (subtitle, sound)",
-            MediaTable::Messages => "Messages (end texts)",
-            MediaTable::ShipNames => "Ship names",
-        }
-    }
-
-    /// The text a new entry starts with.
-    fn new_entry(self) -> Value {
-        match self {
-            MediaTable::Speech => json!({"text": ""}),
-            _ => json!(""),
-        }
+fn table_title(table: MediaTable) -> &'static str {
+    match table {
+        MediaTable::Speech => "Speech events (subtitle, sound)",
+        MediaTable::Messages => "Messages (end texts)",
+        MediaTable::ShipNames => "Ship names",
     }
 }
 
 /// The entries of one table, in the file's order (empty when missing).
 pub fn media_entries(media: &Value, table: MediaTable) -> Vec<(&str, &Value)> {
-    media.get(table.key()).and_then(Value::as_object).map(|o| o.iter().map(|(k, v)| (k.as_str(), v)).collect()).unwrap_or_default()
+    media::entries(media, table)
 }
 
 /// Adds an entry named `key` to a table (creating `media.json` in the mod on first use). Refuses an empty or repeated key.
 pub fn add_media(project: &mut Project, id: &str, table: MediaTable, key: &str) -> Result<(), String> {
-    let key = key.trim();
-    if key.is_empty() {
+    if key.trim().is_empty() {
         return Err("name the entry first".into());
     }
     let rel = ensure_media(project, id)?;
-    if view(project, &rel).is_some_and(|m| media_entries(m, table).iter().any(|(k, _)| *k == key)) {
-        return Err(format!("{} already has '{key}'", table.key()));
-    }
-    project.do_step(&rel, "Add media entry", vec![Edit::set(pointer(&[table.key(), key]), table.new_entry())])
+    media::add(project, &rel, table, key)
 }
 
 /// Removes an entry.
 pub fn remove_media(project: &mut Project, id: &str, table: MediaTable, key: &str) -> Result<(), String> {
     let rel = media_rel(id)?;
-    project.do_step(&rel, "Remove media entry", vec![Edit::remove(pointer(&[table.key(), key]))])
+    media::remove(project, &rel, table, key)
 }
 
 /// Sets a message or a ship name (`field` `None`) or one field of a speech entry (`text`, `file`, `duration`; an empty text removes
 /// all but `text`). Typing joins one step.
 pub fn set_media(project: &mut Project, id: &str, table: MediaTable, key: &str, field: Option<&str>, value: Option<Value>) -> Result<(), String> {
     let rel = media_rel(id)?;
-    let tokens: Vec<&str> = [Some(table.key()), Some(key), field].into_iter().flatten().collect();
-    let at = pointer(&tokens);
-    form_step(project, &rel, &format!("Edit {}", table.key()), vec![value.map_or_else(|| Edit::remove(at.clone()), |v| Edit::set(at.clone(), v))], true)
+    media::set(project, &rel, table, key, field, value)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -1036,11 +965,11 @@ fn script_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: 
     for is_cond in [true, false] {
         ui.separator();
         ui.strong(if is_cond { "Conditions" } else { "Actions" });
-        let items = rule.get(list_key(is_cond)).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+        let items = rule.get(mdoc::rule_list_key(is_cond)).and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
         let mut remove = None;
         for (i, item) in items.iter().enumerate() {
             let ty = item.get("Type").and_then(Value::as_str).unwrap_or("?");
-            let mine = crate::checks::for_item(&findings, ri, list_key(is_cond), i);
+            let mine = crate::checks::for_item(&findings, ri, mdoc::rule_list_key(is_cond), i);
             let head = if mine.is_empty() { ty.to_string() } else { format!("{ty}  ({} problem{})", mine.len(), if mine.len() == 1 { "" } else { "s" }) };
             let wid = egui::Id::new(("t10-item", id, ri, is_cond, i));
             egui::CollapsingHeader::new(format!("{}. {head}", i + 1)).id_salt(wid).default_open(true).show(ui, |ui| {
@@ -1107,7 +1036,7 @@ fn media_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
         if entries.is_empty() {
             continue;
         }
-        egui::CollapsingHeader::new(format!("{} ({})", t.title(), entries.len())).id_salt(("t10-media", id, t.key())).default_open(false).show(ui, |ui| {
+        egui::CollapsingHeader::new(format!("{} ({})", table_title(t), entries.len())).id_salt(("t10-media", id, t.key())).default_open(false).show(ui, |ui| {
             let mut remove = None;
             for (key, v) in entries {
                 ui.horizontal_wrapped(|ui| {

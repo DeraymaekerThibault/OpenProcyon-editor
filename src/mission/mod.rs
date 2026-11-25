@@ -18,5 +18,9 @@ pub mod ships;
 pub mod speech;
 pub mod spike;
 pub mod tasks;
+// T2
+pub mod media;
+pub mod refs;
+pub mod rules;
 
 pub use spike::{Mission, fixture_dir};
