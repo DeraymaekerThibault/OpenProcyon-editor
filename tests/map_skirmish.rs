@@ -34,7 +34,7 @@ fn setup(name: &str) -> (PathBuf, PathBuf, PathBuf) {
         &assets,
         "maps/red/map.json",
         &json!({"name": "Red", "skirmish": true, "assemble": true, "world_half": 400.0,
-            "teams": [{"name_id": "T1"}, {"name_id": "T2"}],
+            "teams": [{"name_id": "T1", "race": 0}, {"name_id": "T2", "race": 2}],
             "players": [
                 {"name": "A", "team": 0, "start": [0.0, 0.0, 0.0], "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": true, "race": 0},
                 {"name": "B", "team": 1, "start": [100.0, 0.0, 0.0], "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": true, "race": 2}],
