@@ -155,6 +155,8 @@ pub fn new_ship_from_glb(project: &mut Project, id: &str, glb: &Path) -> Result<
     let dest = project.dir.join("ships").join(id).join("model.glb");
     crate::project::guard::create_dir_all(dest.parent().expect("has a parent"), project.import.as_deref())?;
     crate::project::guard::write(&dest, &bytes, project.import.as_deref())?;
+    // the editor's own write: take the file into the layer list now, so the next poll does not announce it as an outside change
+    project.rebuild()?;
     project.open_new_doc(&rel, None, json!({"race": "", "points": 0, "skirmish": false})).map(|_| ())
 }
 
@@ -620,6 +622,7 @@ mod tests {
         std::fs::write(&own, &other).unwrap();
         new_ship_from_glb(&mut p, "Mine", &own).unwrap();
         assert_eq!(std::fs::read(m.join("ships/Mine/model.glb")).unwrap(), other);
+        assert!(p.poll().iter().all(|n| !n.text.contains("mod folder changed")), "the editor's own copy is not announced");
         assert_eq!(p.doc(&ship_rel("Mine")).unwrap().edited, json!({"race": "", "points": 0, "skirmish": false}));
         p.save();
         let text = std::fs::read_to_string(m.join("ships/Mine/ship.json")).unwrap().replace([' ', '\n'], "");

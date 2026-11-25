@@ -226,6 +226,8 @@ pub struct Project {
     redo: Vec<Command>,
     notices: Vec<Notice>,
     scratch: String,
+    /// The scratch copy the last mod check read ([`Project::check_dir`]), removed when the next one is made and on drop.
+    check_copy: Option<PathBuf>,
     /// The files in the mod folder at the last overlay build ([`layers::listing`]); a difference in [`Project::poll`] rebuilds it.
     files: std::collections::BTreeSet<String>,
 }
@@ -234,6 +236,9 @@ impl Drop for Project {
     fn drop(&mut self) {
         let _ = guard::remove_dir_all(&crate::overlay::scratch(&self.scratch), self.import.as_deref());
         let _ = guard::remove_dir_all(&crate::overlay::scratch(&format!("{}-empty", self.scratch)), self.import.as_deref());
+        if let Some(c) = &self.check_copy {
+            let _ = guard::remove_dir_all(c, self.import.as_deref());
+        }
         // The per-process folder goes too once no project of this process uses it (the guard has no remove_dir: it is empty or kept).
         if let Some(parent) = crate::overlay::scratch(&self.scratch).parent() {
             let _ = guard::remove_empty_dir(parent, self.import.as_deref());
@@ -257,8 +262,19 @@ impl Project {
         let import = import.filter(|d| d.is_dir()).map(|d| std::path::absolute(&d).unwrap_or(d));
         guard::check_project_dir(&dir, import.as_deref())?;
         let scratch = format!("project-{}", NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed));
-        let mut p =
-            Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch, files: Default::default() };
+        let mut p = Project {
+            root: dir.clone(),
+            dir,
+            import,
+            report: ModReport::default(),
+            docs: vec![],
+            undo: vec![],
+            redo: vec![],
+            notices: vec![],
+            scratch,
+            check_copy: None,
+            files: Default::default(),
+        };
         p.rebuild()?;
         if p.dir.join("mod.json").is_file()
             && let Err(e) = p.open_doc("mod.json")
@@ -329,6 +345,56 @@ impl Project {
     /// The engine's report entry for this mod.
     pub fn entry(&self) -> Option<&ModEntry> {
         self.report.mods.iter().find(|m| m.dir == self.dir).or(self.report.mods.last())
+    }
+
+    /// The folder the mod check reads: the mod folder itself when nothing is unsaved, else a scratch copy of it (files hard-linked or
+    /// copied) with every unsaved document written as [`Project::save`] would write it, so the engine checks the unsaved edits too.
+    /// Writes only into the editor's scratch folder; the mod folder is untouched.
+    pub fn check_dir(&mut self) -> Result<PathBuf, String> {
+        let dirty = self.dirty_rels();
+        if dirty.is_empty() {
+            return Ok(self.dir.clone());
+        }
+        let import = self.import.clone();
+        let out = crate::overlay::scratch(&format!("{}-check-{}", self.scratch, NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed)));
+        if let Some(old) = self.check_copy.replace(out.clone()) {
+            let _ = guard::remove_dir_all(&old, import.as_deref());
+        }
+        guard::create_dir_all(&out, import.as_deref())?;
+        for rel in layers::listing(&self.dir) {
+            if dirty.contains(&rel) {
+                continue;
+            }
+            let to = out.join(&rel);
+            if let Some(parent) = to.parent() {
+                guard::create_dir_all(parent, import.as_deref())?;
+            }
+            guard::check_writable(&to, import.as_deref())?;
+            if std::fs::hard_link(self.dir.join(&rel), &to).is_err() {
+                guard::copy(&self.dir.join(&rel), &to, import.as_deref())?;
+            }
+        }
+        for rel in &dirty {
+            let Some(doc) = self.doc(rel) else { continue };
+            let to = out.join(rel);
+            match doc.plan().0 {
+                Plan::Write(f) => {
+                    if let Some(parent) = to.parent() {
+                        guard::create_dir_all(parent, import.as_deref())?;
+                    }
+                    guard::write(&to, to_json_string(&f), import.as_deref())?;
+                }
+                // saving would delete the file: the check sees it gone
+                Plan::Delete => {}
+                // saving would write nothing: the file on disk already means the same
+                Plan::Nothing => {
+                    if self.dir.join(rel).is_file() {
+                        guard::copy(&self.dir.join(rel), &to, import.as_deref())?;
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// The layer rows for the panel: the report plus the documents with unsaved edits.
@@ -730,6 +796,26 @@ mod tests {
         write(&assets, "data/weapons/guns.json", r#"{"Gun_A": {"range": 10}}"#);
         std::fs::create_dir_all(&m).unwrap();
         (root, assets, m)
+    }
+
+    #[test]
+    fn the_check_folder_holds_the_unsaved_edits_and_the_mod_folder_is_untouched() {
+        let (root, assets, m) = setup("check-dir");
+        write(&m, "mod.json", r#"{"id": "t", "name": "T", "format": 1}"#);
+        write(&m, "ships/Ship_X/model.glb", "glb");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        assert_eq!(p.check_dir().unwrap(), p.dir, "nothing unsaved: the mod folder itself");
+        p.do_edits("ships/Ship_X/ship.json", "Typo", vec![Edit::set("/sigth", json!(3))]).unwrap();
+        let dir = p.check_dir().unwrap();
+        assert_ne!(dir, p.dir);
+        let text = std::fs::read_to_string(dir.join("ships/Ship_X/ship.json")).unwrap();
+        assert!(text.contains("sigth"), "{text}");
+        assert!(dir.join("mod.json").is_file() && dir.join("ships/Ship_X/model.glb").is_file(), "the other files come along");
+        assert!(!m.join("ships/Ship_X/ship.json").exists(), "nothing written to the mod folder");
+        let found = openprocyon::authoring::check_mod(&dir, p.import.as_deref());
+        assert!(found.iter().any(|f| f.path.contains("sigth")), "{found:#?}");
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
