@@ -314,10 +314,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
             st.run(r);
         }
     });
-    if let Some(e) = &st.error {
-        ui.colored_label(egui::Color32::LIGHT_RED, e);
-    } else if !st.info.is_empty() {
-        ui.label(&st.info);
+    // One line always: "Copied..." coming must not push the rows below it.
+    match (&st.error, st.info.is_empty()) {
+        (Some(e), _) => crate::layout::status_line(ui, e, Some(egui::Color32::LIGHT_RED)),
+        (None, false) => crate::layout::status_line(ui, &st.info, None),
+        _ => crate::layout::status_line(ui, "", None),
     }
 }
 

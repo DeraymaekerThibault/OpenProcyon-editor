@@ -246,7 +246,8 @@ fn panel(
         if map.v3.on && project.project.is_some() {
             let strip = map.v3.bar_rect(root.available_rect_before_wrap());
             root.painter().rect_filled(strip, 0.0, ctx.global_style().visuals.panel_fill);
-            central = central.frame(egui::Frame::NONE);
+            // Transparent but with the panel's own margin, so switching 2D/3D does not move the controls.
+            central = central.frame(egui::Frame::central_panel(&ctx.global_style()).fill(egui::Color32::TRANSPARENT));
         }
         central.show(&mut root, |ui| maps_panel::tab(ui, &mut map, &mut project));
         which_mod::window(ctx, &mut project, assets.dir.as_deref().filter(|d| d.is_dir()));

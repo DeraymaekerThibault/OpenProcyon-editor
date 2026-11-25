@@ -142,10 +142,10 @@ pub fn show(ui: &mut egui::Ui, form: &mut Form, names: &Names) -> Outcome {
         if ui.button("Cancel").clicked() {
             outcome = Outcome::Close;
         }
-        if !ready {
-            ui.weak(format!("still to fill in: {}", missing.join(", ")));
-        }
     });
+    // Its own line, always there, cut when long: beside the buttons it ran under the plan area.
+    let text = if missing.is_empty() { String::new() } else { format!("still to fill in: {}", missing.join(", ")) };
+    crate::layout::status_line(ui, &text, Some(ui.visuals().weak_text_color()));
     outcome
 }
 

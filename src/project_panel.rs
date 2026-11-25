@@ -340,6 +340,7 @@ pub fn problems_panel(ui: &mut egui::Ui, st: &mut State, focus: &mut Focus) {
             st.check();
         }
     });
+    ui.add_space(2.0);
     egui::ScrollArea::vertical().id_salt("mod-problems").max_height(140.0).show(ui, |ui| {
         for f in problems::own(&st.findings) {
             finding_row(ui, f, focus);

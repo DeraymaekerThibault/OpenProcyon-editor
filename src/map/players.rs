@@ -417,13 +417,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
             ui.label("Team");
             let team = doc::player_team(p).unwrap_or(-1);
             let label = if team < 0 { "none".to_string() } else { teams.get(team as usize).map_or_else(|| format!("team {team}"), |t| (*t).to_string()) };
-            egui::ComboBox::from_id_salt(("player-team", i)).selected_text(label).show_ui(ui, |ui| {
-                if ui.selectable_label(team < 0, "none").clicked() {
-                    action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(-1) });
-                }
-                for (t, name) in teams.iter().enumerate() {
-                    if ui.selectable_label(team == t as i64, if name.is_empty() { format!("team {t}") } else { (*name).to_string() }).clicked() {
-                        action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(t) });
+            // Fixed width: a longer team name must not widen the box and push Playable and Race right.
+            crate::layout::fixed_width(ui, 130.0, |ui| {
+                egui::ComboBox::from_id_salt(("player-team", i)).selected_text(label).width(130.0).truncate().show_ui(ui, |ui| {
+                    if ui.selectable_label(team < 0, "none").clicked() {
+                        action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(-1) });
                     }
                 }
             });

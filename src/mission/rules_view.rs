@@ -397,12 +397,13 @@ fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<Strin
         if chip(ui, wid("only-problems"), "has problems", on, None).clicked() {
             st.only_problems = !on;
         }
-        if errors + warns > 0 {
-            ui.colored_label(RED, format!("{errors} errors, {warns} warnings"));
-        } else {
-            ui.weak("no findings");
-        }
     });
+    // Its own line, always there: a count that wraps in the row above pushed the list down.
+    if errors + warns > 0 {
+        crate::layout::status_line(ui, &format!("{errors} errors, {warns} warnings"), Some(RED));
+    } else {
+        crate::layout::status_line(ui, "no findings", Some(ui.visuals().weak_text_color()));
+    }
     if let (Some(u), Some((rules, tasks))) = (st.uses.clone(), using) {
         ui.horizontal_wrapped(|ui| {
             if chip(ui, wid("uses-clear"), &format!("uses {}  (x)", u.label), true, None).on_hover_text("Show every rule again").clicked() {

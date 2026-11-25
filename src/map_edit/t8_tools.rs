@@ -159,7 +159,8 @@ pub fn toolbar(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str
     // The form comes and goes with the picked nebula; its space stays (once there is a nebula to pick), and the message line is always
     // one line, so that the plan below does not move.
     let open = if t.mode == Mode::Edit { t.picked } else { None };
-    let mut form_h = t.form_h;
+    // Seeded with the form's usual height (two rows, measured), so that opening it the first time does not push the plan down.
+    let mut form_h = if t.form_h > 0.0 { t.form_h } else { FORM_ROWS_H };
     if !list.is_empty() || open.is_some() {
         crate::layout::reserved(ui, &mut form_h, open.is_some(), |ui| {
             if let Some(i) = open {
@@ -175,6 +176,9 @@ pub fn toolbar(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str
     };
     crate::layout::status_line(ui, &text, colour);
 }
+
+/// The height the nebula form takes when first shown (two wrapped rows).
+const FORM_ROWS_H: f32 = 37.0;
 
 fn mine_row(ui: &mut egui::Ui, t: &mut Tools, project: &Project, id: &str) {
     let types = mines::types(project, id);
