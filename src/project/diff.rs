@@ -60,9 +60,14 @@ fn extends_file(rule: &dyn KeyedRule, rel: &str, base: &Value, edited: &Value, o
     }
     let body = body(base, edited, own_map.map(|_| &kept), cx);
     let mut sets: Vec<(String, Value)> = vec![];
-    // Hand-written `set` entries stay while the pointer exists; their value follows the document.
+    // Hand-written `set` entries stay while the pointer exists; their value follows the document. A pointer into a list written by
+    // key (`/objects/7/pos`) is not kept: its index may now name another entry once a keyed `$remove` or an insert shifted the list.
+    // The list's own diff writes the changes again: as entries, or as fresh `set` pointers computed against `base`.
     if let Some(Value::Object(set)) = &own_set {
         for (ptr, own_value) in set {
+            if cx.keyed.iter().any(|(list, _)| ptr.strip_prefix(list.as_str()).is_some_and(|rest| rest.starts_with('/'))) {
+                continue;
+            }
             if let Some(cur) = edited.pointer(ptr) {
                 // A `set` that was changed back to what the parent has is dropped.
                 if base.pointer(ptr) == Some(cur) && own_value != cur {
@@ -646,6 +651,48 @@ mod tests {
         let own = json!({"extends": "red", "objects": [{"id": 2, "type": "Bee"}]});
         let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &base, &own, Some("red"));
         assert_eq!(d.file, Some(json!({"extends": "red"})));
+    }
+
+    #[test]
+    fn keyed_lists_earlier_set_pointers_do_not_follow_shifted_indices() {
+        // Save 1: a move (set pointers). Save 2: delete a lower-index object, add one, duplicate one.
+        let base = red();
+        let mut saved = base.clone();
+        saved["objects"][2]["pos"] = json!([1, 1, 1]);
+        saved["objects"][1]["pos"] = json!([2, 2, 2]);
+        let first = keyed_file(&base, &saved, &Value::Null).file.unwrap();
+        assert!(first["set"].as_object().unwrap().keys().all(|k| k.starts_with("/objects/")), "{first}");
+        let mut edited = saved.clone();
+        edited["objects"].as_array_mut().unwrap().remove(0);
+        edited["objects"].as_array_mut().unwrap().push(json!({"id": 4, "type": "D", "pos": [1, 2, 3]}));
+        let mut dup = edited["objects"][1].clone();
+        dup["id"] = json!(5);
+        edited["objects"].as_array_mut().unwrap().push(dup);
+        let d = keyed_file(&base, &edited, &first);
+        let file = d.file.unwrap();
+        let (merged, _) = keyed::engine_extend(MAP, &base, &file).unwrap();
+        assert_eq!(merged, edited);
+        // No pointer is left that names the position of an entry the edit moved.
+        assert!(file.get("set").is_none_or(|s| s.as_object().is_some_and(|m| m.keys().all(|k| !k.starts_with("/objects/")))), "{file}");
+    }
+
+    #[test]
+    fn keyed_lists_mission_rules_by_name_do_not_keep_stale_set_pointers() {
+        const SCRIPT: &str = "maps/red/script.json";
+        let base = json!({"rules": [{"name": "A", "do": 1}, {"name": "B", "do": 2}, {"name": "C", "do": 3}]});
+        let mut saved = base.clone();
+        saved["rules"][2]["do"] = json!(30);
+        let d = compute_with(&keyed::EngineRule, SCRIPT, DocKind::Extends, &base, &saved, &Value::Null, Some("red"));
+        let first = d.file.unwrap();
+        assert!(first["set"].get("/rules/2/do").is_some(), "{first}");
+        let mut edited = saved.clone();
+        edited["rules"].as_array_mut().unwrap().remove(0);
+        edited["rules"].as_array_mut().unwrap().push(json!({"name": "D", "do": 4}));
+        let d = compute_with(&keyed::EngineRule, SCRIPT, DocKind::Extends, &base, &edited, &first, Some("red"));
+        let file = d.file.unwrap();
+        let (merged, _) = keyed::engine_extend(SCRIPT, &base, &file).unwrap();
+        assert_eq!(merged, edited, "{file}");
+        assert!(file.get("set").is_none(), "{file}");
     }
 
     #[test]
