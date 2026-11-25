@@ -198,6 +198,27 @@ check could not run) and otherwise holds the launch back until "Launch anyway". 
 pinned `f91542f`) is passed by default ("Load only this mod" is ticked; untick it to see the other enabled mods the game then loads).
 This closes engine requirement 12.
 
+**T10 as built** (`src/map/skirmish.rs`, the "Skirmish" section of the Maps tab; `tests/map_skirmish.rs`).
+- **What lists a map in the lobby** (engine `f91542f`): `"skirmish": true` in `map.json` and nothing else for the row
+  (`menu/skirmish.rs` `skirmish_maps` line 985, `skirmish_entry` line 1000); the row's player count is the number of `playable`
+  players (`MapDoc::playable_players`, `data/maps.rs` line 169). To start it the lobby needs a live opponent for the first playable
+  player: another playable player on another team (`launch_error` line 891, `hostile` line 906). The section shows these as a
+  checklist with the reason each item fails. PROVISIONAL: the opponent rule is restated (private in the engine); a historical map
+  (`assemble` false) taking its fleets from `ships[].player`, and what a missing `start` does, are read, not played.
+- **Who decides the end:** the map's `victory` list, or `"victory": "script"` in `script.json` (a radio; the engine also reads
+  `"objectives"`). The end-rule form offers the 12 condition Types `victory.rs` reads and their fields (`objects`, `Team Name`,
+  `Points`, `Exists?`, `polygon`, `Equivalence` and `Damage Percent`); the list is a copy held to the engine by a test that feeds each
+  fresh condition to `victory::Victory::from_map`. `Equivalence` is the engine's words (`Greater Than`, ...), not `>`.
+- **`script.json` and `media.json`** are opened when the mod or the import has them and created, whole, by the first edit; looking
+  writes nothing. Rules use `schema_form::item_form` on one condition or action at a time; the Add menus leave out `campaign_only`
+  Types, one already there is flagged, and the engine's skirmish `--check-mission` findings show per rule and item. Attack and ram
+  orders, border zones and `OP Follow Group` carry the "stored, not carried out" warning (PROVISIONAL, engine doc). `media.json`
+  has `speech`, `messages` and `ship_names` tables as text rows.
+- **Play in lobby** runs the T11 lobby launch on a copy of the mod that holds the unsaved edits (`Project::check_dir`).
+- Not done: `groups`, `ships`, `paths` and the other top-level keys of a script have no form (a rule's group names come from the
+  engine's `defined_names`); a `script.json` that `extends` another is edited as given, and a rule add or delete on it is not guarded
+  by the keyed-merge check that maps get.
+
 ## Engine requirements for Phase 4
 
 Checked against engine main `42083e4` (see Status). "Missing" means not found in the source or the docs.

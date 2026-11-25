@@ -691,6 +691,66 @@ pub fn mission_mentions(mission: &Value, name: &str, skip: Option<usize>) -> boo
     })
 }
 
+// T10: the skirmish keys (docs/phase4.md P8, T10). `skirmish`, `assemble` and `victory` are in the engine's `map.schema.json` (held by
+// `tests/map_skirmish.rs`); the two other files of a skirmish map are named here too.
+
+/// The top-level keys the skirmish section writes.
+pub const KEY_SKIRMISH: &str = "skirmish";
+pub const KEY_ASSEMBLE: &str = "assemble";
+pub const KEY_VICTORY: &str = "victory";
+/// A map's optional script (engine extension, `docs/modding.md` "Skirmish map scripts") and its words.
+pub const SCRIPT_FILE: &str = "script.json";
+pub const MEDIA_FILE: &str = "media.json";
+/// `script.json`'s top-level key that lets the script end the game, and the value that does it.
+pub const SCRIPT_KEY_VICTORY: &str = "victory";
+pub const SCRIPT_DECIDES: &str = "script";
+
+/// `assemble`: an open map where the players assemble their fleets (`false` or missing: a historical map with pre-placed `ships`).
+pub fn assemble(map: &Value) -> bool {
+    map.get(KEY_ASSEMBLE).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The map's own end rules (`victory`, a list; empty when missing or not a list).
+pub fn victory_rules(map: &Value) -> &[Value] {
+    array(map, KEY_VICTORY)
+}
+
+/// A victory rule's `name`.
+pub fn victory_name(rule: &Value) -> Option<&str> {
+    rule.get("name")?.as_str()
+}
+
+/// A victory rule's conditions (`if`; empty when missing).
+pub fn victory_conditions(rule: &Value) -> &[Value] {
+    array(rule, "if")
+}
+
+/// A victory rule's `winner` (a team `name_id`); `None`: the survivors when they are one team.
+pub fn victory_winner(rule: &Value) -> Option<&str> {
+    rule.get("winner")?.as_str()
+}
+
+/// A victory rule's end message id for the winners (`end.winner`) or the losers (`end.loser`).
+pub fn victory_end(rule: &Value, winners: bool) -> Option<&str> {
+    rule.get("end")?.get(if winners { "winner" } else { "loser" })?.as_str()
+}
+
+/// A condition's `Type`.
+pub fn condition_kind(cond: &Value) -> Option<&str> {
+    cond.get("Type")?.as_str()
+}
+
+/// `true` when a `script.json` lets its own rules end the game (`"victory": "script"`; the engine also takes `"objectives"`, the name the
+/// campaign gives its task-driven endings: `rules/skirmish.rs` `script_decides`).
+pub fn script_decides(script: &Value) -> bool {
+    matches!(script.get(SCRIPT_KEY_VICTORY).and_then(Value::as_str), Some(SCRIPT_DECIDES | "objectives"))
+}
+
+/// The rules of a `script.json` (empty when missing).
+pub fn script_rules(script: &Value) -> &[Value] {
+    array(script, "rules")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
