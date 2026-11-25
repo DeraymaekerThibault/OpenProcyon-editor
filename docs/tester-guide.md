@@ -108,10 +108,9 @@ if you hit it, add the point again in the view instead.
 1. Click "Export zip..." The panel says how many files go into `<id>/` in the zip, and lists warnings. A mod made only of your
    own files should give no warning. The export only warns when `LICENSE` is missing; it cannot tell a notice from the full text,
    so replace the notice yourself.
-2. A warning "identical to the player's import: game content must not be shipped" means a file is a copy of the game's. Do not
-   export. Tell us which file.
-3. Tick "I have read the warnings and want to export anyway" only for a warning you understand. Click "Choose where to save..."
-   and pick a place.
+2. The export does not check what the files are (maintainer decision): you are responsible for what you share, so do not put
+   game files in your mod.
+3. Click "Choose where to save..." and pick a place.
 4. Unzip the result into the game's `mods/` folder and check `mods/<id>/mod.json` exists.
 
 ## Report back

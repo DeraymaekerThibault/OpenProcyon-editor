@@ -31,7 +31,7 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
 | `map_view.rs` | the 2D plan: drag with a 12 px pick, `to_screen`/`to_world`, `short` (f32 shortest decimal), save and play-test. Spike code: it holds its own `Value`, no undo |
 | `mission.rs`, `mission_panel.rs`, `checks.rs`, `schema_form.rs` | `maps/<id>/{mission,map,media}.json` loading, rule forms, `check_mission` findings. Phase 5's, but P8 (skirmish script) reuses them |
 | `launch.rs`, `playtest_panel.rs`, `preview.rs` | `Launch` builds the game command line; play-test, `--shot` preview, game version check |
-| `which_mod.rs`, `export.rs`, `project::problems` | retail edit opens "which mod", export with the retail-content warning, problems panel with `check_mod` |
+| `which_mod.rs`, `export.rs`, `project::problems` | retail edit opens "which mod", export (no content check, by maintainer decision), problems panel with `check_mod` |
 
 ## Packages, in build order
 
@@ -163,8 +163,7 @@ New: `Launch` gets a lobby variant: `--mod <abs> --lobby "map=<id>;points=1000;l
 (exists in the engine: `lobby_scenario.rs`; `docs/modding.md` and `docs/development.md`). The map must be `"skirmish": true` or the
 lobby says "no skirmish map". Also `--map <id>` (no lobby, for a mission or a quick look) and `--shot` as today. Open a retail
 skirmish map as a diff: pick `red_rover` (or any of the 14) in the map list, edit, save into a mod as `extends` plus `set` moves
-(P1; adds and deletes after requirement 1), play it with the mod over the import, and check the mod holds no retail content
-(export's byte comparison). The gate map (below) is built from an empty folder in this package.
+(P1; adds and deletes after requirement 1), play it with the mod over the import. The gate map (below) is built from an empty folder in this package.
 Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, so a play-test is not of this mod alone; open since Phase 3).
 
 ## Engine requirements for Phase 4
@@ -270,7 +269,7 @@ Roadmap: **a skirmish map built only in the editor loads, lists in the lobby and
 4. `--check-mod <mod> --json` reports no errors (a warning for a test of the editor's own links is a bug).
 5. `<game> --mod <mod> --lobby "map=<id>;points=1000;limit=4;slots=human,computer"` shows the map in the lobby list, launches, the
    scenery draws where the plan showed it and collides (own scenery: only with requirement 6), the victory rule ends the game.
-6. Export: no retail-content warning for the map's files.
+6. Export writes the zip with the map's files (the export does not check content, by maintainer decision).
 
 Also kept as tests, no assets needed: moves, adds and deletes round trip through `overlay_into` and `read_merged` to the edited map;
 a retail-map diff holds only the changed entries; the three nebula records stay equal after every edit. What stays unverified until a

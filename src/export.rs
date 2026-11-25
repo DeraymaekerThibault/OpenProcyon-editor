@@ -1,11 +1,8 @@
-//! Exporting a mod as a zip that unzips into the game's `mods/` folder (`mods/<id>/mod.json`), with warnings about what must not
-//! be shipped: the plan is computed first so the UI can show the warnings before anything is written.
+//! Exporting a mod as a zip that unzips into the game's `mods/` folder (`mods/<id>/mod.json`): the plan is computed first so the UI
+//! can show it (and any warnings) before anything is written. The export does not check the content (maintainer decision).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-
-/// File extensions of the original game's formats (and its executables): a mod must never ship these.
-const GAME_EXTENSIONS: &[&str] = &["wot", "twt", "mdb", "msb", "eft", "hdt", "tst", "fft", "tga", "dds", "bik", "exe", "dll"];
 
 /// What an export would contain and what the user should know first.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,15 +48,9 @@ fn mod_id(mod_dir: &Path) -> String {
     from_json.unwrap_or_else(|| std::path::absolute(mod_dir).ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "mod".into()))
 }
 
-fn identical(a: &Path, b: &Path) -> bool {
-    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else { return false };
-    mb.is_file() && ma.len() == mb.len() && matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
-}
-
-/// Lists the files of the mod folder and the warnings. `import` is the player's imported assets (`authoring::base_assets()`), if any.
-/// An error when `mod.json` is missing. PROVISIONAL: identity with the import is by bytes only, so a converted-but-edited file is not
-/// detected (engine requirement: a library-level "compare with import" in `authoring`, like the importer's compare by meaning).
-pub fn plan(mod_dir: &Path, import: Option<&Path>) -> Result<ExportPlan, String> {
+/// Lists the files of the mod folder and the warnings. An error when `mod.json` is missing. By maintainer decision the export does
+/// not check the content: users are responsible for what they share.
+pub fn plan(mod_dir: &Path) -> Result<ExportPlan, String> {
     if !mod_dir.join("mod.json").is_file() {
         return Err(format!("{} has no mod.json: a mod folder needs one", mod_dir.display()));
     }
@@ -74,17 +65,6 @@ pub fn plan(mod_dir: &Path, import: Option<&Path>) -> Result<ExportPlan, String>
             warnings.push(format!("{n} is only a notice; replace it with the full licence text before sharing"));
         }
         Some(_) => {}
-    }
-    for f in &files {
-        if let Some(imp) = import
-            && identical(&mod_dir.join(f), &imp.join(f))
-        {
-            warnings.push(format!("{f}: identical to the player's import: game content must not be shipped"));
-        }
-        let ext = Path::new(f).extension().map(|e| e.to_string_lossy().to_lowercase());
-        if ext.is_some_and(|e| GAME_EXTENSIONS.contains(&e.as_str())) {
-            warnings.push(format!("{f}: a file format of the original game: game content must not be shipped"));
-        }
     }
     Ok(ExportPlan { id: mod_id(mod_dir), mod_dir: mod_dir.to_path_buf(), files, warnings })
 }
@@ -131,34 +111,21 @@ mod tests {
     fn sample(name: &str) -> (PathBuf, PathBuf) {
         let root = tree(name);
         let m = root.join("my_folder");
-        let imp = root.join("import");
         put(&m, "mod.json", br#"{"id": "gates", "name": "Gates"}"#);
         put(&m, "LICENSE", b"CC0");
         put(&m, "ships/Ship_X/ship.json", b"{\"a\": 1}");
         put(&m, "maps/z/map.json", b"{}");
         put(&m, ".git/config", b"x");
         put(&m, ".hidden", b"x");
-        put(&imp, "ships/Ship_X/ship.json", b"{\"a\": 1}"); // identical
-        put(&imp, "maps/z/map.json", b"{\"changed\": true}"); // same path, different bytes
         (root, m)
     }
 
     #[test]
     fn plan_lists_sorted_files_skips_dot_entries_and_names_the_id() {
         let (root, m) = sample("plan");
-        let p = plan(&m, Some(&root.join("import"))).unwrap();
+        let p = plan(&m).unwrap();
         assert_eq!(p.id, "gates");
         assert_eq!(p.files, ["LICENSE", "maps/z/map.json", "mod.json", "ships/Ship_X/ship.json"]);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn identical_files_are_warned_but_edited_ones_are_not() {
-        let (root, m) = sample("identical");
-        let p = plan(&m, Some(&root.join("import"))).unwrap();
-        assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
-        assert!(p.warnings[0].contains("ships/Ship_X/ship.json") && p.warnings[0].contains("identical to the player's import"));
-        assert!(plan(&m, None).unwrap().warnings.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -166,25 +133,25 @@ mod tests {
     fn a_licence_file_that_is_only_the_editors_notice_is_warned() {
         use crate::project::licence::Licence;
         let (root, m) = sample("notice");
-        assert!(plan(&m, None).unwrap().warnings.is_empty(), "a real licence text is fine");
+        assert!(plan(&m).unwrap().warnings.is_empty(), "a real licence text is fine");
         put(&m, "LICENSE", Licence::CcBy4.notice("Gates", "Ada").as_bytes());
-        let w = plan(&m, None).unwrap().warnings;
+        let w = plan(&m).unwrap().warnings;
         assert_eq!(w.len(), 1, "{w:?}");
         assert!(w[0].contains("LICENSE is only a notice") && w[0].contains("full licence text"), "{w:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn game_extensions_and_a_missing_licence_are_warned() {
+    fn a_missing_licence_is_warned_and_game_like_files_are_not_checked() {
         let (root, m) = sample("warn");
         put(&m, "models/hull.MDB", b"x");
         put(&m, "tex/a.tga", b"x");
         std::fs::remove_file(m.join("LICENSE")).unwrap();
-        let w = plan(&m, None).unwrap().warnings;
-        assert_eq!(w.len(), 3, "{w:?}");
-        assert!(w.iter().any(|x| x.contains("LICENSE")) && w.iter().any(|x| x.contains("hull.MDB")) && w.iter().any(|x| x.contains("a.tga")));
+        let w = plan(&m).unwrap().warnings;
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("LICENSE"));
         put(&m, "LICENSE.md", b"MIT");
-        assert_eq!(plan(&m, None).unwrap().warnings.len(), 2);
+        assert!(plan(&m).unwrap().warnings.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -193,18 +160,18 @@ mod tests {
         let root = tree("nomod");
         let m = root.join("cool_mod");
         put(&m, "x.json", b"{}");
-        assert!(plan(&m, None).unwrap_err().contains("mod.json"));
+        assert!(plan(&m).unwrap_err().contains("mod.json"));
         put(&m, "mod.json", b"{}");
-        assert_eq!(plan(&m, None).unwrap().id, "cool_mod");
+        assert_eq!(plan(&m).unwrap().id, "cool_mod");
         put(&m, "mod.json", br#"{"id": "../evil"}"#);
-        assert_eq!(plan(&m, None).unwrap().id, "cool_mod");
+        assert_eq!(plan(&m).unwrap().id, "cool_mod");
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn the_zip_has_one_top_folder_sorted_entries_and_is_reproducible() {
         let (root, m) = sample("zip");
-        let p = plan(&m, None).unwrap();
+        let p = plan(&m).unwrap();
         let (a, b) = (root.join("a.zip"), root.join("b.zip"));
         write_zip(&p, &a).unwrap();
         write_zip(&p, &b).unwrap();

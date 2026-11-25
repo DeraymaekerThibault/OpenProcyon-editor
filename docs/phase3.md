@@ -188,9 +188,8 @@ Works (headless):
   180 s.
 - Export: a zip of the mod folder under one top folder named after the mod's id (unzipped into `mods/` it gives `mods/<id>/mod.json`),
   sorted entries, fixed timestamps, so two exports are byte-identical; dot-files and `.git/` left out; `mod.json` required; a missing
-  `LICENSE` warned; every file byte-identical to the file at the same path in the player's import warned ("game content must not be
-  shipped"), as is a file in a format of the original game; the user confirms before exporting with warnings. New dependency: `zip`
-  (approved), `deflate` only.
+  `LICENSE` warned. The export does not check the content (no comparison with the player's import, no file-format check): by
+  maintainer decision users are responsible for what they share. New dependency: `zip` (approved), `deflate` only.
 
 - Play-test and the preview also load every other enabled mod the game knows (the game has no flag to leave them out at the pinned
   engine), so a run does not test this mod alone. What the game reads: the player's `<user>/mods/` and `mods.json`, and the game's

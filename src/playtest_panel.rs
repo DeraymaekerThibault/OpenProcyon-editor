@@ -230,7 +230,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     ui.separator();
     ui.heading("Export");
     if ui.button("Export zip...").clicked() {
-        st.plan = Some(export::plan(dir, openprocyon::authoring::base_assets().as_deref()));
+        st.plan = Some(export::plan(dir));
         st.confirmed = false;
     }
     let mut finish = false;
