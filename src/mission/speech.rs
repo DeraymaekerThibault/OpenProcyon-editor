@@ -238,7 +238,7 @@ enum Action {
 
 /// Draws the section.
 pub fn show(ui: &mut egui::Ui, project: &mut Project) {
-    let Some(id) = super::tasks::pick_mission(ui, project) else { return };
+    let Some(id) = super::rules_view::current_mission(ui, project) else { return };
     let media_doc = mproject::merged_media(project, &id).cloned().unwrap_or(Value::Null);
     let faces = faces(project);
     let root = egui::Id::new(("mission-speech", id.as_str()));

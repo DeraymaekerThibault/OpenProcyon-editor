@@ -1,9 +1,8 @@
 //! The "Missions" tab section: players, alliances, the human's start, ships and groups (docs/phase5.md P2, work item T6).
 //!
 //! The functions are the edits (each ONE undo step of the mission document, through [`Project`]; the refusals come back as `Err`
-//! with the reason, and nothing changes); [`show`] is the form that calls them. Which mission is edited is chosen in the section
-//! itself and kept in egui memory ([`selected_mission`], readable by the other sections); the section opens it with
-//! [`open_mission`]. Mission keys are named by [`super::doc`] only; the group half is [`super::groups`].
+//! with the reason, and nothing changes); [`show`] is the form that calls them. Which mission is edited is the one the Missions tab's
+//! picker selected ([`super::rules_view::selected_mission`]); the section opens its documents. Mission keys are named by [`super::doc`] only; the group half is [`super::groups`].
 //!
 //! - Players: add, delete (refused while a ship, the start or a rule names the player), rename (every ship `group`, alliance,
 //!   `player_start.name` and rule field that names it follows in the same step). `players` and `alliances` are unkeyed lists, so a
@@ -25,7 +24,7 @@ use serde_json::{Value, json};
 
 use super::doc::{self as mdoc, MissionList};
 use super::groups;
-use super::project::{check_add_delete, list_missions, merged_map, mission_rel, open_mission};
+use super::project::{check_add_delete, merged_map, mission_rel};
 use super::refs::{self, FieldIndex};
 use crate::edit::Edit;
 use crate::project::Project;
@@ -376,17 +375,6 @@ pub fn set_primary(project: &mut Project, id: &str, index: usize, on: bool) -> R
 
 // ---- the form ----
 
-const SELECTED: &str = "missions_selected_mission";
-
-/// The mission the Missions tab edits (chosen in the "Players, ships and groups" section), for the other sections.
-pub fn selected_mission(ctx: &egui::Context) -> Option<String> {
-    ctx.data_mut(|d| d.get_persisted::<String>(egui::Id::new(SELECTED))).filter(|s| !s.is_empty())
-}
-
-fn select_mission(ctx: &egui::Context, id: &str) {
-    ctx.data_mut(|d| d.insert_persisted(egui::Id::new(SELECTED), id.to_string()));
-}
-
 /// A text box that keeps what is typed until it loses focus; returns the text then when it changed.
 pub(crate) fn text_edit(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
     let mut buf = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
@@ -432,34 +420,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
     let ctx = ui.ctx().clone();
     let error_id = egui::Id::new("missions_ships_error");
     let mut error: Option<String> = ctx.data_mut(|d| d.get_temp::<String>(error_id));
-    let missions = list_missions(project);
-    if missions.is_empty() {
-        ui.label("This mod and its import have no mission yet.");
-        return;
-    }
-    let mut chosen = selected_mission(&ctx).filter(|s| missions.iter().any(|m| &m.id == s));
-    ui.horizontal(|ui| {
-        ui.label("Mission");
-        egui::ComboBox::from_id_salt("missions_pick").selected_text(chosen.as_deref().unwrap_or("choose a mission")).show_ui(ui, |ui| {
-            for m in &missions {
-                if ui.selectable_label(chosen.as_deref() == Some(m.id.as_str()), &m.id).clicked() {
-                    chosen = Some(m.id.clone());
-                    select_mission(&ctx, &m.id);
-                    error = None;
-                }
-            }
-        });
-    });
-    let Some(id) = chosen else { return };
-    if project.doc(&mission_rel(&id).unwrap_or_default()).is_none() {
-        match open_mission(project, &id) {
-            Ok(_) => {}
-            Err(e) => {
-                ui.colored_label(egui::Color32::LIGHT_RED, e);
-                return;
-            }
-        }
-    }
+    let Some(id) = super::rules_view::current_mission(ui, project) else { return };
     let Ok((m, _)) = open(project, &id) else { return };
     let types = ship_types(project);
     let players: Vec<String> = mdoc::players(m).into_iter().map(str::to_string).collect();

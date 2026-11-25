@@ -282,6 +282,26 @@ fn items_reorder_and_remove_each_as_one_undo_step() {
 }
 
 #[test]
+fn every_section_reads_the_pickers_mission() {
+    use openprocyon_editor::mission::{ships, speech, tasks};
+    let mut r = Rig::new("one-selection");
+    r.open_mission();
+    // the rig keeps its own State; the tab keeps the same one in egui memory, which the sections read
+    rv::state(&r.ctx).lock().unwrap().mission = r.st.mission.clone();
+    let (ctx, project) = (r.ctx.clone(), &mut r.project);
+    let mut seen = vec![];
+    let mut full = ctx.run_ui(egui::RawInput { screen_rect: Some(SCREEN), ..Default::default() }, |ui| {
+        seen.push(rv::current_mission(ui, project));
+        ships::show(ui, project);
+        tasks::show(ui, project);
+        speech::show(ui, project);
+    });
+    full.textures_delta.clear();
+    assert!(!seen.is_empty() && seen.iter().all(|s| s.as_deref() == Some(ID)), "{seen:?}");
+    assert_eq!(rv::selected_mission(&ctx).as_deref(), Some(ID));
+}
+
+#[test]
 fn save_writes_the_mission_files() {
     let mut r = Rig::new("save");
     r.open_mission();

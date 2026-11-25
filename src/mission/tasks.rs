@@ -187,37 +187,9 @@ enum Action {
     Message(&'static str, Option<String>),
 }
 
-/// The mission the "Missions" tab sections work on, picked in a drop-down shared by the sections that call this (the selection is in
-/// egui's memory under one id). Opens the mission's documents when picked. `None` when the mod and the import have no mission.
-pub fn pick_mission(ui: &mut egui::Ui, project: &mut Project) -> Option<String> {
-    let key = egui::Id::new("mission-section-pick");
-    let missions = mproject::list_missions(project);
-    let mut ids: Vec<String> = missions.iter().filter(|m| m.in_mod || m.in_import).map(|m| m.id.clone()).collect();
-    ids.sort();
-    if ids.is_empty() {
-        ui.label("No mission in the mod or the import yet.");
-        return None;
-    }
-    let mut picked: String = ui.data(|d| d.get_temp(key)).filter(|p| ids.contains(p)).unwrap_or_else(|| ids[0].clone());
-    ui.horizontal(|ui| {
-        ui.label("Mission");
-        egui::ComboBox::from_id_salt(key.with("combo")).selected_text(picked.clone()).show_ui(ui, |ui| {
-            for id in &ids {
-                ui.selectable_value(&mut picked, id.clone(), id);
-            }
-        });
-    });
-    ui.data_mut(|d| d.insert_temp(key, picked.clone()));
-    if let Err(e) = mproject::open_mission(project, &picked) {
-        ui.colored_label(egui::Color32::LIGHT_RED, e);
-        return None;
-    }
-    Some(picked)
-}
-
 /// Draws the section.
 pub fn show(ui: &mut egui::Ui, project: &mut Project) {
-    let Some(id) = pick_mission(ui, project) else { return };
+    let Some(id) = super::rules_view::current_mission(ui, project) else { return };
     let Some(mission) = mproject::merged_mission(project, &id).cloned() else { return };
     let names = Names::collect(&mission, mproject::merged_map(project, &id).unwrap_or(&Value::Null), mproject::merged_media(project, &id).unwrap_or(&Value::Null));
     let root = egui::Id::new(("mission-tasks", id.as_str()));

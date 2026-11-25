@@ -97,6 +97,20 @@ pub fn selected_mission(ctx: &egui::Context) -> Option<String> {
     state(ctx).lock().ok()?.mission.clone()
 }
 
+/// The mission the Missions tab has open, opened in the project (its documents loaded), for the sections below the picker. Says so
+/// and returns `None` when none is chosen yet or it cannot be opened. Every section reads the mission this way; none has its own picker.
+pub fn current_mission(ui: &mut egui::Ui, project: &mut Project) -> Option<String> {
+    let Some(id) = selected_mission(ui.ctx()) else {
+        ui.weak("Choose a mission above.");
+        return None;
+    };
+    if let Err(e) = mproject::open_mission(project, &id) {
+        ui.colored_label(RED, e);
+        return None;
+    }
+    Some(id)
+}
+
 // ---- small widgets with fixed ids ----
 
 fn chip(ui: &mut egui::Ui, id: egui::Id, text: &str, strong: bool, color: Option<egui::Color32>) -> egui::Response {
