@@ -452,7 +452,7 @@ fn step(ui: &mut egui::Ui, label: &str, v: &mut Option<f32>, default: f32) {
         *v = on.then_some(default);
     }
     if let Some(x) = v {
-        ui.add(egui::DragValue::new(x).speed(0.5).range(1.0..=500.0));
+        ui.add(egui::DragValue::new(x).update_while_editing(false).speed(0.5).range(1.0..=500.0));
     }
 }
 
@@ -464,7 +464,7 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
             many => format!("{} selected", many.len()),
         });
         ui.separator();
-        ui.add(egui::DragValue::new(&mut st.turn_deg).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
+        ui.add(egui::DragValue::new(&mut st.turn_deg).update_while_editing(false).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
         let yaw = f64::from(st.turn_deg).to_radians();
         if selected.len() > 1 {
             // Several: turning each where it is is what ships want; turning together swings them round their shared centre.
@@ -508,10 +508,10 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
             if let Some(at) = merged_mission(project, id).and_then(|m| geo::item_xyz(m, &selected[0])) {
                 let (mut x, mut y) = (at[0] as f32, at[1] as f32);
                 let mut delta = [0.0, 0.0];
-                if ui.add(egui::DragValue::new(&mut x).speed(1.0).prefix("x ")).changed() {
+                if ui.add(egui::DragValue::new(&mut x).update_while_editing(false).speed(1.0).prefix("x ")).changed() {
                     delta[0] = f64::from(x) - at[0];
                 }
-                if ui.add(egui::DragValue::new(&mut y).speed(1.0).prefix("y ")).changed() {
+                if ui.add(egui::DragValue::new(&mut y).update_while_editing(false).speed(1.0).prefix("y ")).changed() {
                     delta[1] = f64::from(y) - at[1];
                 }
                 if delta != [0.0, 0.0] {
@@ -523,7 +523,7 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
                 && let Some(z) = merged_mission(project, id).and_then(|m| geo::item_xyz(m, &selected[0])).map(|p| p[2])
             {
                 let mut z32 = z as f32;
-                if ui.add(egui::DragValue::new(&mut z32).speed(1.0).prefix("z ")).changed() {
+                if ui.add(egui::DragValue::new(&mut z32).update_while_editing(false).speed(1.0).prefix("z ")).changed() {
                     let r = geo::set_z(project, id, *t, name, *i, f64::from(z32));
                     note(st, r);
                 }

@@ -886,7 +886,7 @@ fn victory_field(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
         VField::Points => {
             ui.label("Points");
             let mut n = cond.get(key).and_then(Value::as_i64).unwrap_or(0);
-            if ui.add(egui::DragValue::new(&mut n).range(0..=1_000_000)).changed() {
+            if ui.add(egui::DragValue::new(&mut n).update_while_editing(false).range(0..=1_000_000)).changed() {
                 set(st, project, key, json!(n));
             }
         }
@@ -917,7 +917,7 @@ fn victory_field(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
             });
             let mut x = cond.get("Damage Percent").and_then(Value::as_f64).unwrap_or(0.0);
             if ui
-                .add(egui::DragValue::new(&mut x).speed(0.01).range(0.0..=1.0))
+                .add(egui::DragValue::new(&mut x).update_while_editing(false).speed(0.01).range(0.0..=1.0))
                 .on_hover_text("A fraction, 0 to 1 (PROVISIONAL: the engine compares the base's damage fraction with it)")
                 .changed()
             {
@@ -1070,7 +1070,7 @@ fn media_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
                             }
                             let mut d = v.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
                             ui.label("seconds");
-                            if ui.add(egui::DragValue::new(&mut d).speed(0.1).range(0.0..=600.0)).on_hover_text("0: text only, no sound").changed() {
+                            if ui.add(egui::DragValue::new(&mut d).update_while_editing(false).speed(0.1).range(0.0..=600.0)).on_hover_text("0: text only, no sound").changed() {
                                 let r = set_media(project, id, t, key, Some("duration"), (d > 0.0).then(|| json!(d)));
                                 st.run(r);
                             }
@@ -1110,11 +1110,11 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
     let running = st.child.is_some();
     ui.horizontal_wrapped(|ui| {
         ui.label("Computers");
-        ui.add(egui::DragValue::new(&mut st.lobby.computers).range(1..=7));
+        ui.add(egui::DragValue::new(&mut st.lobby.computers).update_while_editing(false).range(1..=7));
         ui.label("Points");
-        ui.add(egui::DragValue::new(&mut st.lobby.points).range(0..=100_000).speed(10));
+        ui.add(egui::DragValue::new(&mut st.lobby.points).update_while_editing(false).range(0..=100_000).speed(10));
         ui.label("Fleet limit");
-        ui.add(egui::DragValue::new(&mut st.lobby.limit).range(1..=100));
+        ui.add(egui::DragValue::new(&mut st.lobby.limit).update_while_editing(false).range(1..=100));
     });
     let ready = lists_and_starts(map);
     let tip = if running {

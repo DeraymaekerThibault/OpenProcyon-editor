@@ -262,11 +262,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if st.lobby {
         ui.horizontal(|ui| {
             ui.label("Computers");
-            ui.add(egui::DragValue::new(&mut st.lobby_set.computers).range(0..=7));
+            ui.add(egui::DragValue::new(&mut st.lobby_set.computers).update_while_editing(false).range(0..=7));
             ui.label("Points");
-            ui.add(egui::DragValue::new(&mut st.lobby_set.points).range(0..=100_000).speed(10));
+            ui.add(egui::DragValue::new(&mut st.lobby_set.points).update_while_editing(false).range(0..=100_000).speed(10));
             ui.label("Fleet limit");
-            ui.add(egui::DragValue::new(&mut st.lobby_set.limit).range(1..=100));
+            ui.add(egui::DragValue::new(&mut st.lobby_set.limit).update_while_editing(false).range(1..=100));
         });
         ui.weak("Points and limit follow the lobby's own steps and ranges; the game refuses a value it does not accept.");
     }

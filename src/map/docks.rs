@@ -459,7 +459,7 @@ pub fn show(ui: &mut egui::Ui, t: &mut State) {
                     t.yaw_for = Some((ty.clone(), p.index));
                     t.yaw_edit = yaw;
                 }
-                let r = ui.add_enabled(own, egui::DragValue::new(&mut t.yaw_edit).speed(0.01).prefix("yaw ").suffix(" rad"));
+                let r = ui.add_enabled(own, egui::DragValue::new(&mut t.yaw_edit).update_while_editing(false).speed(0.01).prefix("yaw ").suffix(" rad"));
                 if (r.drag_stopped() || r.lost_focus()) && (t.yaw_edit - yaw).abs() > 1e-6 {
                     t.action = Some(Action::Yaw { index: p.index, yaw: t.yaw_edit });
                 }

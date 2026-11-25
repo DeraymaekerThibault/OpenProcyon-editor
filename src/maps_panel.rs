@@ -276,7 +276,7 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
             act = Some(Act::Delete);
         }
         ui.separator();
-        ui.add(egui::DragValue::new(&mut st.turn_deg).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
+        ui.add(egui::DragValue::new(&mut st.turn_deg).update_while_editing(false).speed(1.0).range(-360.0..=360.0).suffix(" deg"));
         let yaw = f64::from(st.turn_deg).to_radians();
         if st.sel.len() > 1 {
             // Several: turning each where it is is what ships and objects usually want; turning together swings them round their centre.
@@ -529,7 +529,7 @@ fn opt_step(ui: &mut egui::Ui, label: &str, v: &mut Option<f32>, default: f32, r
         *v = on.then_some(default);
     }
     if let Some(x) = v {
-        ui.add(egui::DragValue::new(x).range(range).speed(0.5));
+        ui.add(egui::DragValue::new(x).update_while_editing(false).range(range).speed(0.5));
     }
 }
 

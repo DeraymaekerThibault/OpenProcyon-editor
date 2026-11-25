@@ -466,7 +466,7 @@ fn vec3(ui: &mut egui::Ui, v: [f64; 3]) -> Option<[f64; 3]> {
     let mut out = v;
     let mut changed = false;
     for c in &mut out {
-        changed |= ui.add(egui::DragValue::new(c).speed(1.0)).changed();
+        changed |= ui.add(egui::DragValue::new(c).update_while_editing(false).speed(1.0)).changed();
     }
     changed.then_some(out)
 }

@@ -538,7 +538,8 @@ impl<'a> St<'a> {
         };
         let integer = matches!(kind, Kind::Integer(_));
         let mut x = v.as_f64().unwrap_or(0.0);
-        let mut drag = egui::DragValue::new(&mut x).range(range.min.unwrap_or(f64::MIN)..=range.max.unwrap_or(f64::MAX)).speed(if integer { 0.1 } else { 0.05 });
+        let mut drag =
+            egui::DragValue::new(&mut x).update_while_editing(false).range(range.min.unwrap_or(f64::MIN)..=range.max.unwrap_or(f64::MAX)).speed(if integer { 0.1 } else { 0.05 });
         if integer {
             drag = drag.max_decimals(0);
         }

@@ -223,7 +223,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
     let mut half = doc::world_half(&map).unwrap_or(doc::DEFAULT_WORLD_HALF);
     ui.horizontal(|ui| {
         ui.label("world_half");
-        let r = ui.add(egui::DragValue::new(&mut half).speed(10.0).range(10.0..=100_000.0)).on_hover_text(hint("/world_half"));
+        let r = ui.add(egui::DragValue::new(&mut half).update_while_editing(false).speed(10.0).range(10.0..=100_000.0)).on_hover_text(hint("/world_half"));
         if r.changed() {
             let r = set_world_half(project, id, half, true);
             st.run(r);
@@ -284,7 +284,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
             ui.label("Sun travels along").on_hover_text(hint(&pointer(&[doc::KEY_LIGHTING, doc::KEY_LIGHT_DIRECTION])));
             let mut changed = false;
             for (axis, v) in ["x", "y", "z"].iter().zip(d.iter_mut()) {
-                changed |= ui.add(egui::DragValue::new(v).speed(0.02).range(-1.0..=1.0).prefix(*axis)).changed();
+                changed |= ui.add(egui::DragValue::new(v).update_while_editing(false).speed(0.02).range(-1.0..=1.0).prefix(*axis)).changed();
             }
             if changed {
                 let r = set_light_direction(project, id, d, true);

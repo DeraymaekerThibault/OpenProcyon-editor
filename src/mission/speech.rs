@@ -386,7 +386,7 @@ fn speech_row(ui: &mut egui::Ui, id: egui::Id, mission: &str, name: &str, entry:
                 field(actions, mdoc::SPEECH_DURATION, has.then(|| json!(0.0)));
             } else if let Some(s) = seconds.as_mut() {
                 let before = *s;
-                ui.add(egui::DragValue::new(s).speed(0.05).range(0.0..=600.0).suffix(" s"));
+                ui.add(egui::DragValue::new(s).update_while_editing(false).speed(0.05).range(0.0..=600.0).suffix(" s"));
                 if *s != before {
                     field(actions, mdoc::SPEECH_DURATION, Some(json!(*s)));
                 }

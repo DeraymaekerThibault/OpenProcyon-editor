@@ -494,8 +494,8 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
     }
     ui.horizontal_wrapped(|ui| {
         ui.checkbox(&mut st.show_formation, "Formation preview");
-        ui.add(egui::DragValue::new(&mut st.ships).range(1..=12).suffix(" ships"));
-        ui.add(egui::DragValue::new(&mut st.radius).range(1.0..=200.0).speed(0.5).prefix("radius "));
+        ui.add(egui::DragValue::new(&mut st.ships).update_while_editing(false).range(1..=12).suffix(" ships"));
+        ui.add(egui::DragValue::new(&mut st.radius).update_while_editing(false).range(1.0..=200.0).speed(0.5).prefix("radius "));
         ui.label("(PROVISIONAL: which ships a slot gets is the lobby's)");
     });
     if let Some(e) = &st.error {

@@ -242,7 +242,7 @@ fn form(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str, i: us
             t.sound = in_doc.1;
         }
         ui.label("Sound distance");
-        let r = ui.add(egui::DragValue::new(&mut t.sound).speed(5.0).range(0.0..=100000.0));
+        let r = ui.add(egui::DragValue::new(&mut t.sound).update_while_editing(false).speed(5.0).range(0.0..=100000.0));
         if r.drag_stopped() || r.lost_focus() {
             let res = nebula::set_sound_distance(project, id, i, t.sound);
             t.say(res, "Sound distance set.");

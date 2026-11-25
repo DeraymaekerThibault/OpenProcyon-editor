@@ -323,7 +323,7 @@ fn scalar(ui: &mut egui::Ui, f: &Field, cur: &Value, names: &Names, id: egui::Id
         }
         Widget::Number => {
             let mut x = cur.as_f64().or_else(|| cur.as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0);
-            let mut drag = egui::DragValue::new(&mut x).speed(0.1);
+            let mut drag = egui::DragValue::new(&mut x).update_while_editing(false).speed(0.1);
             if let Some((lo, hi)) = f.range {
                 drag = drag.range(lo..=hi);
             }
