@@ -94,8 +94,8 @@ if you hit it, add the point again in the view instead.
 ## 6. Play-test and preview
 
 1. Open the "Play-test & export" tab. If it warns that the game binary has another version than the editor, note both.
-2. If it lists other enabled mods: the game loads them too, so the run does not test your mod alone (PROVISIONAL until the engine
-   has `--only-mod`). Switch them off in the game's Mods menu first.
+2. "Load only this mod" is ticked by default (`--only-mod`): the game leaves your other enabled mods out, so the run tests your
+   mod alone. If you untick it, the tab lists the other enabled mods the game will load too.
 3. Pick a Map and your Ship with the "pick" menus. The ship menu lists the import's ships and the open mod's own; you can
    also type an id in the box.
 4. Keep "Save unsaved documents before launching" ticked. Click "Play-test": the game opens on your ship. Fire your gun.

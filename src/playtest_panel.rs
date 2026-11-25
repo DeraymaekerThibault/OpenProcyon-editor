@@ -25,7 +25,7 @@ pub struct State {
     /// Play through the skirmish lobby (`--lobby`) instead of straight into the battle (`--map`).
     pub lobby: bool,
     pub lobby_set: Lobby,
-    /// `--only-mod`. PROVISIONAL: needs a game binary newer than the engine tag this editor links.
+    /// `--only-mod`: load this mod and none of the player's other enabled mods. On by default.
     pub only_mod: bool,
     pending: Option<Action>,
     /// The `--check-mod` run in flight, and the launch it holds back.
@@ -65,7 +65,7 @@ impl Default for State {
             save_requested: false,
             lobby: false,
             lobby_set: Lobby::default(),
-            only_mod: false,
+            only_mod: true,
             pending: None,
             check_job: None,
             held: None,
@@ -247,11 +247,10 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
             (other_enabled_mods(&openprocyon::modding::installed(bundled.as_deref()), dir), bundled)
         })
         .clone();
-    if !others.is_empty() {
-        // PROVISIONAL: the game (at the pinned engine) has no flag to leave the other enabled mods out of a run.
+    if !others.is_empty() && !st.only_mod {
         ui.colored_label(
             ui.visuals().warn_fg_color,
-            format!("Not this mod alone: the game also loads {} other enabled mods ({}) after the engine's files, so they can change what you see. Switch them off in the game's Mods menu to test this mod alone.", others.len(), others.join(", ")),
+            format!("Not this mod alone: the game also loads {} other enabled mods ({}) after the engine's files, so they can change what you see. Tick \"Load only this mod\" to leave them out.", others.len(), others.join(", ")),
         );
         ui.weak(format!(
             "Read from your mods folder and the game's bundled mods ({}). PROVISIONAL: the bundled folder is looked up as the game does it (next to {}, else the source checkout found from this editor's working directory); if the game runs from elsewhere the list can differ.",
@@ -278,7 +277,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         ui.weak("Points and limit follow the lobby's own steps and ranges; the game refuses a value it does not accept.");
     }
     ui.checkbox(&mut st.only_mod, "Load only this mod (--only-mod)")
-        .on_hover_text("PROVISIONAL: needs a game binary that has the flag (newer than the engine this editor links); an older one may ignore or refuse it.");
+        .on_hover_text("The game loads this mod and none of the other mods you have enabled, so the run is of this mod alone.");
     ui.horizontal(|ui| {
         ui.checkbox(&mut st.save_first, "Save unsaved documents before launching");
         if unsaved > 0 {

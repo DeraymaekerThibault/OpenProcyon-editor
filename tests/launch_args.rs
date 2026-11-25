@@ -10,7 +10,7 @@ fn os(a: &[&str]) -> Vec<OsString> {
 
 #[test]
 fn a_lobby_launch_has_the_spec_and_no_map_flag() {
-    let mut l = Launch::new(Path::new("/m/gates"), "red_rover");
+    let mut l = Launch { only_mod: false, ..Launch::new(Path::new("/m/gates"), "red_rover") };
     l.lobby = Some(Lobby { computers: 3, ..Lobby::default() });
     assert_eq!(l.args(), os(&["--mod", "/m/gates", "--lobby", "map=red_rover;points=1000;limit=10;slots=human,3*computer"]));
     // the ship shortcut does not apply to a lobby: Auto Assign picks the fleet
@@ -21,11 +21,13 @@ fn a_lobby_launch_has_the_spec_and_no_map_flag() {
 }
 
 #[test]
-fn only_mod_follows_the_mod_and_is_off_by_default() {
+fn only_mod_follows_the_mod_and_is_on_by_default() {
     let mut l = Launch::new(Path::new("/m/gates"), "gate_ambush");
+    assert_eq!(openprocyon::modding::ONLY_MOD, "--only-mod", "the engine's flag string");
+    assert_eq!(l.args(), os(&["--mod", "/m/gates", "--only-mod", "--map", "gate_ambush"]));
+    l.only_mod = false;
     assert!(!l.args().contains(&"--only-mod".into()));
     l.only_mod = true;
-    assert_eq!(l.args(), os(&["--mod", "/m/gates", "--only-mod", "--map", "gate_ambush"]));
     l.lobby = Some(Lobby::default());
     assert_eq!(l.args()[..3], os(&["--mod", "/m/gates", "--only-mod"])[..]);
     assert_eq!(l.args()[3], OsString::from("--lobby"));

@@ -199,7 +199,7 @@ Works (headless):
   the editor starts: `mods/` next to it, else the source checkout's (found from this process's working directory, which the game
   inherits, then from the binary). PROVISIONAL: that lookup restates the pinned engine's (`launch::bundled_mods_for`); the UI names
   the folder it used and says the list can differ if the game runs from elsewhere. The real fix is the engine's `--only-mod` flag
-  (engine requirement 12, being built): then the run loads nothing else and the list can go.
+  (engine requirement 12, in the pin `f91542f`): the play-test passes it by default, and the list shows only when the box is unticked.
 - Export: a `LICENSE` that is only the notice the editor wrote is not warned about (the check was removed by the maintainer's
   decision and can be re-added later). Preview status follows the job (`Preview::phase`), the picture is drawn last, at most 300 points high, so Export stays on screen.
 
@@ -308,7 +308,7 @@ it is, the editor drops its PROVISIONAL mirrors (`edit::dotted_to_pointer` for f
 9. The nearest key from `unknown_keys`. (P2)
 10. `defined_names` per field kind as a field accepts it (a `group` field takes players and placed ships too). (P1)
 11. A library "compare with the import" by meaning. (P6)
-12. `--only-mod` (or `--no-installed-mods`): load just the `--mod` folders, not the player's enabled mods, so a play-test and a preview
+12. (DONE in the pin f91542f) `--only-mod` (or `--no-installed-mods`): load just the `--mod` folders, not the player's enabled mods, so a play-test and a preview
     test one mod alone. (P6)
 13. Reproducible screenshots: two runs of the same `--shot --shot-frame 300` differ (5.9% RMSE in a tester's run, the ship took another
     course). `--shot` should imply a fixed seed and the fixed step (the engine has `--fixed-step`), or accept `--seed`. (P6)

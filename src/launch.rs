@@ -68,16 +68,15 @@ pub struct Launch {
     pub shot: Option<Shot>,
     /// Play the map through the skirmish lobby (`--lobby`) instead of straight into the battle (`--map`).
     pub lobby: Option<Lobby>,
-    /// `--only-mod`: the game loads this mod and none of the player's installed mods. PROVISIONAL: the flag exists in the engine's
-    /// `claude/engine-integration` branch (`modding::ONLY_MOD`), not at the tag this editor links; a game binary without it may ignore
-    /// the flag or refuse it, so it is off unless the player asks.
+    /// `--only-mod` (the engine's `modding::ONLY_MOD`): the game loads this mod and none of the player's installed mods, so a run is
+    /// of this mod alone. On by default.
     pub only_mod: bool,
 }
 
 impl Launch {
     /// A launch of `map` from the mod in `mod_dir`; the folder is made absolute (the game runs in another working directory).
     pub fn new(mod_dir: &Path, map: &str) -> Launch {
-        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None, lobby: None, only_mod: false }
+        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None, lobby: None, only_mod: true }
     }
 
     /// The command line, in the engine's flag order:
@@ -87,7 +86,7 @@ impl Launch {
     pub fn args(&self) -> Vec<OsString> {
         let mut a: Vec<OsString> = vec!["--mod".into(), self.mod_dir.clone().into()];
         if self.only_mod {
-            a.push("--only-mod".into());
+            a.push(openprocyon::modding::ONLY_MOD.into());
         }
         if let Some(lobby) = &self.lobby {
             a.extend(["--lobby".into(), lobby.spec(&self.map).into()]);
@@ -253,19 +252,24 @@ fn version_of(bin: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// A launch without `--only-mod`, so the arguments tests read the flag order of the rest.
+    fn plain(dir: &Path, map: &str) -> Launch {
+        Launch { only_mod: false, ..Launch::new(dir, map) }
+    }
+
     fn shot(file: &str, frames: &[u32]) -> Shot {
         Shot { file: file.into(), frames: frames.to_vec(), dist: None, yaw: None, pitch: None }
     }
 
     #[test]
     fn arguments_are_mod_then_map() {
-        let l = Launch::new(Path::new("/m/gates"), "gate_ambush");
+        let l = plain(Path::new("/m/gates"), "gate_ambush");
         assert_eq!(l.args(), ["--mod", "/m/gates", "--map", "gate_ambush"].map(OsString::from));
     }
 
     #[test]
     fn ship_and_shot_flags_follow_in_the_engines_order() {
-        let mut l = Launch::new(Path::new("/m/gates"), "gate_ambush");
+        let mut l = plain(Path::new("/m/gates"), "gate_ambush");
         l.ship = Some("Ship_X".into());
         assert_eq!(l.args(), ["--mod", "/m/gates", "--map", "gate_ambush", "--ship", "Ship_X"].map(OsString::from));
         l.ship = None;
@@ -286,7 +290,7 @@ mod tests {
 
     #[test]
     fn paths_are_absolute_even_from_relative_input() {
-        let mut l = Launch::new(Path::new("mods/gates"), "m");
+        let mut l = plain(Path::new("mods/gates"), "m");
         l.shot = Some(shot("local/a.png", &[300]));
         let a = l.args();
         assert!(Path::new(&a[1]).is_absolute());

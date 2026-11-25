@@ -181,7 +181,7 @@ New: `Launch` gets a lobby variant: `--mod <abs> --lobby "map=<id>;points=1000;l
 lobby says "no skirmish map". Also `--map <id>` (no lobby, for a mission or a quick look) and `--shot` as today. Open a retail
 skirmish map as a diff: pick `red_rover` (or any of the 14) in the map list, edit, save into a mod as `extends` plus `set` moves
 (P1; adds and deletes after requirement 1), play it with the mod over the import. The gate map (below) is built from an empty folder in this package.
-Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, so a play-test is not of this mod alone; open since Phase 3).
+Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, so a play-test is not of this mod alone; done: the pin has it, and the play-test passes it by default).
 
 **T11 as built: the flags the editor passes** (`src/launch.rs`, `tests/launch_args.rs`; the engine owns their meaning).
 
@@ -189,15 +189,14 @@ Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, 
 |---|---|
 | map, straight into the battle | `--mod <abs> --map <id> [--ship <id>]` |
 | map through the lobby | `--mod <abs> --lobby "map=<id>;points=P;limit=L;slots=human,N*computer[;seed=S]"` (no `--map`, which would skip the lobby; no `--ship`, the lobby's Auto Assign picks the fleet). Defaults `points=1000`, `limit=10`, `N=1`; the engine checks the ranges and the map must be `"skirmish": true` |
-| either, this mod alone | `--only-mod` right after `--mod <abs>` |
+| either, this mod alone (default) | `--only-mod` right after `--mod <abs>` |
 | screenshot | `--mod <abs> --map <id> [--ship <id>] --shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]` |
 | mod check, before every play-test | `--check-mod <abs> --json` (exit 1 means errors; the output is still read) |
 
 The play-test runs the check on a thread, shows its errors and warnings in the panel, starts the game when there are no errors (or the
-check could not run) and otherwise holds the launch back until "Launch anyway". PROVISIONAL: `--only-mod` is in the engine's
-`claude/engine-integration` branch (`modding::ONLY_MOD`), not at the tag `Cargo.toml` pins (`b2c01f5`; `--lobby` and `--check-mod`
-are); the editor cannot tell whether the game binary has it, so it is an unchecked box, off by default, and an older game may ignore or
-refuse it. This closes the editor side of engine requirement 12 once the engine tag moves.
+check could not run) and otherwise holds the launch back until "Launch anyway". `--only-mod` (the engine's `modding::ONLY_MOD`, in the
+pinned `f91542f`) is passed by default ("Load only this mod" is ticked; untick it to see the other enabled mods the game then loads).
+This closes engine requirement 12.
 
 ## Engine requirements for Phase 4
 
@@ -228,7 +227,7 @@ Checked against engine main `42083e4` (see Status). "Missing" means not found in
 11. **`--lobby` is present**, with `--mod`: `map`, `points`, `limit`, `slots`, `seed`, `fleet`. Not verified: `--lobby` together with
     `--mod` for a mod's skirmish map (no game here). The editor needs `--check-mod` clean first.
 12. **`--only-mod` (or `--no-installed-mods`)**, and public `scenery_transform` / `game_rotation` / `formation_slots` in `authoring`.
-    First is Phase 3 requirement 12, still absent (no match in `game/src`).
+    First is Phase 3 requirement 12, now in the engine (`modding::ONLY_MOD`); the others are still open.
 13. **`authoring::merge_rule(rel)`** and the `extends` parent per file (Phase 3 requirements 1 and 3, on an engine branch, not
     merged at last check): P1 needs both to stop restating the rules in `project::merge_kind` and `parent_rel`.
 
