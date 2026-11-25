@@ -145,6 +145,117 @@ pub fn owner(mission: &Value, item: &Item) -> Option<(Kind, String)> {
     }
 }
 
+// ---- pure: the rules beside the plan (docs/phase5.md P6, T9) ----
+
+/// What a rule names that the plan shows: volumes, paths, points, point sets and map texts by name, and ships by index (a group named
+/// by the rule stands for its ships, a `Group,Unit` text for the unit's ship, a player for the ships of that player).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Things {
+    pub geo: Vec<(Kind, String)>,
+    pub ships: Vec<usize>,
+}
+
+impl Things {
+    pub fn has_geo(&self, kind: Kind, name: &str) -> bool {
+        self.geo.iter().any(|(k, n)| *k == kind && n == name)
+    }
+}
+
+fn index_after(pointer: &str, list: &str) -> Option<usize> {
+    let mut it = pointer.split('/').skip(1);
+    if it.next()? == list { it.next()?.parse().ok() } else { None }
+}
+
+/// Everything rule `rule` of the mission names that is on the plan (the reference walk, [`super::refs`], so nested `OP Any Of` lists and
+/// `Group,Unit` texts count).
+pub fn rule_things(mission: &Value, rule: usize) -> Things {
+    let mut t = Things::default();
+    super::refs::walk(mission, super::refs::FieldIndex::engine(), &mut |v| {
+        if index_after(&v.pointer, "rules") != Some(rule) {
+            return;
+        }
+        for (kind, _, name) in super::refs::names_in(v) {
+            if let Some(k) = Kind::ALL.into_iter().find(|k| k.ref_kind() == kind) {
+                if !t.has_geo(k, name) {
+                    t.geo.push((k, name.to_string()));
+                }
+                continue;
+            }
+            for (i, s) in mdoc::ships(mission).iter().enumerate() {
+                // a group and a player are one namespace (refs.rs): the ships of the player, and the members of the group
+                let hit = match kind {
+                    "unit" => mdoc::ship_name(s) == Some(name),
+                    "group" | "player" => mdoc::ship_group(s) == Some(name) || mdoc::ship_id(s).is_some_and(|id| mdoc::group_members(mission, name).contains(&id)),
+                    _ => false,
+                };
+                if hit && !t.ships.contains(&i) {
+                    t.ships.push(i);
+                }
+            }
+        }
+    });
+    t
+}
+
+/// Whether the marker of `item` is something the rule names: a ship of its groups, a point or a map text by name.
+fn ruled_by(mission: &Value, item: &Item, things: &Things) -> bool {
+    match item {
+        Item::Ship(i) => things.ships.contains(i),
+        Item::Point(_) | Item::Text(_) => owner(mission, item).is_some_and(|(k, n)| things.has_geo(k, &n)),
+        _ => false,
+    }
+}
+
+/// The "uses this" filter a click on `items` stands for: the thing a vertex, point or label belongs to, a ship by its name and the
+/// groups it is in, the start by its player. `None` when nothing clicked names anything.
+pub fn uses_of_items(mission: &Value, items: &[Item]) -> Option<super::rules_view::Uses> {
+    let mut u = super::rules_view::Uses::default();
+    let mut labels: Vec<String> = vec![];
+    let add = |u: &mut super::rules_view::Uses, kind: &str, name: &str| {
+        let k = (kind.to_string(), name.to_string());
+        if !u.keys.contains(&k) {
+            u.keys.push(k);
+        }
+    };
+    for it in items {
+        match it {
+            Item::Ship(i) => {
+                let Some(s) = mdoc::ships(mission).get(*i) else { continue };
+                if let Some(n) = mdoc::ship_name(s) {
+                    add(&mut u, "unit", n);
+                    labels.push(format!("ship '{n}'"));
+                }
+                if let Some(g) = mdoc::ship_group(s) {
+                    add(&mut u, "group", g);
+                }
+                if let (Some(id), Some(groups)) = (mdoc::ship_id(s), mdoc::groups(mission)) {
+                    for g in groups.keys().filter(|g| mdoc::group_members(mission, g).contains(&id)) {
+                        add(&mut u, "group", g);
+                    }
+                }
+            }
+            Item::Start => {
+                if let Some(n) = mdoc::player_start_name(mission) {
+                    add(&mut u, "player", n);
+                    labels.push(format!("player '{n}'"));
+                }
+            }
+            other => {
+                if let Some((k, n)) = owner(mission, other) {
+                    add(&mut u, k.ref_kind(), &n);
+                    labels.push(format!("{} '{n}'", k.noun()));
+                }
+            }
+        }
+    }
+    labels.dedup();
+    if u.keys.is_empty() {
+        return None;
+    }
+    u.label = labels.join(", ");
+    Some(u)
+}
+
 // ---- egui state ----
 
 struct State {
@@ -224,13 +335,16 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) {
     }
 
     // What is drawn, read once for the frame; the borrow ends before anything is written.
-    let (scene, shapes_now, grey, world_half, dirty) = {
+    let rule_sel = super::rules_view::state(ui.ctx()).lock().map_or(0, |r| r.rule);
+    let (scene, shapes_now, grey, world_half, dirty, things, ruled_markers) = {
         let Some(m) = merged_mission(project, &id) else { return };
         let map = merged_map(project, &id);
         let grey: Vec<[f32; 2]> = map.map_or_else(Vec::new, |mp| view2d::build_scene(mp).markers.iter().map(|k| k.pos).collect());
         let wh = map.and_then(mapdoc::world_half).unwrap_or(mapdoc::DEFAULT_WORLD_HALF) as f32;
         let dirty = super::project::mission_rel(&id).ok().and_then(|r| project.doc(&r).map(|d| d.dirty)).unwrap_or(false);
-        (build_scene(m), shapes(m), grey, wh, dirty)
+        let (scene, things) = (build_scene(m), rule_things(m, rule_sel));
+        let ruled: Vec<usize> = scene.items.iter().enumerate().filter(|(_, it)| ruled_by(m, it, &things)).map(|(i, _)| i).collect();
+        (scene, shapes(m), grey, wh, dirty, things, ruled)
     };
     if scene.items != st.items {
         st.items = scene.items.clone();
@@ -255,9 +369,10 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) {
         st.view.fit_world(rect, world_half, 20.0);
         st.fit = false;
     }
-    paint_overlay(ui, rect, &st.view, &grey, &shapes_now, st.active.as_ref().map(|(_, n)| n.as_str()), &selected);
+    paint_overlay(ui, rect, &st.view, &grey, &shapes_now, st.active.as_ref().map(|(_, n)| n.as_str()), &selected, &scene, &things, &ruled_markers);
     if resp.selection_changed {
         follow_selection(st, project, &id, &scene);
+        pick_uses(ui.ctx(), project, &id, &scene.selected(&st.sel));
     }
     if let Some(d) = resp.committed {
         let items = scene.selected(&st.sel);
@@ -290,6 +405,15 @@ fn follow_selection(st: &mut State, project: &Project, id: &str, scene: &Scene) 
         && let Some(o) = owner(m, one)
     {
         st.active = Some(o);
+    }
+}
+
+/// A click on the plan filters the rule list to the rules that use what was picked (a click on nothing leaves the filter, its chip
+/// in the list clears it).
+fn pick_uses(ctx: &egui::Context, project: &Project, id: &str, items: &[Item]) {
+    let Some(u) = merged_mission(project, id).and_then(|m| uses_of_items(m, items)) else { return };
+    if let Ok(mut r) = super::rules_view::state(ctx).lock() {
+        r.uses = Some(u);
     }
 }
 
@@ -453,6 +577,7 @@ fn details(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str) {
 
 fn lists(ui: &mut egui::Ui, st: &mut State, project: &Project, id: &str) {
     let Some(m) = merged_mission(project, id) else { return };
+    let mut picked = None;
     egui::CollapsingHeader::new("Names").id_salt("plan-names").default_open(false).show(ui, |ui| {
         for kind in Kind::ALL {
             let names = geo::names(m, kind);
@@ -461,17 +586,42 @@ fn lists(ui: &mut egui::Ui, st: &mut State, project: &Project, id: &str) {
                 for n in names {
                     let on = st.active.as_ref() == Some(&(kind, n.clone()));
                     if ui.selectable_label(on, &n).clicked() {
+                        let item = match kind {
+                            Kind::Point => geo::index_of(m, kind, &n).map(Item::Point),
+                            Kind::MapText => geo::index_of(m, kind, &n).map(Item::Text),
+                            _ => kind.table().map(|t| Item::Vertex(t, n.clone(), 0)),
+                        };
+                        if let Some(u) = item.and_then(|it| uses_of_items(m, &[it])) {
+                            picked = Some(u);
+                        }
                         st.active = Some((kind, n));
                     }
                 }
             });
         }
     });
+    if let Some(u) = picked
+        && let Ok(mut r) = super::rules_view::state(ui.ctx()).lock()
+    {
+        r.uses = Some(u);
+    }
 }
 
 // ---- drawing over the canvas ----
 
-fn paint_overlay(ui: &egui::Ui, rect: egui::Rect, view: &PlanView, grey: &[[f32; 2]], shapes: &[Shape], active: Option<&str>, selected: &[Item]) {
+#[allow(clippy::too_many_arguments)]
+fn paint_overlay(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    view: &PlanView,
+    grey: &[[f32; 2]],
+    shapes: &[Shape],
+    active: Option<&str>,
+    selected: &[Item],
+    scene: &Scene,
+    things: &Things,
+    ruled_markers: &[usize],
+) {
     let p = ui.painter_at(rect);
     for w in grey {
         let c = view.to_screen(rect, *w);
@@ -480,21 +630,68 @@ fn paint_overlay(ui: &egui::Ui, rect: egui::Rect, view: &PlanView, grey: &[[f32;
         }
     }
     let on = |name: &str| active == Some(name) || selected.iter().any(|i| matches!(i, Item::Vertex(_, n, _) if n == name));
+    // what the selected rule names (P6): gold rings on ships and points, gold outlines on volumes, paths and point sets
+    let gold = Color32::from_rgb(255, 205, 60);
+    for m in ruled_markers.iter().filter_map(|i| scene.markers.get(*i)) {
+        p.circle_stroke(view.to_screen(rect, m.pos), 13.0, Stroke::new(2.5, gold));
+    }
     for s in shapes {
-        let hot = on(s.name());
+        let kind = match s {
+            Shape::Polygon { .. } => Kind::Volume,
+            Shape::Path { .. } => Kind::Path,
+            Shape::Dots { .. } => Kind::PointSet,
+        };
+        let ruled = things.has_geo(kind, s.name());
+        let hot = on(s.name()) || ruled;
         match s {
             Shape::Polygon { name, pts } if pts.len() >= 2 => {
-                let col = if hot { Color32::from_rgb(210, 150, 255) } else { Color32::from_rgb(150, 100, 200) };
+                let col = if ruled {
+                    gold
+                } else if hot {
+                    Color32::from_rgb(210, 150, 255)
+                } else {
+                    Color32::from_rgb(150, 100, 200)
+                };
                 let sp: Vec<_> = pts.iter().map(|q| view.to_screen(rect, *q)).collect();
-                p.add(egui::Shape::closed_line(sp.clone(), Stroke::new(if hot { 2.0 } else { 1.2 }, col)));
+                p.add(egui::Shape::closed_line(
+                    sp.clone(),
+                    Stroke::new(
+                        if ruled {
+                            3.0
+                        } else if hot {
+                            2.0
+                        } else {
+                            1.2
+                        },
+                        col,
+                    ),
+                ));
                 let c = sp.iter().fold(vec2(0.0, 0.0), |a, q| a + q.to_vec2()) / sp.len() as f32;
                 p.text(pos2(c.x, c.y), egui::Align2::CENTER_CENTER, name, egui::FontId::monospace(10.0), col);
             }
             Shape::Path { pts, .. } if pts.len() >= 2 => {
-                let col = if hot { Color32::from_rgb(255, 150, 120) } else { Color32::from_rgb(220, 110, 90) };
+                let col = if ruled {
+                    gold
+                } else if hot {
+                    Color32::from_rgb(255, 150, 120)
+                } else {
+                    Color32::from_rgb(220, 110, 90)
+                };
                 let sp: Vec<_> = pts.iter().map(|q| view.to_screen(rect, *q)).collect();
                 for w in sp.windows(2) {
-                    p.line_segment([w[0], w[1]], Stroke::new(if hot { 2.0 } else { 1.2 }, col));
+                    p.line_segment(
+                        [w[0], w[1]],
+                        Stroke::new(
+                            if ruled {
+                                3.0
+                            } else if hot {
+                                2.0
+                            } else {
+                                1.2
+                            },
+                            col,
+                        ),
+                    );
                     let d = w[1] - w[0];
                     if d.length() > 24.0 {
                         let (mid, dir) = (w[0] + d * 0.5, d.normalized());
@@ -504,7 +701,13 @@ fn paint_overlay(ui: &egui::Ui, rect: egui::Rect, view: &PlanView, grey: &[[f32;
                 }
             }
             Shape::Dots { pts, .. } => {
-                let col = if hot { Color32::WHITE } else { Color32::from_rgb(200, 200, 200) };
+                let col = if ruled {
+                    gold
+                } else if hot {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgb(200, 200, 200)
+                };
                 for (i, q) in pts.iter().enumerate() {
                     let c = view.to_screen(rect, *q);
                     if i == 0 {

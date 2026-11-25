@@ -58,9 +58,45 @@ struct Cache {
     names: Names,
 }
 
+/// The "uses this" filter of the rule list (docs/phase5.md P6): what a click on the plan picked, as the (field kind, name) pairs a rule
+/// field must name (`refs::references_of`). Set by [`super::plan`], cleared by the chip in the list.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Uses {
+    /// What the chip shows ("volume 'Gate Area'").
+    pub label: String,
+    pub keys: Vec<(String, String)>,
+}
+
+/// Position of the rule or task a field pointer (`/rules/2/conditions/0/...`, `/tasks/1/...`) is in.
+fn owner_index(pointer: &str, list: &str) -> Option<usize> {
+    let mut it = pointer.split('/').skip(1);
+    (it.next()? == list).then(|| it.next()?.parse().ok()).flatten()
+}
+
+/// The rules and the tasks (by index) with a field that names any of `uses`, in document order.
+pub fn rules_using(mission: &Value, uses: &Uses) -> (Vec<usize>, Vec<usize>) {
+    let (mut rules, mut tasks) = (vec![], vec![]);
+    for (kind, name) in &uses.keys {
+        for r in refs::references_of(mission, kind, name) {
+            if let Some(i) = owner_index(&r.pointer, "rules") {
+                rules.push(i);
+            } else if let Some(i) = owner_index(&r.pointer, "tasks") {
+                tasks.push(i);
+            }
+        }
+    }
+    for v in [&mut rules, &mut tasks] {
+        v.sort_unstable();
+        v.dedup();
+    }
+    (rules, tasks)
+}
+
 /// What the section remembers between frames.
 #[derive(Default)]
 pub struct State {
+    /// "Uses this": only the rules that name what the plan picked (see [`Uses`]).
+    pub uses: Option<Uses>,
     /// The open mission's id (the folder under `maps/`).
     pub mission: Option<String>,
     /// The selected rule.
@@ -282,8 +318,14 @@ pub fn show_with(ui: &mut egui::Ui, project: &mut Project, st: &mut State) {
     let all: Vec<Value> = rules::rules(project, &Target::mission(&rel)).to_vec();
     st.rule = st.rule.min(all.len().saturating_sub(1));
     let mut acts = vec![];
-
-    list(ui, st, &all, &refusal, &mut acts);
+    let using = st.uses.as_ref().and_then(|u| {
+        mproject::merged_mission(project, &id).map(|m| {
+            let (rules, tasks) = rules_using(m, u);
+            let names = tasks.iter().map(|&t| mdoc::tasks(m).get(t).and_then(mdoc::task_name).unwrap_or("(unnamed)").to_string()).collect();
+            (rules, names)
+        })
+    });
+    list(ui, st, &all, &refusal, using.as_ref(), &mut acts);
     if let Some(rule) = all.get(st.rule) {
         ui.separator();
         body(ui, st, project, &rel, rule, &mut acts);
@@ -315,11 +357,11 @@ fn rule_findings(found: &[Finding], i: usize) -> usize {
     found.iter().filter(|f| f.rule_index == Some(i)).count()
 }
 
-fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<String>, acts: &mut Vec<Act>) {
+fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<String>, using: Option<&(Vec<usize>, Vec<String>)>, acts: &mut Vec<Act>) {
     let found: Vec<Finding> = st.findings().to_vec();
     let mission_level = found.iter().filter(|f| f.rule_index.is_none()).count();
     let (errors, warns) = (found.iter().filter(|f| f.level == Level::Error).count(), found.iter().filter(|f| f.level != Level::Error).count());
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.strong(format!("Rules ({})", all.len()));
         if action(ui, wid("add-rule"), "+ New rule", refusal) {
             acts.push(Act::AddRule);
@@ -335,6 +377,17 @@ fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<Strin
             ui.weak("no findings");
         }
     });
+    if let (Some(u), Some((rules, tasks))) = (st.uses.clone(), using) {
+        ui.horizontal_wrapped(|ui| {
+            if chip(ui, wid("uses-clear"), &format!("uses {}  (x)", u.label), true, None).on_hover_text("Show every rule again").clicked() {
+                st.uses = None;
+            }
+            ui.weak(format!("{} of {} rules", rules.len(), all.len()));
+            if !tasks.is_empty() {
+                ui.weak(format!("also read by the task(s): {}", tasks.join(", ")));
+            }
+        });
+    }
     if mission_level > 0 {
         ui.weak(format!("{mission_level} findings are about the mission as a whole, not a rule: see the problems panel"));
     }
@@ -342,10 +395,10 @@ fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<Strin
     egui::ScrollArea::vertical().id_salt("rules-list").max_height(240.0).show(ui, |ui| {
         for (i, r) in all.iter().enumerate() {
             let n = rule_findings(&found, i);
-            if (st.only_problems && n == 0) || !matches_filter(r, &needle) {
+            if (st.only_problems && n == 0) || !matches_filter(r, &needle) || using.is_some_and(|(rules, _)| !rules.contains(&i)) {
                 continue;
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let name = mdoc::rule_name(r).filter(|n| !n.is_empty()).unwrap_or("(unnamed)");
                 let counts = format!("{} when, {} do", mdoc::rule_items(r, true).len(), mdoc::rule_items(r, false).len());
                 let label = format!("{}. {name}   {counts}", i + 1);

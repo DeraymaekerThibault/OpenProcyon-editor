@@ -182,7 +182,7 @@ impl Reference {
 }
 
 /// The names a field's text holds: (kind, part, name) per name, the `Group,Unit` text as two.
-fn names_in(v: &Visit) -> Vec<(&'static str, Part, &str)> {
+pub fn names_in(v: &Visit) -> Vec<(&'static str, Part, &str)> {
     let Some(kind) = NAME_KINDS.iter().find(|k| **k == v.kind) else { return vec![] };
     if *kind == "group" {
         return match v.text.split_once(',') {

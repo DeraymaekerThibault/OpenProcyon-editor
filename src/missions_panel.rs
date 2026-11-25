@@ -24,12 +24,30 @@ fn sections(ui: &mut egui::Ui, project: &mut Project) {
     retail_notice(ui, project);
     ui.separator();
     section(ui, "Players, ships and groups", |ui| ships::show(ui, project));
-    section(ui, "Plan", |ui| plan::show(ui, project));
     section(ui, "Tasks and the end", |ui| tasks::show(ui, project));
-    section(ui, "Rules", |ui| rules_view::show(ui, project));
+    section(ui, "Rules and plan", |ui| rules_and_plan(ui, project));
     section(ui, "Speech and messages", |ui| speech::show(ui, project));
     section(ui, "Campaign", |ui| campaign::show(ui, project));
     section(ui, "Play-test report", |ui| report::show(ui, project));
+}
+
+/// Width from which the rule list and the plan sit side by side; below it the plan is under the list. PROVISIONAL.
+const SIDE_BY_SIDE: f32 = 800.0;
+
+/// The rule list with the mission plan beside it (docs/phase5.md P6): the selected rule is drawn on the plan, a click on the plan
+/// filters the list. The two share their state through egui memory ([`rules_view::state`]).
+fn rules_and_plan(ui: &mut egui::Ui, project: &mut Project) {
+    if ui.available_width() >= SIDE_BY_SIDE {
+        ui.columns(2, |cols| {
+            rules_view::show(&mut cols[0], project);
+            plan::show(&mut cols[1], project);
+        });
+    } else {
+        rules_view::show(ui, project);
+        ui.separator();
+        ui.strong("Plan");
+        plan::show(ui, project);
+    }
 }
 
 fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
