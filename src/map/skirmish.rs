@@ -1120,7 +1120,10 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
     let tip = if running {
         "A game started from here is still running: close it, or press Stop, before starting another.".to_string()
     } else if ready {
-        format!("runs {} --mod <a copy of the mod with your unsaved edits> --lobby ...", launch::game_bin().display())
+        format!(
+            "Goes straight into the battle with these settings (the lobby screen itself is skipped). Runs {} --mod <a copy of the mod with your unsaved edits> --lobby ...",
+            launch::game_bin().display()
+        )
     } else {
         "the lobby checklist above has something missing".into()
     };

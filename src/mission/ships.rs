@@ -540,18 +540,26 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
             }
         });
     });
-    ui.horizontal(|ui| {
-        ui.label("start");
-        if let Some(v) = vec3(ui, mdoc::player_start_pos(m).unwrap_or([0.0; 3])) {
-            ops.push(Op::StartVec(false, v));
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label("forward");
-        if let Some(v) = vec3(ui, mdoc::player_start_forward(m).unwrap_or([0.0, 1.0, 0.0])) {
-            ops.push(Op::StartVec(true, v));
-        }
-    });
+    // `start` and `forward` are written only when typed: until then the boxes show the defaults, greyed.
+    for (forward, label, value, default) in [(false, "start", mdoc::player_start_pos(m), [0.0; 3]), (true, "forward", mdoc::player_start_forward(m), [0.0, 1.0, 0.0])] {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            let set = value.is_some();
+            ui.scope(|ui| {
+                if !set {
+                    let weak = ui.visuals().weak_text_color();
+                    ui.visuals_mut().override_text_color = Some(weak);
+                }
+                if let Some(v) = vec3(ui, value.unwrap_or(default)) {
+                    ops.push(Op::StartVec(forward, v));
+                }
+            });
+            if !set {
+                ui.weak("(default, not in the file)");
+            }
+        });
+    }
+    ui.weak("The game reads start and forward only when the human's player owns no ship (then it places a stand-in cutter there); a player with a ship ignores them. PROVISIONAL: restated from docs/missions.md section 4.");
 
     ui.separator();
     ui.strong("Ships");

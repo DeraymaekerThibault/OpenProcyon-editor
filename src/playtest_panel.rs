@@ -258,7 +258,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     picker(ui, "Map", &mut st.map, maps);
     picker(ui, "Ship", &mut st.ship, ships);
     ui.checkbox(&mut st.lobby, "Play through the skirmish lobby (--lobby)")
-        .on_hover_text("The map must be a skirmish map. The ship above is not used: the lobby assigns the fleet.");
+        .on_hover_text("The map must be a skirmish map. The ship above is not used: the lobby assigns the fleet. The game goes straight into the battle with these settings: the lobby screen itself is skipped.");
     if st.lobby {
         ui.horizontal(|ui| {
             ui.label("Computers");

@@ -385,3 +385,29 @@ fn renaming_a_group_leaves_its_section_open() {
     assert_eq!(groups::names(&view(&p)), ["Navy", "Pirates"], "a rename keeps the order");
     assert!(frame(&mut p), "still open after the rename");
 }
+
+#[test]
+fn the_start_form_shows_defaults_greyed_with_a_note_until_a_value_is_typed() {
+    use bevy_egui::egui;
+    use openprocyon_editor::mission::rules_view as rv;
+    let (mut p, _) = opened("startform");
+    // a start with only its name: what the form shows for start and forward is the default, not a value of the file
+    let rel = "maps/gates/mission.json";
+    p.do_step(rel, "bare start", vec![openprocyon_editor::edit::Edit::set(doc::player_start_pointer(None), json!({"name": "Hero"}))]).unwrap();
+    let ctx = egui::Context::default();
+    rv::state(&ctx).lock().unwrap().mission = Some(ID.to_string());
+    let mut texts = vec![];
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 1600.0))), ..Default::default() };
+    let mut full = ctx.run_ui(raw, |ui| ships::show(ui, &mut p));
+    full.textures_delta.clear();
+    fn collect(s: &egui::epaint::Shape, out: &mut Vec<String>) {
+        match s {
+            egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+            _ => {}
+        }
+    }
+    full.shapes.iter().for_each(|s| collect(&s.shape, &mut texts));
+    assert_eq!(texts.iter().filter(|t| t.contains("(default, not in the file)")).count(), 2, "start and forward: {texts:?}");
+    assert!(texts.iter().any(|t| t.contains("only when the human's player owns no ship")), "{texts:?}");
+}
