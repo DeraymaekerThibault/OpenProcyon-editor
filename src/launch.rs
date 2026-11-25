@@ -168,6 +168,80 @@ impl Launch {
     }
 }
 
+/// The last `n` non-empty lines of `text`, trimmed, joined with newlines.
+pub fn last_lines(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// What to tell the player when the game ended: `None` for a clean exit (code 0), else the exit code (or that a signal ended it)
+/// and the last lines the game printed, which is where it says what went wrong.
+pub fn exit_report(code: Option<i32>, success: bool, output: &str) -> Option<String> {
+    if success {
+        return None;
+    }
+    let head = code.map_or_else(|| "The game was ended by a signal".to_string(), |c| format!("The game exited with code {c}"));
+    let tail = last_lines(output, 8);
+    Some(if tail.is_empty() { format!("{head} and printed nothing.") } else { format!("{head}. Its last lines:\n{tail}") })
+}
+
+/// A game process the editor started, with its stdout and stderr in one log file so that a failure can be shown.
+pub struct Game {
+    child: Child,
+    log: PathBuf,
+}
+
+/// How a [`Game`] stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GameState {
+    Running,
+    /// Ended: `None` after a clean exit, else the report ([`exit_report`]).
+    Ended(Option<String>),
+}
+
+impl Game {
+    /// Starts `launch` with the output captured in a file in the temp folder.
+    pub fn spawn(launch: &Launch) -> std::io::Result<Game> {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let log = std::env::temp_dir().join(format!("procyon-editor-game-{}-{}.log", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let out = crate::project::guard::create_file(&log, None).map_err(std::io::Error::other)?;
+        let err = out.try_clone()?;
+        let child = Command::new(game_bin()).args(launch.args()).envs(launch.envs()).stdout(out).stderr(err).spawn()?;
+        Ok(Game { child, log })
+    }
+
+    /// Whether it still runs; once it ended, the report (and the log file is removed).
+    pub fn poll(&mut self) -> GameState {
+        match self.child.try_wait() {
+            Ok(None) => GameState::Running,
+            Ok(Some(status)) => {
+                let report = exit_report(status.code(), status.success(), &self.output());
+                let _ = crate::project::guard::remove_file(&self.log, None);
+                GameState::Ended(report)
+            }
+            Err(e) => GameState::Ended(Some(format!("Cannot tell whether the game still runs: {e}"))),
+        }
+    }
+
+    /// Ends the process (the play-test's "Stop").
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = crate::project::guard::remove_file(&self.log, None);
+    }
+
+    /// The end of the log (the last 16 KiB), lossily as text.
+    fn output(&self) -> String {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut f) = std::fs::File::open(&self.log) else { return String::new() };
+        let len = f.metadata().map_or(0, |m| m.len());
+        let _ = f.seek(SeekFrom::Start(len.saturating_sub(16 * 1024)));
+        let mut bytes = Vec::new();
+        let _ = f.read_to_end(&mut bytes);
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
 /// One line of `--check-mod --json`: the fields the panel shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModFinding {
@@ -387,6 +461,42 @@ mod tests {
         assert_eq!(resolve_bin(Path::new("openprocyon"), None), None);
         assert_eq!(resolve_bin(Path::new("/x/openprocyon"), None), Some(PathBuf::from("/x/openprocyon")));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_failed_exit_shows_the_code_and_the_last_lines_and_a_clean_one_nothing() {
+        assert_eq!(exit_report(Some(0), true, "all fine"), None);
+        let out = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n") + "\n\nERROR: no such map\n";
+        let r = exit_report(Some(2), false, &out).unwrap();
+        assert!(r.starts_with("The game exited with code 2. Its last lines:") && r.ends_with("ERROR: no such map"), "{r}");
+        assert!(!r.contains("line 5\n") && r.contains("line 20"), "only the last lines: {r}");
+        assert!(exit_report(None, false, "").unwrap().contains("signal"));
+        assert!(exit_report(Some(1), false, "").unwrap().contains("printed nothing"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_game_that_fails_is_reported_with_its_output_and_one_that_runs_can_be_stopped() {
+        // `sh` stands in for the game binary through PROCYON_GAME_BIN would need a process-wide env; spawn the pieces directly.
+        let log = std::env::temp_dir().join(format!("procyon-editor-game-test-{}.log", std::process::id()));
+        let out = std::fs::File::create(&log).unwrap();
+        let err = out.try_clone().unwrap();
+        let child = Command::new("sh").args(["-c", "echo out line; echo 'bad map' >&2; exit 3"]).stdout(out).stderr(err).spawn().unwrap();
+        let mut g = Game { child, log: log.clone() };
+        let state = loop {
+            match g.poll() {
+                GameState::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
+                s => break s,
+            }
+        };
+        let GameState::Ended(Some(r)) = state else { panic!("{state:?}") };
+        assert!(r.contains("code 3") && r.contains("out line") && r.contains("bad map"), "{r}");
+        assert!(!log.exists(), "the log is removed");
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        let mut g = Game { child, log };
+        assert_eq!(g.poll(), GameState::Running);
+        g.stop();
+        assert!(matches!(g.poll(), GameState::Ended(_)));
     }
 
     #[test]

@@ -24,7 +24,6 @@ use openprocyon::data::MapDoc;
 use openprocyon::rules::schema::Equivalence;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap};
-use std::process::Child;
 
 use super::doc;
 use super::project as maps;
@@ -596,7 +595,7 @@ pub struct Panel {
     buffers: HashMap<String, String>,
     new_key: String,
     lobby: Lobby,
-    child: Option<Child>,
+    child: Option<launch::Game>,
     info: String,
     error: Option<String>,
     cache: Option<(Value, Value, Value, Vec<Finding>)>,
@@ -1098,10 +1097,16 @@ fn media_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
 
 fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &str, map: &Value) {
     ui.strong("Play");
-    let running = st.child.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None)));
-    if !running {
+    if let Some(g) = st.child.as_mut()
+        && let launch::GameState::Ended(report) = g.poll()
+    {
         st.child = None;
+        match report {
+            Some(r) => st.error = Some(r),
+            None => st.info = "The game ended.".into(),
+        }
     }
+    let running = st.child.is_some();
     ui.horizontal_wrapped(|ui| {
         ui.label("Computers");
         ui.add(egui::DragValue::new(&mut st.lobby.computers).range(1..=7));
@@ -1111,7 +1116,9 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
         ui.add(egui::DragValue::new(&mut st.lobby.limit).range(1..=100));
     });
     let ready = lists_and_starts(map);
-    let tip = if ready {
+    let tip = if running {
+        "A game started from here is still running: close it, or press Stop, before starting another.".to_string()
+    } else if ready {
         format!("runs {} --mod <a copy of the mod with your unsaved edits> --lobby ...", launch::game_bin().display())
     } else {
         "the lobby checklist above has something missing".into()
@@ -1120,9 +1127,9 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
         if !ready {
             st.error = Some("The map would not list or start in the lobby yet: see the checklist.".into());
         } else {
-            let started = project
-                .check_dir()
-                .and_then(|dir| lobby_launch(&dir, id, &st.lobby).spawn().map_err(|e| format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display())));
+            let started = project.check_dir().and_then(|dir| {
+                launch::Game::spawn(&lobby_launch(&dir, id, &st.lobby)).map_err(|e| format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()))
+            });
             if let Some(child) = st.run(started) {
                 st.child = Some(child);
                 st.info = format!("Game started through the lobby on {id}. The lobby opens on the map.");
@@ -1130,6 +1137,14 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
         }
     }
     if running {
-        ui.label("game running");
+        ui.horizontal(|ui| {
+            ui.label("game running (the button is off until it ends)");
+            if ui.small_button("Stop").clicked()
+                && let Some(mut g) = st.child.take()
+            {
+                g.stop();
+                st.info = "The game was stopped.".into();
+            }
+        });
     }
 }

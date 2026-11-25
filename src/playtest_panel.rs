@@ -4,7 +4,6 @@
 use bevy::prelude::Resource;
 use bevy_egui::egui;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 
 use crate::export::{self, ExportPlan};
 use crate::launch::{self, Launch, Lobby, ModCheck};
@@ -32,8 +31,10 @@ pub struct State {
     check_job: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Result<ModCheck, String>>>>,
     held: Option<Launch>,
     check: Option<Result<ModCheck, String>>,
-    child: Option<Child>,
+    child: Option<launch::Game>,
     status: String,
+    /// The last game run ended with an error (its report is in `status`).
+    failed: bool,
     version: Option<Result<String, String>>,
     plan: Option<Result<ExportPlan, String>>,
     confirmed: bool,
@@ -72,6 +73,7 @@ impl Default for State {
             check: None,
             child: None,
             status: String::new(),
+            failed: false,
             version: None,
             plan: None,
             confirmed: false,
@@ -150,12 +152,16 @@ impl State {
     }
 
     fn start(&mut self, l: &Launch) {
-        match l.spawn() {
+        self.failed = false;
+        match launch::Game::spawn(l) {
             Ok(c) => {
                 self.child = Some(c);
                 self.status = format!("Game started on map {}.", l.map);
             }
-            Err(e) => self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()),
+            Err(e) => {
+                self.failed = true;
+                self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display());
+            }
         }
     }
 
@@ -213,8 +219,12 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     {
         st.run(dir, a);
     }
-    if st.child.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None))) {
+    if let Some(g) = st.child.as_mut()
+        && let launch::GameState::Ended(report) = g.poll()
+    {
         st.child = None;
+        st.failed = report.is_some();
+        st.status = report.unwrap_or_else(|| "The game ended.".into());
     }
     st.poll_check();
     if st.check_job.is_some() {
@@ -287,8 +297,23 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     let ready = !st.map.trim().is_empty();
     let mut clicked = None;
     ui.horizontal(|ui| {
-        if ui.add_enabled(ready && !playing, egui::Button::new("Play-test")).on_hover_text(format!("runs {}", launch::game_bin().display())).clicked() {
+        let why = if st.child.is_some() {
+            "A game started from here is still running: close it, or press Stop, before starting another.".to_string()
+        } else if st.check_job.is_some() {
+            "The mod is being checked; the game starts when that is done.".to_string()
+        } else if !ready {
+            "Pick a map first.".to_string()
+        } else {
+            format!("runs {}", launch::game_bin().display())
+        };
+        if ui.add_enabled(ready && !playing, egui::Button::new("Play-test")).on_hover_text(why).clicked() {
             clicked = Some(Action::Play);
+        }
+        if st.child.is_some() && ui.button("Stop").on_hover_text("Ends the game this editor started").clicked() {
+            if let Some(mut g) = st.child.take() {
+                g.stop();
+            }
+            st.status = "The game was stopped.".into();
         }
         ui.label("Preview at frame");
         ui.add(egui::TextEdit::singleline(&mut st.frame).desired_width(50.0));
@@ -308,7 +333,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         ui.label("The game reads the files on disk: unsaved documents are not in the test.");
     }
     if !st.status.is_empty() {
-        ui.label(&st.status);
+        if st.failed && st.child.is_none() {
+            ui.colored_label(ui.visuals().error_fg_color, &st.status);
+        } else {
+            ui.label(&st.status);
+        }
     }
     match &st.check {
         None => {}
