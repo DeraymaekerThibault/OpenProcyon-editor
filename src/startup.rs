@@ -14,6 +14,8 @@ pub struct Args {
     pub map: Option<String>,
     /// `--select`: entries of the map to select, as (array key, index).
     pub select: Vec<(String, usize)>,
+    /// `--points`: the 3D map view starts in the scenery-points mode (T12).
+    pub points: bool,
     pub screenshot: Option<PathBuf>,
     pub frame: u32,
 }
@@ -47,11 +49,12 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
                 }
                 out.select.push((array.to_string(), index));
             }
+            "--points" => out.points = true,
             "--screenshot" => out.screenshot = Some(absolute(value()?)),
             "--frame" => out.frame = value()?.parse().map_err(|_| "--frame needs a whole number".to_string())?,
             other => {
                 return Err(format!(
-                    "unknown flag {other} (flags: --mod <dir>, --tab <{}>, --ship <id>, --map <id>, --select <array>:<index>, --screenshot <file.png>, --frame N)",
+                    "unknown flag {other} (flags: --mod <dir>, --tab <{}>, --ship <id>, --map <id>, --select <array>:<index>, --points, --screenshot <file.png>, --frame N)",
                     TABS.join("|")
                 ));
             }
@@ -90,6 +93,7 @@ mod tests {
         let a = p(&["--tab", "map3d", "--select", "objects:1", "--select", "ships:0"]).unwrap();
         assert_eq!(a.tab.as_deref(), Some("map3d"));
         assert_eq!(a.select, vec![("objects".to_string(), 1), ("ships".to_string(), 0)]);
+        assert!(p(&["--points"]).unwrap().points && !p(&[]).unwrap().points);
         assert!(p(&["--select", "objects"]).is_err() && p(&["--select", "rocks:1"]).is_err() && p(&["--select", "ships:x"]).is_err());
     }
 

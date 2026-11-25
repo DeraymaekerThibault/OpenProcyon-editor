@@ -579,7 +579,7 @@ pub fn toolbar(ui: &mut egui::Ui, v3: &mut View3d) {
 pub struct MapGizmos;
 
 #[derive(Component)]
-struct MapCamera;
+pub(super) struct MapCamera;
 
 /// A model entity: the item it draws and the height it was spawned at (the drag's preview moves it from there).
 #[derive(Component)]
@@ -597,6 +597,9 @@ struct Mats {
 /// Registers the systems of the view. Needs the ship view's plugin for the ambient light (or any `GlobalAmbientLight`).
 pub fn plugin(app: &mut App) {
     app.init_gizmo_group::<MapGizmos>().add_systems(Startup, setup).add_systems(Update, (camera, sync, interact, highlight, draw).chain());
+    // T12 begin
+    app.add_plugins(super::docks::plugin);
+    // T12 end
 }
 
 fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>, mut gizmos: ResMut<GizmoConfigStore>) {
@@ -623,7 +626,7 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>
 }
 
 /// The pointer of this frame becomes current; orbit, pan and zoom; the camera draws in the canvas rect only while the tab asks.
-fn camera(mut st: ResMut<maps_panel::State>, mut cam: Single<(&mut Camera, &mut Transform), With<MapCamera>>) {
+pub(super) fn camera(mut st: ResMut<maps_panel::State>, mut cam: Single<(&mut Camera, &mut Transform), With<MapCamera>>) {
     let v3 = &mut st.v3;
     v3.cur = v3.input.take();
     let (camera, tf) = &mut *cam;
@@ -710,6 +713,9 @@ fn sync(
 
 /// Hover, the height drag, and a click: selection is the tab's, which takes `click`.
 fn interact(mut st: ResMut<maps_panel::State>, cam: Single<(&Camera, &GlobalTransform), With<MapCamera>>) {
+    // T12 begin: the scenery-points mode does the hover, the click and the drags of the selected object itself
+    let points_mode = st.t12.active();
+    // T12 end
     let v3 = &mut st.v3;
     v3.hover_label = None;
     let Some(input) = v3.cur else {
@@ -717,6 +723,13 @@ fn interact(mut st: ResMut<maps_panel::State>, cam: Single<(&Camera, &GlobalTran
         v3.preview_dz = 0.0;
         return;
     };
+    // T12 begin
+    if points_mode {
+        v3.drag = None;
+        v3.preview_dz = 0.0;
+        return;
+    }
+    // T12 end
     let (camera, gt) = *cam;
     // Window coordinates (logical): the viewport's origin is added and subtracted by Bevy itself (see ship_view::scene::interact).
     let cursor = input.base.hover;
@@ -788,6 +801,7 @@ fn highlight(mut st: ResMut<maps_panel::State>, mats: Res<Mats>, mut q: Query<(&
 
 /// The ground square, the markers, the selection's boxes and the height arrow.
 fn draw(mut gizmos: Gizmos<MapGizmos>, st: Res<maps_panel::State>, cam: Single<&Transform, With<MapCamera>>) {
+    let points_mode = st.t12.active(); // T12
     let v3 = &st.v3;
     if v3.cur.is_none() {
         return;
@@ -832,7 +846,7 @@ fn draw(mut gizmos: Gizmos<MapGizmos>, st: Res<maps_panel::State>, cam: Single<&
             gizmos.line(p, Vec3::new(p.x, 0.0, p.z), Color::srgba(1.0, 0.85, 0.2, 0.4));
         }
     }
-    if let Some(anchor) = handle_anchor(&v3.items, &v3.selected) {
+    if let Some(anchor) = handle_anchor(&v3.items, &v3.selected).filter(|_| !points_mode) {
         let a = anchor + Vec3::Y * dz;
         gizmos.arrow(a, a + Vec3::Y * v3.orbit.dist * 0.12, Color::srgb(0.3, 0.5, 1.0));
     }

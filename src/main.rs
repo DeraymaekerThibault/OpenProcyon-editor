@@ -122,6 +122,7 @@ fn apply_flags(
         maps.show_map(p, id);
     }
     maps.select_at_start(&f.select);
+    maps.t12.on = f.points; // T12
     if let Some(id) = &f.ship {
         ships.selected = Some(id.clone());
         if *tab == Tab::Ship3d

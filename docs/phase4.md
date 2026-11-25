@@ -191,6 +191,14 @@ skirmish map as a diff: pick `red_rover` (or any of the 14) in the map list, edi
 (P1; adds and deletes after requirement 1), play it with the mod over the import. The gate map (below) is built from an empty folder in this package.
 Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, so a play-test is not of this mod alone; done: the pin has it, and the play-test passes it by default).
 
+**T12 as built: scenery points** (`src/map/docks.rs`, `tests/map_docks.rs`). In the Maps tab's 3D view, "Scenery points" on and one scenery object selected shows
+that type's dock points (cyan, with the yaw arrow) and crew places (magenta) from the project's `data/docks.json` and `data/crew_nodes.json`. For a type of the
+mod's own: "Add dock point" / "Add crew place" then a click on the model, drag the selected point's axis arrows (grid snap), set a dock's yaw, delete; each is one undo
+step of the file it changes. A retail type (a retail map uses it, or the import's docks, crew or collision file has it) is shown read-only. Collision is not edited:
+the panel says so (requirement 6). The engine's rules are quoted with file and line in the module's header; the first dock point's height places the object
+(`scenery_transform`), so moving that point's z moves the object. PROVISIONAL: "own" is a scan of the import (requirement 3); a new dock has no `tender` and no `layer`; a
+new crew place has no `rot`. `--points` starts the view in this mode (screenshots).
+
 **T11 as built: the flags the editor passes** (`src/launch.rs`, `tests/launch_args.rs`; the engine owns their meaning).
 
 | Launch | Arguments |

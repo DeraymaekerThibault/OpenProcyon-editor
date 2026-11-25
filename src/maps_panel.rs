@@ -63,6 +63,8 @@ pub struct State {
     // end T10
     // T9: the 3D view's state; the Bevy systems of `view3d::plugin` read and answer through it
     pub v3: crate::map::view3d::View3d,
+    // T12: the scenery-points mode of the 3D view (dock points and crew places of a mod's own scenery)
+    pub t12: crate::map::docks::State,
 }
 
 impl Default for State {
@@ -94,7 +96,8 @@ impl Default for State {
             // T10
             skirmish: skirmish::Panel::default(),
             // end T10
-            v3: Default::default(), // T9
+            v3: Default::default(),  // T9
+            t12: Default::default(), // T12
         }
     }
 }
@@ -222,6 +225,7 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     // T8 begin: drawn before the map is read for this frame, because the toolbar takes the project mutably
     crate::map_edit::t8_tools::toolbar(ui, &mut st.t8, project, &id);
     // T8 end
+    crate::map::docks::ensure_open(project, st.t12.on); // T12: opens the data files the scenery-points mode reads, before the map is borrowed
     let Some(map) = maps::merged_view(project, &id) else {
         st.map = None;
         return save;
@@ -290,10 +294,15 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         ui.selectable_value(&mut st.v3.on, true, "3D view");
         if st.v3.on {
             crate::map::view3d::toolbar(ui, &mut st.v3);
+            crate::map::docks::toolbar(ui, &mut st.t12); // T12
         }
     });
     if st.v3.on {
         st.v3.feed(&project.root, &id, map, &scene, &st.sel, (st.view.snap.grid, st.view.world_half));
+        // T12 begin: the scenery-points panel above the canvas; what it asks the project to write is done below with the other changes
+        crate::map::docks::feed(&mut st.t12, project, map, &scene, &mut st.v3);
+        crate::map::docks::show(ui, &mut st.t12);
+        // T12 end
         let response = crate::map::view3d::canvas(ui, &mut st.v3);
         if let Some(c) = st.v3.click.take() {
             st.sel.retain_below(scene.markers.len());
@@ -307,6 +316,16 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
             let changes = crate::map::view3d::height_changes(map, &scene, &st.sel, dz);
             let label = change_label("Set height of", &scene, &st.sel);
             done(st, maps::change_entries(project, &id, &label, &changes), "");
+        } else if st.t12.action.is_some() {
+            // T12: a point dragged, added or deleted: one undo step of data/docks.json or data/crew_nodes.json
+            match crate::map::docks::apply(project, &mut st.t12) {
+                Some(Ok(label)) => {
+                    st.error = None;
+                    st.info = label;
+                }
+                Some(Err(e)) => st.error = Some(e),
+                None => {}
+            }
         } else if let Some(a) = t7_action.take() {
             if let Some(r) = players::apply(&mut st.players, project, &id, a) {
                 st.select_next = vec![r];
