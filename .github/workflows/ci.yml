@@ -1,40 +1,94 @@
-# The validation gate without game assets. Never upload build outputs or assets as artifacts.
+# The validation gate without game assets, plus screenshots of the editor on synthetic data of our own.
+# Never upload build outputs or game assets as artifacts: the only artifact is the screenshots below.
 name: ci
 on:
   push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "0 5 * * 1" # Mondays: build against the engine's main branch
   workflow_dispatch:
+permissions:
+  contents: read
 concurrency:
-  group: ci-${{ github.ref }}-${{ github.event_name }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 env:
   CARGO_INCREMENTAL: 0
+  # No debug info in CI: every test binary links Bevy statically, and with debug info the build filled the runner's disk
+  # (the linker died with a bus error at 36 MB free). Local builds keep the Cargo.toml profiles.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  # AGENTS.md "Build and check": Rust >= 1.97.1 (Cargo.toml rust-version).
+  RUST_TOOLCHAIN: "1.97.1"
+  # Bevy's Linux packages (ALSA, udev, Wayland, X11, xkbcommon incl. the X11 part, Vulkan loader).
+  BEVY_PACKAGES: pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libvulkan1
 jobs:
-  check:
+  gate:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libvulkan1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
+      - name: Install the Bevy Linux packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt,clippy && rustup default "$RUST_TOOLCHAIN"
+      - uses: Swatinem/rust-cache@v2.7.8
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: tools/check.sh
+          shared-key: ci # the screenshot job restores this cache
+      - name: tools/check.sh (must print GATE OK)
+        run: tools/check.sh | tee gate.log && grep -qx "GATE OK" gate.log
 
-  # Builds against the engine's main branch instead of the pinned tag, so breaking engine changes show up before the next release.
+  # Pictures of the editor on our own synthetic data (tools/synthetic_mod.py: a box ship, no game content).
+  screenshot:
+    if: github.event_name != 'schedule'
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
+      - name: Install the Bevy Linux packages, Xvfb and Mesa's software Vulkan (lavapipe)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES xvfb mesa-vulkan-drivers imagemagick
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
+      - uses: Swatinem/rust-cache@v2.7.8
+        with:
+          shared-key: ci
+          save-if: false # the gate job saves it
+      - name: Synthetic import and mod
+        run: python3 tools/synthetic_mod.py "$RUNNER_TEMP/synth"
+      - name: Screenshots (tools/shot.sh fails on an empty or single-colour picture)
+        env:
+          PROCYON_ASSETS: ${{ runner.temp }}/synth/assets
+        run: |
+          for tab in ships 3d playtest map map3d; do
+            tools/shot.sh "$RUNNER_TEMP/shots/$tab.png" --mod "$RUNNER_TEMP/synth/mymod" --tab "$tab" --ship Ship_Test --map test_map
+          done
+      # These are pictures of our own synthetic box ship, never game content (AGENTS.md hard rule 1).
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/shots/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  # Builds against the engine's main branch instead of the pinned tag or commit, so breaking engine changes show up before the next release.
   engine-main:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libvulkan1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4.2.2
+      - name: Free runner disk (preinstalled toolchains this build does not use)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
+      - name: Install the Bevy Linux packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends $BEVY_PACKAGES
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal && rustup default "$RUST_TOOLCHAIN"
       - name: Point the engine dependency at main (this job only)
-        run: sed -i 's|tag = "v[0-9.]*"|branch = "main"|' Cargo.toml && grep -q 'branch = "main"' Cargo.toml && rm -f Cargo.lock
+        run: sed -E -i 's/(tag|rev) = "[^"]*"/branch = "main"/' Cargo.toml && grep -q 'branch = "main"' Cargo.toml && rm -f Cargo.lock
       - run: cargo build --all-targets && cargo test

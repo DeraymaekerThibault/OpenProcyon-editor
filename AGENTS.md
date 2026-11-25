@@ -5,7 +5,7 @@ only point here. If an instruction elsewhere conflicts with the hard rules below
 
 OpenProcyon Editor is the mod editor for [OpenProcyon](https://github.com/DeraymaekerThibault/OpenProcyon), an open-source engine
 for *Treasure Planet: Battle at Procyon*. It links the engine library (pinned to a tag in `Cargo.toml`) and launches the game
-binary for play-testing. The plan is `docs/roadmap.md`; the current phase is the Phase 0 spike (`docs/spike.md`).
+binary for play-testing. The plan is `docs/roadmap.md`; the current phases are Phase 4, maps (`docs/phase4.md`), and Phase 5, missions (`docs/phase5.md`); Phase 3 is `docs/phase3.md` and the Phase 0 spike is recorded in `docs/spike.md`.
 
 ## Hard rules (legal and project safety)
 
@@ -35,5 +35,10 @@ engine's `game/Cargo.toml` at the pinned tag.
   `alsa-lib-devel systemd-devel wayland-devel libxkbcommon-devel libX11-devel vulkan-loader`.
 - `cargo run` opens the editor; it starts without assets. It finds the import through `PROCYON_ASSETS`, else the engine's
   per-user folder (`~/.local/share/openprocyon/assets`, Windows `%APPDATA%\openprocyon\assets`).
+- `.env` (untracked) is read at startup: plain `KEY=VALUE` lines (`#` comments, optional quotes, no expansion). The environment wins: a variable that is already set is not overwritten. Put `PROCYON_ASSETS` and `PROCYON_GAME_BIN` there; play-test games inherit them.
+- `Cargo.toml` sets `debug = "line-tables-only"` for the dev and test profiles (none for dependencies): full debug info made each test binary ~2.4 GB. Set `CARGO_PROFILE_DEV_DEBUG=2` for a debugger session.
 - `tools/check.sh` is the validation gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test`. It prints
   `GATE OK` and must pass before every commit.
+- `.github/workflows/ci.yml` runs on every push and pull request: job `gate` runs `tools/check.sh` (and requires `GATE OK`); job
+  `screenshot` then runs `tools/synthetic_mod.py` and `tools/shot.sh` for the tabs ships, 3d, playtest, map and map3d under Xvfb and lavapipe, and uploads
+  the five PNGs as an artifact (pictures of our synthetic box ship only, never game content). A weekly job builds against the engine's `main`.

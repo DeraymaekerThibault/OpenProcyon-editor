@@ -1,0 +1,17 @@
+{
+  "id": "gate_ambush",
+  "name": "Gate Ambush",
+  "description": "Two raiders wait at the gate.",
+  "sky": "skybox_22_Layer1",
+  "world_half": 1200.0,
+  "objects": [
+    {
+      "type": "Island04",
+      "id": 1,
+      "pos": [-300.0, 300.0, 0.0],
+      "rot": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+      "player": -1,
+      "scene": "Island04"
+    }
+  ]
+}

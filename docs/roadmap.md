@@ -1,24 +1,87 @@
 # OpenProcyon modding tools roadmap
 
-Nov 24, 2026 · @Thibault
+Nov 24, 2026 · @Thibault (status section updated Nov 25, 2026)
 
 ## Summary
 
-We build one editor for ships, weapons, maps and missions as a Rust app on Bevy 0.20 with egui, in its own repository. It stands on an authoring contract that lives in the engine: schemas, a mod checker, a public authoring API and versioned formats. The contract comes first because the editor, the game and hand-written mods all need it. Each part of the editor is built only once its file format is frozen, so nothing is redone.
+We build one editor for ships, weapons, maps and missions as a Rust app on Bevy 0.20 with egui, in its own repository. It stands on an authoring contract that lives in the engine: schemas, a mod checker, a public authoring API and versioned formats. The contract comes first because the editor, the game and hand-written mods all need it. Until the v0.3 release formats may change freely and the editor follows them; the formats are frozen just before that release.
 
 Modding with files keeps working the whole time; every engine phase also makes hand-written mods easier (autocomplete in VS Code, clear errors).
 
 | Phase | Where | Delivers | Starts when |
 | --- | --- | --- | --- |
 | 0. Decisions and spike | both | the stack proven on one small slice, the open decisions settled | now |
-| 1. Authoring contract | engine | typed loading, schemas, `--check-mod`, authoring API, format versions | Phase 0 says go |
+| 1. Authoring contract | engine | typed loading, schemas, `--check-mod`, authoring API, format versions, crew points and texture overrides without retail models | Phase 0 says go |
 | 2. Freeze ships and weapons | engine | format 1 for `ship.json`, `guns.json`, `bullets.json`, `menu/strings.json`, `mod.json` | Phase 1 done |
 | 3. Editor shell, ships and weapons | editor | open a mod, edit with forms, 3D ship preview, play-test, export | Phase 2 done |
-| 4. Map editor | editor | place scenery, starts, nebulae, mines | `map.json` frozen with v0.3 |
-| 5. Mission editor | editor | ships, groups, paths, volumes, tasks, rules, speech, templates | `mission.json` frozen with v0.3 |
+| 4. Map editor | editor | place scenery, starts, nebulae, mines | now; `map.json` format 1 gates the v0.3 release |
+| 5. Mission editor | editor | ships, groups, paths, volumes, tasks, rules, speech, templates | now; `mission.json` and `media.json` format 1 gate the v0.3 release |
 | 6. Live tools | engine | hot reload, effect and look tuning in the running game | after Phase 3 |
 
 About the repository rules: AGENTS.md forbids another fidelity overview, so this plan lives outside the repository. Its work items go into the existing "Modding platform" milestone and #156.
+
+## Where things stand (Nov 25, 2026)
+
+A snapshot for whoever picks the work up next. The plan above stays the plan; this says how far it got.
+
+**Done in code.**
+- **Engine:** the authoring work the editor needs is merged on main.
+  - OpenProcyon #626, #631: keyed merge, scenery transform, formations.
+  - #638: `--rule-report`, `sound_duration`.
+  - #639: templates.
+  - #640: retail `ship_names`, wake keys, the error for teams without a race.
+  - #641: inherited retail warnings.
+  - #646: `visit_fields`, tasks merged by `Name`, the mission, script and media schemas.
+  - #647: duplicate ids, nebula agreement.
+  - #649: ship kills credited, `--lobby` exits, the full `--help`.
+  - #651: the developer console in every singleplayer battle.
+  - #654: duplicate-id false positives, lobby error text, console `win` and `lose` in any battle.
+- **Editor:** Phase 4 (T0 to T12) and Phase 5 (all tasks, including T11 templates) are on `claude/editor-integration` (PR #1 into `main`), pinned to engine main `f1bf09f`.
+- **Copies removed:** the editor's own copies of engine rules are gone for the keyed merge, the damage layer, crew kinds, the scenery transform, formations, the field walk (`visit_fields`) and the Ogg reader. A test checks every mission and media key the editor writes against the engine schemas.
+
+**Verified with real assets.** Three local test rounds (Nov 25) on a maintainer machine with an import:
+- every step of the Phase 4 gate, a skirmish map built only in the editor that lists in the lobby and plays to a win;
+- the gate-ambush mission won after the ship-kill fix;
+- the template expansions;
+- the play-test report;
+- keyed task edits on a retail mission;
+- dock points on a mod's own scenery, in game;
+- the round-1 and round-2 UI fixes.
+
+The round-3 editor fixes are covered only by headless tests so far:
+- the save path keeps keyed lists keyed, with no index pointers and no rewritten values;
+- the Maps tab scrolls;
+- play-test error lines show the real last line;
+- the backdrop state resets per map;
+- one undo step per typed number;
+- several layout fixes.
+
+**Not yet confirmed in a real run.**
+- A `--lobby` win through the Game Summary and the editor showing the run ended. Console `win` makes this testable since #654.
+- A 3D height drag seen in game.
+- A retail mission's ship-kill rule; only mission03 has one, and it is awkward to test.
+- Sinking your own ship: no kill is credited, covered by a unit test only.
+- The Phase 5 gate rebuilt by hand from an empty folder, all the way through.
+- The player "Raiders" missing from the template pickers on the tester's gate mission. The engine accepts players listed only in `mission.json`, so the tester's file probably has another shape. Not reproduced.
+
+**Next work.**
+1. **Round 4 of the local test:** re-check the round-3 fixes above with real assets, plus the open items.
+2. **One rules run for missions and skirmish:** the rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
+   - **Plan:** load both formats into one rules-run resource, with the campaign-only parts (opening, briefing, campaign id) as an optional extra. Behaviour must not change; prove it with `tools/tracediff.py`, same seed and `--fixed-step`, on one mission and one skirmish map (needs assets).
+3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path, then the editor's panels.
+4. **Rules the editor still restates,** to move into the engine:
+   - the inverse rotation maths (`map_edit/orient.rs`, `ship_view/coords.rs`);
+   - the skirmish lobby checklist (`map/skirmish.rs`);
+   - the map catalogue scan;
+   - the bundled-mods lookup (`launch.rs`);
+   - the mission key constants in `mission/doc.rs` (guarded by a schema test).
+5. **Engine checks:** `--check-mod` unknown-key warnings for mission, script and media files, using the new schemas. A nebula vertex outside `world_half` gives no warning yet.
+6. **Phase 6** (live tools) has not started.
+
+**Working notes.**
+- **CI minutes:** the editor repository is private, and its free GitHub Actions minutes ran out on Nov 25, so CI jobs get no runner. Until they come back, the local `tools/check.sh` (GATE OK) is the check. The engine repository's CI runs as usual.
+- **Local tests:** a local agent on the maintainer's machine runs them with real assets, from a numbered step list, and reports PASS, FAIL, PARTIAL or SKIPPED per step. It has no access to this cloud environment; the maintainer pastes its report back.
+- **Shared folders:** run one agent at a time per checkout and build folder. Builds in parallel in the same `target/` overwrite each other.
 
 ## Where we start from
 
@@ -55,11 +118,13 @@ These decisions are made once and hold for every phase.
 2. **The editor is a separate repository.** It is a Rust crate on Bevy 0.20 and bevy\_egui that links a tagged `openprocyon` release. Its dependencies, release cadence and contributors stay out of the engine's check gate.
 3. **Schema first.** Forms, dropdowns and checks are generated from the engine's schemas and the rule schema, never hand-built per file.
 4. **The editor writes diffs, not copies.** A change to a retail ship is saved as `extends` plus the changed keys, in the importer's JSON layout (`tools/jsonio.py`). Mods stay small, legal and readable by hand.
-5. **Freeze before building.** Each editor phase starts only once its formats are at a frozen, versioned format. Later changes come with a migration in the engine that upgrades old files.
+5. **Freeze before release, not before building.** We are pre-release: formats may change freely and the editor follows them. Editor phases 4 and 5 start now and do not wait on the freeze. The v0.3 freeze (format 1 for `map.json`, `mission.json`, `media.json` and `script.json`) happens just before the v0.3 release and gates that release, not the start of work. Changes after the freeze come with a migration in the engine that upgrades old files.
 6. **Play-testing uses the real game.** The editor launches the game binary with `--mod`, `--map`, `--ship` and `--fire-rule`. It never simulates a battle itself.
 7. **Modelling stays in Blender; placement moves into the editor.** Meshes, UVs and materials are made in Blender. Gun mounts, engines, wakes, flags, boarding, dock and tow points are placed in the editor on the 3D model and saved to `ship.json` and the data files, never written back into the GLB. This also works on retail hulls that a mod only extends.
-8. **Same legal rules as the engine.** No game content in either repository; the editor reads only the player's own import. Its export warns when a mod contains a file identical to the player's import (reusing `tools/compare_assets.py`). The hygiene test is copied into the editor repository.
+8. **Same legal rules as the engine.** No game content in either repository; the editor reads only the player's own import. Its export does not check a mod for retail content: by maintainer decision, users are responsible for what they share. The hygiene test is copied into the editor repository.
 9. **Licence.** The editor links GPL-3.0 code, so it is GPL-3.0. Mods made with it are the author's own; the tool claims nothing over them.
+
+**Code-first authoring is a first-class path.** Large mods are often generated by scripts (a real expansion writes its whole mission, 433 conditions and actions, from Python). An editor edit to a generated file is lost on the next run, so the contract serves scripts as fully as the editor: schemas, `--check-mod --json`, `--dump-rule-schema` and data-file templates. The editor never assumes it owns a file.
 
 ## Architecture
 
@@ -86,11 +151,11 @@ The accented box is the contract: everything the editor knows about valid data c
 
 ## Phases
 
-Seven phases, each closed by a gate that can be checked; the map and mission phases wait on the v0.3 format freeze, not on a date. Sizes are rough person-weeks for one developer working full time.
+Seven phases, each closed by a gate that can be checked; the map and mission phases start now and are not held by the v0.3 format freeze, which gates the release. Sizes are rough person-weeks for one developer working full time.
 
 &#91;embedded content: roadmap · 7 phases, 2 repositories, 1 outside gate\]
 
-Phase 6 runs in the engine beside the map and mission phases; only the v0.3 freeze sets when Phases 4 and 5 can start.
+Phase 6 runs in the engine beside the map and mission phases; Phases 4 and 5 start now; the v0.3 freeze only gates their release.
 
 ### Phase 0. Decisions and spike (about 2 weeks, both repositories)
 
@@ -98,14 +163,18 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 - Throwaway spike: a crate that links `openprocyon` and bevy\_egui. It loads one imported map, moves one island with the mouse, edits one rule through a form built from `--dump-rule-schema`, saves `map.json` and `mission.json` in the importer's layout, shows `--check-mission` findings inline and launches the game on the result.
 - **Gate:** every spike step works on Bevy 0.20. If one fights us, compare against a web stack before Phase 3, not after.
 
-### Phase 1. Authoring contract (about 6 to 8 weeks, engine)
+### Phase 1. Authoring contract (about 5 to 7 weeks, engine)
 
-- \#537 typed loading with file, mod and field in every error; #538 one source for the merge list and the rule vocabulary.
-- `schemars` on the typed documents and `--dump-schemas`; schemas attached to each release so VS Code can use them through `$schema`.
-- `--check-mod [--json]`, the `authoring` module, #136 overlay into a caller-chosen folder.
-- `mod.json` `format`, `game_version` and `requires` read; a format number per file type and the migration hook.
-- `ship.json` keys for tow and homing points.
-- **Gate:** every bundled mod and every retail map passes `--check-mod` with no errors; a misspelt key in a test mod gives a warning that names file and field; the schemas validate every imported file.
+- Already on main (November 2026): most of #537, namely typed guns, bullets, effects, look profile and HUD files, mission checks at load and the per-mod load report. What remains of #537 and #538 (one source for the merge list and the rule vocabulary) finishes here.
+- `authoring` module, first slice done (engine branch `claude/exciting-lamport-zxdqra`): side-effect-free asset lookup, engine version, overlay into a caller-chosen folder (part of #136), rule schema and mission check in-process. Next, from the spike's findings (`docs/spike.md`): defined names per kind, findings with a structured location and the suggested fix as data, the rule envelope in the schema, the engine's JSON writer, `--version` on the game binary.
+- `schemars` on the typed documents and `--dump-schemas` (approved); schemas attached to each release so VS Code can use them through `$schema`.
+- `--check-mod [--json]`, usable by scripts as well as the editor. It checks every name in `ship.json` against the model's nodes (section layers, `adjacent`, damage variants, hardpoints) and warns when a node is matched only by a substring of its name.
+- `mod.json` `format`, `game_version` and `requires` read (approved); a format number per file type and the migration hook.
+- `ship.json` keys for tow and homing points (approved).
+- Crew nodes from JSON (approved): walk lanes, posts, work places and climbs can be listed beside the model, so a mod adds deck crews to a retail hull without shipping that hull's model.
+- Retail texture override by name (approved): a PNG in the mod replaces a retail texture wherever it is used, so a texture pack or a backport ships no retail model.
+- Mission-check warnings for behaviour that authors only found by experiment (a teleport sends a whole group to the first point of a set, a nebula needs its map entry, its environment entry and a volume to agree, whales start hidden), each added once confirmed against the original's behaviour.
+- **Gate:** every bundled mod and every retail map passes `--check-mod` with no errors; a misspelt key in a test mod gives a warning that names file and field; the schemas validate every imported file; a test mod adds crew lanes and a new texture to a retail hull with no GLB in the mod.
 
 ### Phase 2. Freeze ships and weapons (about 1 week, engine)
 
@@ -122,13 +191,15 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 - Open any retail ship or gun from the import as the starting point; edits are saved as `extends` plus the changed keys (backlog B5).
 - Every field shows whether it is retail or an engine extension, and what the engine fills in when it is left empty, including the
   HUD and weapon-bar pictures it draws from the model (backlog B1, B2).
-- Play-test button (`--mod --map --ship`), screenshot preview (`--shot`), export to zip with the retail-content warning.
+- Play-test button (`--mod --map --ship`), screenshot preview (`--shot`), export to zip (it does not check content, by maintainer decision).
 - **Gate:** a community tester builds a new ship and a new gun from scratch without opening a JSON file, and the result passes `--check-mod`.
 
 ### Phase 4. Map editor (about 8 to 12 weeks, editor)
 
-- Waits on `map.json` format 1 (v0.3).
-- Scenery catalogue from the import; place, rotate and snap; top-down and 3D views; starts and teams; nebulae; mines; `world_half`; sky and lighting pickers; backdrop picture; collision and dock data for a mod's own scenery.
+- Starts now; does not wait on the freeze. `map.json` format 1 (v0.3) must be frozen before the v0.3 release.
+- Scenery catalogue from the import; place, rotate and snap; top-down and 3D views; starts and teams; nebulae; mines; `world_half`; sky and lighting pickers; backdrop picture.
+- Linked pieces kept in agreement: a nebula's map entry, environment entry and volume are made together; the sun of a baked sky and the map's `lighting` share one setting.
+- A mod's own scenery: collision and dock data derived from its model (an engine tool the editor calls), instead of separate scripts per scene.
 - Skirmish maps are the first target, not an afterthought: most community maps are skirmish maps. In scope: `"skirmish": true`,
   players, teams and start positions, `victory` rules, the optional `script.json` (engine extension) with its `media.json`, and a
   play-test through `--lobby` (backlog B4).
@@ -137,10 +208,12 @@ Phase 6 runs in the engine beside the map and mission phases; only the v0.3 free
 
 ### Phase 5. Mission editor (about 12 to 16 weeks, editor)
 
-- Waits on `mission.json` and `media.json` format 1 (v0.3).
+- Starts now; does not wait on the freeze. `mission.json` and `media.json` format 1 (v0.3) must be frozen before the v0.3 release.
 - Ships and groups, paths, volumes, points, tasks, rules, speech and messages, campaign order; detailed in the next section.
+- Play-test report: which rules fired and which never did, so losing and optional branches are not shipped untested.
 - Open a retail mission from the import and save the changes as a diff, as for ships and maps (backlog B5).
 - **Gate:** the worked example `gate-ambush` is rebuilt in the editor from an empty folder and its file matches the hand-written one in meaning.
+- Plan, engine requirements and the task list: `docs/phase5.md`.
 
 ### Phase 6. Live tools (about 4 to 6 weeks, engine)
 
@@ -155,7 +228,7 @@ Missions are already low-code data: a list of rules, each "when all these condit
 - **Typed fields.** Each field takes the widget its kind asks for: group, volume, path, player, task and point fields are dropdowns of what the mission defines; booleans are toggles (the strings `"TRUE"`/`"FALSE"` are written for the author); numbers carry their range; enums list their values.
 - **Inline checks.** `--check-mission` findings appear on the field they concern while typing, with the suggested spelling one click away.
 - **The map beside the rules.** Selecting a rule highlights the groups, volumes, paths and points it uses on the map; clicking a volume on the map lists the rules that read it.
-- **Templates.** "Reach a point", "ambush on arrival", "escort to a gate", "sink a group to win" each expand into ordinary rules and tasks that stay editable. A template is a data file, so the community can add more.
+- **Templates.** "Reach a point", "ambush on arrival", "escort to a gate", "sink a group to win" each expand into ordinary rules and tasks that stay editable. Three blocks come first, because a real 37-rule mission is mostly made of them: a dialogue block (say a line, wait until the speech is done, say the next), a cutscene block (NIS start, teleports and waits, NIS end) and a failsafe block (any-of and not conditions that switch rules on and off). A template is a data file, so the community and authoring scripts can use the same ones.
 - **Speech and messages.** `media.json` entries edited beside the rules that play them; the line's duration is read from the OGG.
 - **Play-test from here.** Launch the mission from any rule with `--fire-rule`, and from any point with `--start-at`.
 - **Campaigns.** Mission order in `mod.json` `missions`, shown as a list the author drags.
@@ -238,7 +311,7 @@ computes; the editor only shows it at the right place.
 **B4. Skirmish maps.** Most community content is skirmish maps, so Phase 4 targets them first (see Phase 4).
 
 - The engine gaps today: there is no `map.schema.json` or `script.schema.json` yet (`--dump-schemas` writes ship, guns, bullets,
-  crew nodes and mod). The map editor needs both before it starts; add them to the v0.3 freeze list.
+  crew nodes and mod). The map editor needs both before the v0.3 release; add them to the v0.3 freeze list.
 - Multiplayer: retail plays skirmish maps in multiplayer, but the engine does not have multiplayer yet (its menu shows the retail
   button, not implemented). The editor play-tests skirmish maps against computer players through `--lobby`. A map script is
   deterministic (no wall clock, no randomness), which is what multiplayer will need; keep the editor from adding anything that
@@ -273,7 +346,7 @@ mods over the import in a separate overlay folder; switching the mod off gives p
 
 ## Risks and mitigations
 
-The biggest risk is building on formats that still move; the freeze gates and engine-side migrations are the answer to it.
+The biggest risk is building on formats that still move; the answer is that the editor follows formats while they move, the v0.3 freeze gates the release, and engine-side migrations cover later changes.
 
 | Risk | Mitigation |
 | --- | --- |
@@ -282,17 +355,18 @@ The biggest risk is building on formats that still move; the freeze gates and en
 | Bevy releases every few months with breaking changes | upgrade the editor right after each engine upgrade; bevy\_egui followed 0.20 within two days |
 | bevy\_egui needs Bevy features the engine leaves off | checked in the Phase 0 spike, before any real work |
 | Editor and game running together share one overlay folder | #136 lands in Phase 1 |
-| A modder ships retail content by accident | the export compares the mod with the player's own import and warns |
+| A modder ships retail content by accident | accepted: by maintainer decision users are responsible for what they share; the export does not check or warn |
 | Building the engine library is slow for editor contributors | release builds of the editor for testers; contributors share the engine's build cache tips (`tools/worktree.sh`) |
 | The work is mostly one maintainer | the contract phases also make hand-written modding better, so value lands even if the editor phases slow down |
 
 ## Open decisions for the maintainer
 
-These need an answer in Phase 0; the first two are dependency approvals that AGENTS.md reserves for the maintainer.
+Checked items are settled (November 2026); the rest remain open.
 
-- [ ] Approve `schemars` as an engine dependency (recommended over a hand-written generator, which would be one more table to keep in sync).
-- [ ] Approve the new `ship.json` keys for tow and homing points, and the `mod.json` keys `format`, `game_version`, `requires` (data format changes).
-- [ ] Name and owner of the editor repository; GPL-3.0 licence confirmed.
+- [x] Approve `schemars` as an engine dependency.
+- [x] Approve the new `ship.json` keys for tow and homing points, and the `mod.json` keys `format`, `game_version`, `requires`.
+- [x] Approve crew nodes from JSON and retail texture override by name.
+- [ ] Editor repository: `openprocyon-editor` exists, GPL-3.0; owner of its reviews still to name.
 - [ ] Which formats v0.3 freezes: `map.json`, `mission.json`, `media.json`, `script.json`.
 - [ ] Whether the editor ships inside the game download or as its own download.
 - [x] A mod may ship a diff over a retail mission or skirmish map, exactly as over a retail ship (backlog B5).

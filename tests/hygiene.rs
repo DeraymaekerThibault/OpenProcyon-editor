@@ -39,3 +39,39 @@ fn patterns() {
         assert!(problem(ok).is_none(), "{ok}");
     }
 }
+
+/// The write guard (docs/roadmap.md B6): outside tests, only `src/project/guard.rs` touches the file system for writing.
+#[test]
+fn every_write_goes_through_the_guard() {
+    const CALLS: &[&str] = &[
+        "fs::write(",
+        "fs::copy(",
+        "fs::remove_file(",
+        "fs::remove_dir(",
+        "fs::remove_dir_all(",
+        "fs::create_dir(",
+        "fs::create_dir_all(",
+        "fs::rename(",
+        "File::create(",
+        "OpenOptions",
+    ];
+    fn walk(dir: &Path, bad: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, bad);
+            } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("project/guard.rs") {
+                let text = std::fs::read_to_string(&p).unwrap();
+                let code = text.split("#[cfg(test)]").next().unwrap_or("");
+                for (n, line) in code.lines().enumerate() {
+                    if CALLS.iter().any(|c| line.contains(c)) && !line.trim_start().starts_with("//") {
+                        bad.push(format!("{}:{}: {}", p.display(), n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+    }
+    let mut bad = vec![];
+    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut bad);
+    assert!(bad.is_empty(), "write through project::guard (it refuses the game import):\n{}", bad.join("\n"));
+}

@@ -1,0 +1,10 @@
+{
+  "id": "gates",
+  "name": "Gates",
+  "version": "0.1",
+  "category": "Missions",
+  "description": "A one-mission test.",
+  "missions": [
+    "gate_ambush"
+  ]
+}

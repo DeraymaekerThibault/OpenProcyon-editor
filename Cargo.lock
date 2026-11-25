@@ -836,7 +836,6 @@ dependencies = [
  "bevy_log",
  "bevy_math",
  "bevy_mesh",
- "bevy_picking",
  "bevy_platform",
  "bevy_reflect",
  "bevy_render",
@@ -1318,31 +1317,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "wgpu-types",
-]
-
-[[package]]
-name = "bevy_picking"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e55df29bec491abfaec21f4ce211ff90169be815e7cb4ccbd76872d6e2babf"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_camera",
- "bevy_derive",
- "bevy_ecs",
- "bevy_input",
- "bevy_math",
- "bevy_mesh",
- "bevy_platform",
- "bevy_reflect",
- "bevy_shape",
- "bevy_time",
- "bevy_transform",
- "bevy_window",
- "crossbeam-channel",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1956,7 +1930,7 @@ dependencies = [
  "arrayvec",
  "cc",
  "cfg-if",
- "constant_time_eq",
+ "constant_time_eq 0.4.2",
  "cpufeatures",
 ]
 
@@ -2204,6 +2178,15 @@ name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9"
+dependencies = [
+ "rustversion",
+]
 
 [[package]]
 name = "constgebra"
@@ -2477,6 +2460,12 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "ecolor"
@@ -4232,10 +4221,11 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openprocyon"
 version = "0.2.0"
-source = "git+https://github.com/DeraymaekerThibault/OpenProcyon?tag=v0.2.0#9e1692695b18386763c7db163f7f3aa64014966c"
+source = "git+https://github.com/DeraymaekerThibault/OpenProcyon?rev=f1bf09f#f1bf09f27f1c513dfe01d313949c5db6f167b446"
 dependencies = [
  "ab_glyph",
  "bevy",
+ "schemars",
  "serde",
  "serde_json",
  "wayland-sys",
@@ -4249,6 +4239,8 @@ dependencies = [
  "bevy_egui",
  "openprocyon",
  "rfd",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]
@@ -4673,6 +4665,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-cast"
+version = "1.0.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3"
+dependencies = [
+ "ref-cast-impl",
+]
+
+[[package]]
+name = "ref-cast-impl"
+version = "1.0.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4821,6 +4833,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "schemars"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4887,6 +4924,17 @@ name = "serde_derive"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5445,6 +5493,12 @@ name = "twox-hash"
 version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
+
+[[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
 
 [[package]]
 name = "typeid"
@@ -6577,6 +6631,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeroize"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "zerotrie"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6612,6 +6686,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "9.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d8dbe089cf6b0448b78f5fc50139ab5aaa40d08ac07cdc1baf2c13add35fcce"
+dependencies = [
+ "constant_time_eq 0.6.1",
+ "crc32fast",
+ "flate2",
+ "getrandom",
+ "indexmap",
+ "libc",
+ "memchr",
+ "nix",
+ "typed-path",
+ "windows-sys 0.61.2",
+ "zeroize",
+ "zopfli",
+]
+
+[[package]]
 name = "zlib-rs"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6622,6 +6716,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zopfli"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf7fc5d30c28483d93805c4a5e12b05bbb52407fa67c5f8bd552374cd01fb11"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"
