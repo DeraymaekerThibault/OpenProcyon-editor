@@ -10,12 +10,12 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
   follows them; Phase 4 starts now. The freeze comes just before the v0.3 release and gates the release. Today `map.json`
   has no `format` key, no schema and no typed loader. The open decision "which formats v0.3 freezes" (`map.json`, `mission.json`,
   `media.json`, `script.json`) is still unticked in the roadmap.
-- **Prototype, not merged.** A typed `map.json` with `map.schema.json` and `script.schema.json` is being prototyped on engine branch
-  `claude/map-schema`. When this plan was written the branch had no commit
-  beyond engine main (`42083e4`) and a clean worktree, so there was nothing to read. Treat its shape as unknown (PROVISIONAL).
+- **Now merged (at `f91542f`).** A typed `map.json` with `map.schema.json` (the plan was written when the prototype branch
+  `claude/map-schema` had no commit; `script.schema.json` is still not in `authoring::schemas()`).
 - **Engine checked.** Everything below about the engine was read from engine main `42083e4` (and its uncommitted `authoring` work).
   The editor now pins engine main `f91542f` (OpenProcyon#626), which holds the keyed merge, `map.schema.json` and `--only-mod`.
-  The editor-side restatements marked "until the pin moves" can now switch to the engine.
+  The restatements marked "until the pin moves" were switched to the engine (keyed merge read from the overlay, `--only-mod`, map
+  schema hover texts); what stays is listed with each item.
 - **Rule while the format moves:** build everything, but keep key names behind one small module per file (`map_doc`), so a format
   change touches one place. Anything that names a key (`players[].start`, `nebulae[].cloud`) is re-checked at the freeze.
 
@@ -206,8 +206,8 @@ Checked against engine main `42083e4` (see Status). "Missing" means not found in
    replace; `set` needs an existing pointer and cannot add or remove (docs/modding.md "Extending a file"). Needed: `objects`, `ships`,
    `mines` by `id`; `players` by `name`; `nebulae` by `name`; `teams` by `name_id`; a marker to delete an entry; a rule for objects
    with no `id` (decoration). Blocks P1 add/delete on retail maps, P5. Largest item.
-2. **Schemas for `map.json`, `script.json`, `media.json`.** Missing at main: `authoring::schemas()` returns ship, guns, bullets,
-   crew_nodes, mod. Prototype on branch `claude/map-schema`, not merged, no commits seen (PROVISIONAL). Also a `format` key per file.
+2. **Schemas for `map.json`, `script.json`, `media.json`.** At `f91542f` `authoring::schemas()` returns ship, guns, bullets,
+   crew_nodes, mod and map; `script.json` and `media.json` are still missing. Also a `format` key per file.
 3. **Scenery listing in `authoring`:** the `type` and `scene` pairs, with which have collision and docks. Missing: `defined_names`
    lists mission names only; the pairing exists only inside maps.
 4. **Map checks for a map without rules.** `check_mod::missions` skips a map folder with no `mission.json` or `script.json`
