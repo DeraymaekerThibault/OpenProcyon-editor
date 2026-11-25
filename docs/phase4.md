@@ -14,6 +14,7 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
   `claude/map-schema` had no commit; `script.schema.json` is still not in `authoring::schemas()`).
 - **Engine checked.** Everything below about the engine was read from engine main `42083e4` (and its uncommitted `authoring` work).
   The editor now pins engine main `925d8e4` (OpenProcyon#631, on top of #626 `f91542f`), which holds the keyed merge, `map.schema.json` and `--only-mod`.
+  Since then the pin moved to `e2f096c` (OpenProcyon#646, #647, #649): `script.schema.json` and `media.schema.json` exist, and requirements 5 and 10 below are done.
   The restatements marked "until the pin moves" were switched to the engine (keyed merge read from the overlay, `--only-mod`, map
   schema hover texts); what stays is listed with each item.
 - **Rule while the format moves:** build everything, but keep key names behind one small module per file (`map_doc`), so a format
@@ -243,14 +244,14 @@ Checked against engine main `42083e4` (see Status). "Missing" means not found in
    replace; `set` needs an existing pointer and cannot add or remove (docs/modding.md "Extending a file"). Needed: `objects`, `ships`,
    `mines` by `id`; `players` by `name`; `nebulae` by `name`; `teams` by `name_id`; a marker to delete an entry; a rule for objects
    with no `id` (decoration). Blocks P1 add/delete on retail maps, P5. Largest item.
-2. **Schemas for `map.json`, `script.json`, `media.json`.** At `f91542f` `authoring::schemas()` returns ship, guns, bullets,
+2. **Schemas for `map.json`, `script.json`, `media.json`: DONE at `e2f096c`** (`script.schema.json`, `media.schema.json` and `mission.schema.json` are in `authoring::schemas()`). The request, at `f91542f` `authoring::schemas()` returns ship, guns, bullets,
    crew_nodes, mod and map; `script.json` and `media.json` are still missing. Also a `format` key per file.
 3. **Scenery listing in `authoring`:** the `type` and `scene` pairs, with which have collision and docks. Missing: `defined_names`
    lists mission names only; the pairing exists only inside maps.
 4. **Map checks for a map without rules.** `check_mod::missions` skips a map folder with no `mission.json` or `script.json`
    (`rules_file` is `None`), so `world_half` and missing-scenery warnings do not run for a map that is only `map.json`. Also missing:
    skirmish slot checks (start inside `world_half`, `forward` not zero, team ids in `teams`, duplicate ids across objects and ships).
-5. **Nebula agreement check:** the map entry, the mission environment record and the volume have the same name. Missing: the
+5. **Nebula agreement check: DONE at `e2f096c`** (OpenProcyon#647: `--check-mod` warns when a nebula's map entry, mission record and volume disagree; the editor shows it as any finding, `tests/mod_check.rs`). The request: the map entry, the mission environment record and the volume have the same name. Missing: the
    roadmap lists it under Phase 1; `rules/check.rs` has only name collection for nebulae.
 6. **Collision derived from a model.** Missing: no function builds a `data/collision.json` entry from a GLB; `tools/export_collision.py`
    is the importer for retail files. Docks the same (`tools/export_docks.py`). Needed as a library call plus a CLI.
@@ -259,7 +260,7 @@ Checked against engine main `42083e4` (see Status). "Missing" means not found in
    `authoring`; `scenario/lighting.rs` reads `lighting` only and marks the roof-as-sun choice PROVISIONAL.
 9. **Rotation helpers:** heading to the 3x3 matrix and back, as `game_rotation` does. `scenario::spawn::game_rotation` exists, public,
    not in `authoring`, and has no inverse. Needed for rotation handles that read back.
-10. **Unique ids:** a check (and a helper) that `id`s are unique across `objects`, `ships`, animals and mines. Missing (the doc
+10. **Unique ids: DONE at `e2f096c`** (OpenProcyon#647: a warning for an id used twice across `objects`, `ships`, animals and `mines`, in the mod's own files; `tests/mod_check.rs`). The request: a check (and a helper) that `id`s are unique across `objects`, `ships`, animals and mines. Missing (the doc
     says "keep them unique"; no check found).
 11. **`--lobby` is present**, with `--mod`: `map`, `points`, `limit`, `slots`, `seed`, `fleet`. Not verified: `--lobby` together with
     `--mod` for a mod's skirmish map (no game here). The editor needs `--check-mod` clean first.

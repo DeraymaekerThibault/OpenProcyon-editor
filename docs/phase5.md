@@ -9,8 +9,8 @@ the plan in `docs/roadmap.md` (Phase 5, "The low-code mission editor", backlog B
 - **Freeze: `mission.json` and `media.json` format 1 (v0.3).** Policy (roadmap principle 5, maintainer decision): pre-release,
   formats may change freely and the editor follows them; Phase 5 starts now, the freeze gates the release only. Today neither file
   has a `format` key, a schema or a typed loader: the game reads both as untyped JSON (`campaign.rs:400-404`, `load_as::<Value>`), and
-  `authoring::schemas()` has no mission or media schema (`authoring.rs:110-114`).
-- **Engine checked.** Everything below about the engine was read at the editor's pin `f91542f` (since moved to `925d8e4`, OpenProcyon#631, then to `e344068`, on top of OpenProcyon#638, #639 and #640, then to `ee99ace`, with OpenProcyon#641; the findings below stand unless a later note says otherwise) (engine source read only). The engine
+  `authoring::schemas()` had no mission or media schema (`authoring.rs:110-114`); at `e2f096c` it has `mission.schema.json`, `script.schema.json` and `media.schema.json` and the typed `data::{MissionDoc, MediaDoc}` (descriptive: the game still reads the files as untyped values).
+- **Engine checked.** Everything below about the engine was read at the editor's pin `f91542f` (since moved to `925d8e4`, OpenProcyon#631, then to `e344068`, on top of OpenProcyon#638, #639 and #640, then to `ee99ace`, with OpenProcyon#641, then to `e2f096c`, with OpenProcyon#646 (authoring API for missions), #647 and #649; the findings below stand unless a later note says otherwise) (engine source read only). The engine
   checkout also has an unmerged branch `claude/authoring-expose` (`ae444cb`, one commit over the pin) that makes the keyed-list merge
   (`keyed_lists`, `extend`, `merge_keyed`), `scenery_transform`, `game_rotation` and `formation_slots` public in `authoring`; it is not
   in the pin, so nothing here relies on it.
@@ -52,12 +52,11 @@ New: `src/mission/project.rs`: the missions of the mod and of the import (a map 
 mission": the folder, a `mission.json` with `players`, `ships` and `rules` (the game stops without `ships` and `rules`,
 `docs/missions.md` section 3), a `media.json` with the three empty tables (the game stops without the file, `campaign.rs:400-404`), a
 minimal `map.json` (or an existing map picked), and the id appended to `mod.json` `missions`: one `do_group` step.
-Keyed lists on an extending mission come from `project::keyed` unchanged (`ships` by `id`, `rules` by `name`, `points` by `Name`).
-Lists the engine does NOT key, refused on an extending mission with the project's message until requirement 2: `tasks`,
-`environment.nebulae`, `environment.animals`, `map_text`, `players`, `alliances`; a change to them restates the whole list (the
+Keyed lists on an extending mission come from `project::keyed` unchanged, which asks the engine (`authoring::keyed_lists`: `ships` by `id`, `rules` by `name`, `points` and, since `e2f096c`, `tasks` by `Name`; `doc::list_key` reads the same table).
+Lists the engine does NOT key, refused on an extending mission with the project's message until requirement 2: `environment.nebulae`, `environment.animals`, `map_text`, `players`, `alliances`; a change to them restates the whole list (the
 form says so). Object keys (`groups`, `volumes`, `paths`, `point_sets`, `speech`) can be added and changed, not removed (Phase 3
 requirement: no removal form for `extends` files).
-Engine needs: 1 (schemas, later), 2 (keyed tasks and removal), 3 (public keyed rule).
+Engine needs: 1 (schemas: done), 2 (keyed tasks: done; removal and the rest), 3 (public keyed rule: done).
 
 ### P2. Players, alliances, the human's start, ships and groups (M)
 
@@ -87,9 +86,9 @@ New: `src/mission/plan.rs` (pure: what the plan shows of a mission, what a drag 
 - `map_text` `[{name, text, pos, visible}]`: labels.
 **Rename follows references.** Renaming a volume, path, point, point set, task, group, player or rule rewrites every rule field of
 that kind that names it (kinds from the rule schema, nested conditions and task lists included) in the same `do_group` step. Which
-fields hold which kind is the rule schema's data (`kind` per field), so this restates nothing; the walk itself mirrors the engine's
-private `visit_fields` (`check.rs:263-264`; PROVISIONAL until requirement 6). A `Group,Unit` spec renames its part.
-Engine needs: 6 (references as data), 5 (nebula agreement, for volumes that are a nebula's polygon).
+fields hold which kind is the rule schema's data (`kind` per field), so this restates nothing; the walk itself is the engine's
+`authoring::visit_fields` (requirement 6, done at `e2f096c`; `mission/refs.rs` holds only the kind classification `NAME_KINDS`, held to the schema by a test). A `Group,Unit` spec renames its part (`authoring::split_group`).
+Engine needs: 6 (references as data: done), 5 (nebula agreement, for volumes that are a nebula's polygon).
 
 ### P4. Tasks and how the mission ends (S)
 
@@ -227,15 +226,14 @@ See "Phase 5 gate" below.
 
 ## Engine requirements for Phase 5
 
-Checked against the pin `f91542f`. "Missing" means not found in the source or the docs.
+Checked against the pin `f91542f`; the notes "DONE at `e2f096c`" were added when the pin moved. "Missing" means not found in the source or the docs.
 
-1. **Schemas and typed documents for `mission.json` and `media.json`** (and `script.json`, still open from Phase 4 requirement 2),
+1. **Schemas and typed documents for `mission.json` and `media.json`: DONE at `e2f096c`** (OpenProcyon#646: `mission.schema.json`, `script.schema.json`, `media.schema.json`, typed `data::{MissionDoc, MediaDoc}` with a `format` key; unknown keys stay allowed and no key is `required`). `tests/mission_keys.rs` holds every key `mission/doc.rs` writes to those schemas. Still named in `doc.rs`, by design: the key constants themselves (a Rust `const` per key, so the forms read them; the test fails when one is not a property of the schema), and `Type`, which belongs to the rule schema. The request, kept for the record: (and `script.json`, still open from Phase 4 requirement 2),
    with a `format` key each. Missing: `authoring::schemas()` lists ship, guns, bullets, crew nodes, mod, map (`authoring.rs:110-114`);
    the game reads both files as `Value` (`campaign.rs:400-404`). Why: hover texts and unknown-key warnings for the top-level and
    ship/task/point keys (the forms otherwise spell them in `mission/doc.rs` with no check), the v0.3 freeze, and a typed load the
    gate can compare (below).
-2. **Keyed lists and removal in mission files.** `keyed_defaults` keys `ships`, `rules`, `points` (`modding.rs:211`). Also wanted:
-   `tasks` by `Name`, `environment.nebulae` by `New Nebula Name`, `environment.animals` by `group`, `map_text` by `name`; removal of an
+2. **Keyed lists and removal in mission files.** `tasks` by `Name`: DONE at `e2f096c` (`keyed_defaults` now keys `ships`, `rules`, `points`, `tasks`; the editor's diff and add/delete path takes it from `authoring::keyed_lists`, `tests/mission_retail.rs`; repeated task names in a retail mission make keyed task edits refused, like repeated rule names). Still wanted: `environment.nebulae` by `New Nebula Name`, `environment.animals` by `group`, `map_text` by `name`; removal of an
    object key in an `extends` file (`volumes`, `groups`, `paths`, `point_sets`, `speech`); a position for an added keyed entry
    (`"$after": "<name>"` or similar), because rules run in order and new ones are appended (`modding.rs:192-195`). Why: P1, P4, P11
    on retail missions without restating retail lists.
@@ -252,7 +250,7 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
    `OP Wait`), tasks with their end state, the outcome. Missing: the data is in `Script` (`fired`, `ran`, `state.rs:40-43`;
    `never_fired`, `state.rs:423`) but leaves the game only as an autoplay log line (`smoke/mod.rs:294`). Why: P10's report for a human
    play-test, without parsing logs.
-6. **Name references as data:** `authoring::references(mission, kind, name)` (or `visit_fields` public, `check.rs:263-264`, it is
+6. **Name references as data: DONE at `e2f096c`** (OpenProcyon#646: `authoring::{visit_fields, visit_fields_mut, FieldVisit, split_group}`; the editor's copy of the walk is deleted, `mission/refs.rs` uses `visit_fields`; `visit_fields_mut` is not used because renames are pointer edits for the undo stack). The request: `authoring::references(mission, kind, name)` (or `visit_fields` public, it was
    `pub(crate)`) returning a JSON pointer per field that names `name` as `kind`, `Group,Unit` split. Why: rename that follows
    references (P3), the map beside the rules (P6), "play from this rule" prerequisites (P10), without the editor re-walking rules.
 7. **Ship class list in `authoring`** (the roadmap's "listing ids"): the classes a `ships[].type` may name, from the overlay.
@@ -269,8 +267,8 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
 10. **Templates as data** (decided: the engine; done: OpenProcyon#639, in the pin `e344068`): a template format and the first files in the engine (with an expander in `authoring`),
     if templates are to be shared with authoring scripts (roadmap: "a template is a data file, so the community and authoring
     scripts can use the same ones"). Why: P8; otherwise they live in the editor.
-11. **Unique ids across ships, objects, animals and mines** (Phase 4 requirement 10, still missing). Why: groups address ids (P2).
-12. **Nebula agreement check** (Phase 4 requirement 5, still missing). Why: a volume that is a nebula's polygon (P3).
+11. **Unique ids across ships, objects, animals and mines: DONE at `e2f096c`** (OpenProcyon#647; Phase 4 requirement 10, still missing). Why: groups address ids (P2).
+12. **Nebula agreement check: DONE at `e2f096c`** (OpenProcyon#647; Phase 4 requirement 5, still missing). Why: a volume that is a nebula's polygon (P3).
 
 Present and used as is: `check_mission` (with `nested`), `accepted_names`, `defined_names`, `known_names`, `rule_schema` (with
 `rule.keys` and `task.keys`), `merge_rule`, `extends_parent`, `overlay_into`, `read_merged`, `to_json_string`, `check_mod`;
