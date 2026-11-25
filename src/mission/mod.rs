@@ -8,6 +8,7 @@
 //! A later task adds its own `pub mod` line below (project, rules, media, refs, catalogue, groups, templates).
 
 pub mod campaign;
+pub mod catalogue;
 pub mod doc;
 pub mod plan;
 pub mod report;
