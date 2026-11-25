@@ -343,6 +343,10 @@ impl<'a> St<'a> {
     }
 
     fn entry_controls(&mut self, ui: &mut egui::Ui, parent: &str, key: &str) {
+        // an entry the document below already has (or retail, being its own base) can be neither renamed nor removed here
+        if self.origin(&model::child_pointer(parent, key)) == Some(Origin::Inherited) {
+            return;
+        }
         let doc = self.doc;
         let rkey = self.id.with(("rename", parent, key));
         let mut name: String = ui.data(|d| d.get_temp(rkey)).unwrap_or_else(|| key.to_string());
@@ -404,7 +408,9 @@ impl<'a> St<'a> {
                             }
                         }
                         Slot::Entry(parent, key) => {
-                            ui.menu_button("...", |ui| self.entry_controls(ui, parent, key));
+                            if origin != Some(Origin::Inherited) {
+                                ui.menu_button("...", |ui| self.entry_controls(ui, parent, key));
+                            }
                         }
                         Slot::Item(parent, i) => {
                             self.item_controls(ui, parent, i);
@@ -782,6 +788,17 @@ mod tests {
         let entry = &guns["Test Gun"];
         let t = painted(&schema("guns.schema.json"), entry, &FormCtx { base: Some(entry), findings: &[], focus: None, hidden: &[] });
         assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("unknown key")), "{t:?}");
+    }
+
+    #[test]
+    fn an_inherited_map_entry_has_no_rename_or_remove_but_the_mods_own_entry_has() {
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let doc = json!({"points": 10, "guns": {"M1": {"gun": "G1", "arc_deg": 90}}});
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: Some("/guns/M1"), hidden: &[] });
+        assert!(!t.iter().any(|x| x.contains("Rename") || x == "Remove"), "{t:?}");
+        let base = json!({"points": 10, "guns": {}});
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&base), findings: &[], focus: Some("/guns/M1"), hidden: &[] });
+        assert!(has(&t, "Rename") && has(&t, "Remove"), "{t:?}");
     }
 
     #[test]
