@@ -150,6 +150,7 @@ Phase 6 runs in the engine beside the map and mission phases; Phases 4 and 5 sta
 - Play-test report: which rules fired and which never did, so losing and optional branches are not shipped untested.
 - Open a retail mission from the import and save the changes as a diff, as for ships and maps (backlog B5).
 - **Gate:** the worked example `gate-ambush` is rebuilt in the editor from an empty folder and its file matches the hand-written one in meaning.
+- Plan, engine requirements and the task list: `docs/phase5.md`.
 
 ### Phase 6. Live tools (about 4 to 6 weeks, engine)
 
