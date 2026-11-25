@@ -2,11 +2,12 @@
 //! (`id`, `name`) can be changed entry by entry instead of being written whole, so a mod that adds one island to a retail map does
 //! not restate the map's `objects`.
 //!
-//! PROVISIONAL: this module restates the engine's keyed merge until the engine pin moves to a version that has it (engine branch
-//! `claude/engine-integration`, `game/src/modding.rs`: `keyed_defaults`, `merge_keyed`, `extend`; docs/modding.md "Changing one
-//! entry of a list"). The pinned engine replaces a list whole, so a file written with this rule is merged right by the editor
-//! ([`extend`], also used to open such a file) but not yet by the pinned engine's overlay. The rule, and the `$remove` spelling, are
-//! the engine's to define: when the pin moves, [`KeyedRule::lists`] is the one place to replace (ask the engine for it).
+//! The engine merges such a file itself (`authoring::overlay_into`, docs/modding.md "Changing one entry of a list"), and the editor
+//! reads that merged result ([`engine_extend`] runs it on a scratch folder for tests). What the engine keeps private is the rule
+//! itself (`modding::keyed_defaults`, `merge_keyed`, `extend`), and the editor needs it to WRITE a file (which lists may add and
+//! delete one entry, [`diff_list`]), so this module keeps a copy. PROVISIONAL: the copy, until the engine exposes the rule; the
+//! conformance test `tests/keyed_engine.rs` fails when the engine's behaviour and the copy differ. The `$remove` spelling is
+//! the engine's PROVISIONAL one too.
 //!
 //! The rule: in an extends file, which lists merge by key by default; a file may override with `"merge": {"/objects": "id"}` (merge
 //! by that field) or `"merge": {"/objects": false}` (replace whole). A diff entry whose key matches a parent entry is deep-merged
@@ -17,7 +18,7 @@ use serde_json::{Map, Value};
 
 use crate::edit::pointer;
 
-/// Which lists of a file merge by key by default. PROVISIONAL, see the module doc.
+/// Which lists of a file merge by key by default. PROVISIONAL: a copy of the engine's private `keyed_defaults`, see the module doc.
 pub trait KeyedRule {
     /// `(pointer, key field)` of the lists that merge by key in the extends file `rel` (a path inside the assets). The default is the
     /// engine's rule: in `maps/<id>/map.json` `objects`, `ships` and `mines` by `id`, `nebulae` and `players` by `name`; `mission.json`
@@ -187,7 +188,7 @@ fn entry_diff(base: &Map<String, Value>, edited: &Map<String, Value>, path: &mut
     out
 }
 
-// ---- the merge itself (a model of the engine's, used to open a file and to test the diff) ----
+// ---- the merge itself (a model of the engine's, used to test the diff; `tests/keyed_engine.rs` holds it to the engine) ----
 
 /// Objects merge key by key, anything else is replaced (the engine's `merge`).
 pub fn deep_merge(base: &mut Value, over: &Value) {
@@ -304,6 +305,39 @@ pub fn extend(rule: &dyn KeyedRule, rel: &str, mut parent: Value, diff: &Value) 
         }
     }
     Ok((parent, warnings))
+}
+
+/// What the ENGINE makes of the extends file `diff` (named `rel`) laid over `parent`: the same inputs as [`extend`], but run through
+/// the engine's own `authoring::overlay_into` and `read_merged` on a scratch folder, so the result is the engine's by construction.
+/// `Err`: the engine skipped the file (its reason, as the engine words it). Warnings are the engine's. This is the oracle that tests
+/// compare [`extend`] and the diff against; the editor's merged view reads the engine's overlay directly and does not need it.
+pub fn engine_extend(rel: &str, parent: &Value, diff: &Value) -> Result<(Value, Vec<String>), String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let dir = crate::overlay::scratch(&format!("engine-extend-{}", N.fetch_add(1, Ordering::Relaxed)));
+    let _ = crate::project::guard::remove_dir_all(&dir, None);
+    let (assets, m, out) = (dir.join("assets"), dir.join("mod"), dir.join("out"));
+    let write = |root: &std::path::Path, rel: &str, v: &Value| -> Result<(), String> {
+        let path = root.join(rel);
+        crate::project::guard::create_dir_all(path.parent().expect("a file path"), None)?;
+        crate::project::guard::write(&path, v.to_string(), None)
+    };
+    let result = (|| {
+        let parent_id = diff.get("extends").and_then(Value::as_str).ok_or("the file has no 'extends'")?;
+        let parent_rel = openprocyon::authoring::extends_parent(rel, parent_id).ok_or("no parent file for that path")?;
+        write(&assets, &parent_rel, parent)?;
+        write(&m, rel, diff)?;
+        let report = openprocyon::authoring::overlay_into(&assets, std::slice::from_ref(&m), &out)?;
+        let entry = report.mods.first().ok_or("the engine reports no mod")?;
+        if let Some((_, why)) = entry.skipped.first() {
+            return Err(why.clone());
+        }
+        let warnings = entry.warnings.iter().map(|(_, w)| w.clone()).collect();
+        let merged = openprocyon::authoring::read_merged(&out, rel).map_err(|e| e.to_string())?;
+        Ok((merged, warnings))
+    })();
+    let _ = crate::project::guard::remove_dir_all(&dir, None);
+    result
 }
 
 /// The pointer of the list `key` at the top of a file (`objects` is `/objects`).

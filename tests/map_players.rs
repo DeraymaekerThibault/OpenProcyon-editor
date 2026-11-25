@@ -80,8 +80,7 @@ fn an_added_player_is_a_keyed_entry_and_a_delete_is_a_remove_and_both_undo() {
     let list = file["players"].as_array().unwrap();
     assert!(list.iter().any(|e| e["name"] == "C"), "{file}");
     assert!(list.iter().any(|e| e["name"] == "A" && e["$remove"] == true), "{file}");
-    // The pinned engine's overlay replaces lists whole (keyed merge is PROVISIONAL, src/project/keyed.rs): the editor's own reading of
-    // the saved file, opened afresh, is the reference.
+    // The engine's overlay merges the keyed lists: the saved file, opened afresh, is the reference.
     assert_eq!(doc::player_names(merged_view(&p, "red").unwrap()), vec!["B", "C"]);
     assert_eq!(doc::player_names(&reopened(&m)), vec!["B", "C"], "{file}");
     p.undo();

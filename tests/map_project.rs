@@ -234,8 +234,8 @@ fn add_and_delete_on_a_retail_map_are_keyed_entries_not_the_whole_list() {
         "nothing of the retail map is restated"
     );
     assert_eq!(read(&m, "maps/blue/map.json"), json!({"extends": "blue", "objects": [{"id": 1, "type": "Y", "pos": [1.0, 1.0, 1.0]}]}));
-    // the merge rule applied to the file gives the document (the pinned engine's overlay cannot merge by key yet)
-    let (merged, warnings) = keyed::extend(&keyed::EngineRule, "maps/red/map.json", red(), &file).unwrap();
+    // the merge rule applied to the file gives the document (the engine's own merge)
+    let (merged, warnings) = keyed::engine_extend("maps/red/map.json", &red(), &file).unwrap();
     assert!(warnings.is_empty());
     assert_eq!(merged, view);
     // a fresh project opens the file as the same map, and has nothing to save
@@ -260,7 +260,7 @@ fn add_and_delete_on_a_retail_map_are_keyed_entries_not_the_whole_list() {
     add_entry(&mut p, "red", Array::Objects, id1.clone()).unwrap();
     p.save();
     let file = read(&m, "maps/red/map.json");
-    let (merged, _) = keyed::extend(&keyed::EngineRule, "maps/red/map.json", red(), &file).unwrap();
+    let (merged, _) = keyed::engine_extend("maps/red/map.json", &red(), &file).unwrap();
     assert_eq!(&merged, merged_view(&p, "red").unwrap());
     assert!(file.get("merge").is_none(), "no list is written whole: {file}");
     let _ = id3;

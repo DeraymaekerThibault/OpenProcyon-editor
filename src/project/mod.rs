@@ -445,15 +445,9 @@ impl Project {
         } else if own.is_null() {
             base.clone()
         } else {
-            // PROVISIONAL: when the engine skipped the file (bad `extends`), show the file itself; the problems list says why.
-            // PROVISIONAL: a file whose lists merge by key is merged here ([`keyed::extend`]); the pinned engine replaces a list whole.
-            let keyed = (kind == DocKind::Extends && parent.is_some() && !keyed::effective(&keyed::EngineRule, rel, own.get("merge")).is_empty())
-                .then(|| keyed::extend(&keyed::EngineRule, rel, base.clone(), &own).ok())
-                .flatten();
-            match keyed {
-                Some((merged, _)) => merged,
-                None => read_merged(&self.root, rel).unwrap_or_else(|_| own.clone()),
-            }
+            // The engine's overlay merges the file (keyed lists included); when it skipped it (bad `extends`), show the file itself and
+            // let the problems list say why.
+            read_merged(&self.root, rel).unwrap_or_else(|_| own.clone())
         };
         Ok(Doc { rel: rel.to_string(), kind, base, own, clean: edited.clone(), edited, dirty: false, disk, parent, conflict: None })
     }

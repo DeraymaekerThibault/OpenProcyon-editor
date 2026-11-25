@@ -108,8 +108,8 @@ pub(super) fn is_whole(project: &Project, rel: &str) -> bool {
 }
 
 /// Whether `which` of the map document can take an added or a deleted entry. A map that is whole in the mod (a new map) always can
-/// (`Ok(None)`). A map that extends another can when the list merges by key ([`keyed`], PROVISIONAL: it restates the engine's keyed
-/// merge until the pin moves) and the list below has a unique key on every entry; the key field is returned, an added entry must
+/// (`Ok(None)`). A map that extends another can when the list merges by key ([`keyed`], PROVISIONAL: a copy of the engine's private
+/// `keyed_defaults`, held to the engine by `tests/keyed_engine.rs`) and the list below has a unique key on every entry; the key field is returned, an added entry must
 /// carry it. Otherwise the error says why: adding or deleting one entry would write the parent's whole list into the mod.
 pub(super) fn check_add_delete(project: &Project, rel: &str, which: Array) -> Result<Option<String>, String> {
     if is_whole(project, rel) {

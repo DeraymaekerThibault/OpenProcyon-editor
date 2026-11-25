@@ -519,7 +519,7 @@ mod tests {
         assert_eq!(d.file, Some(json!({})), "an empty file: the project deletes it");
     }
 
-    // ---- keyed lists (T4): checked against the rule's own merge, [`keyed::extend`] ----
+    // ---- keyed lists (T4): checked against the engine's own merge ([`keyed::engine_extend`]) ----
 
     const MAP: &str = "maps/red/map.json";
 
@@ -535,7 +535,7 @@ mod tests {
     fn keyed_file(base: &Value, edited: &Value, own: &Value) -> Diff {
         let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, base, edited, own, Some("red"));
         let file = d.file.clone().expect("a file");
-        let (merged, _) = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &file).unwrap();
+        let (merged, _) = keyed::engine_extend(MAP, base, &file).unwrap();
         assert_eq!(merged, *edited, "the rule merges {file} back to the edited document");
         d
     }
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(file["objects"], edited["objects"]);
         assert_eq!(d.warnings.len(), 1);
         assert!(d.warnings[0].starts_with("/objects is written whole"), "{:?}", d.warnings);
-        let (merged, _) = keyed::extend(&keyed::EngineRule, MAP, base, &file).unwrap();
+        let (merged, _) = keyed::engine_extend(MAP, &base, &file).unwrap();
         assert_eq!(merged, edited);
         // a moved decoration in the same list is a set pointer, not a restated list
         let mut edited = red();
@@ -627,7 +627,7 @@ mod tests {
         let base = red();
         // own file: one hand-written entry change and a merge override of another list
         let own = json!({"extends": "red", "merge": {"/teams": "name_id"}, "objects": [{"id": 2, "type": "Bee"}], "teams": [{"name_id": "T2"}]});
-        let (mut edited, _) = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &own).unwrap();
+        let (mut edited, _) = keyed::engine_extend(MAP, &base, &own).unwrap();
         assert_eq!(edited["teams"], json!([{"name_id": "T1"}, {"name_id": "T2"}]));
         edited["objects"][2]["pos"] = json!([0, 0, 1]);
         edited["objects"].as_array_mut().unwrap().remove(0);
@@ -638,7 +638,7 @@ mod tests {
         assert_eq!(file["objects"], json!([{"id": 1, "$remove": true}, {"id": 2, "type": "Bee"}, {"id": 3, "pos": [0, 0, 1]}]));
         // a list the file replaces whole by choice is written whole as before
         let own = json!({"extends": "red", "merge": {"/objects": false}, "objects": [{"id": 1}]});
-        let mut edited = keyed::extend(&keyed::EngineRule, MAP, base.clone(), &own).unwrap().0;
+        let mut edited = keyed::engine_extend(MAP, &base, &own).unwrap().0;
         edited["objects"][0]["pos"] = json!([1, 1, 1]);
         let d = compute_with(&keyed::EngineRule, MAP, DocKind::Extends, &base, &edited, &own, Some("red"));
         assert_eq!(d.file.unwrap(), json!({"extends": "red", "merge": {"/objects": false}, "objects": [{"id": 1, "pos": [1, 1, 1]}]}));
