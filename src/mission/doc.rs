@@ -796,11 +796,6 @@ pub fn point_set_dot_pos(dot: &Value) -> Option<[f64; 3]> {
     xyz(dot.get(POINT_SET_POS)?)
 }
 
-/// The pointer of key `key` of the `player_start` object.
-pub fn player_start_pointer(key: &str) -> String {
-    pointer(&[KEY_PLAYER_START, key])
-}
-
 /// A ship's nine-number `rot`, when it has one.
 pub fn ship_rot(ship: &Value) -> Option<[f64; 9]> {
     crate::map_edit::orient::read_rot(ship.get(SHIP_ROT)?)

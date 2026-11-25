@@ -176,7 +176,7 @@ impl Item {
     pub fn pointer(&self) -> String {
         match self {
             Item::Ship(i) => mdoc::ship_pointer(*i, Some(mdoc::SHIP_POS)),
-            Item::Start => mdoc::player_start_pointer(mdoc::START_POS),
+            Item::Start => mdoc::player_start_pointer(Some(mdoc::START_POS)),
             Item::Point(i) => mdoc::point_pointer(*i, Some(mdoc::POINT_POSITION)),
             Item::Text(i) => mdoc::map_text_pointer(*i, Some(mdoc::MAP_TEXT_POS)),
             Item::Vertex(GeoTable::PointSets, name, i) => mdoc::point_set_dot_pos_pointer(name, *i),
@@ -258,7 +258,7 @@ pub fn turn_edits(mission: &Value, items: &[Item], yaw: f64) -> Vec<Edit> {
             Item::Start => {
                 if let Some(f) = mdoc::player_start_forward(mission) {
                     let to = [f[0] * c + f[1] * s, -f[0] * s + f[1] * c, f[2]];
-                    out.push(Edit::set(mdoc::player_start_pointer(mdoc::START_FORWARD), Value::Array(to.iter().map(|x| num(*x)).collect())));
+                    out.push(Edit::set(mdoc::player_start_pointer(Some(mdoc::START_FORWARD)), Value::Array(to.iter().map(|x| num(*x)).collect())));
                 }
             }
             _ => {}
