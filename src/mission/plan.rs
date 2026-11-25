@@ -460,7 +460,7 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
     ui.horizontal_wrapped(|ui| {
         ui.label(match selected {
             [] => "Nothing selected".to_string(),
-            [one] => describe(one),
+            [one] => describe(merged_mission(project, id), one),
             many => format!("{} selected", many.len()),
         });
         ui.separator();
@@ -496,11 +496,27 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
     });
 }
 
-fn describe(item: &Item) -> String {
+/// What the selection row says about one selected thing: a ship by its name (else its type) and id, a point by its name; the list
+/// position (`#N`) only when the mission has nothing better to call it.
+fn describe(mission: Option<&Value>, item: &Item) -> String {
     match item {
-        Item::Ship(i) => format!("Ship #{i}"),
+        Item::Ship(i) => match mission.map(mdoc::ships).and_then(|l| l.get(*i)) {
+            Some(s) => {
+                let who = mdoc::ship_name(s).filter(|n| !n.is_empty()).or_else(|| mdoc::ship_type(s));
+                match (who, mdoc::ship_id(s)) {
+                    (Some(w), Some(id)) => format!("Ship '{w}' (id {id})"),
+                    (Some(w), None) => format!("Ship '{w}'"),
+                    (None, Some(id)) => format!("Ship id {id}"),
+                    (None, None) => format!("Ship #{i}"),
+                }
+            }
+            None => format!("Ship #{i}"),
+        },
         Item::Start => "The human's start".into(),
-        Item::Point(i) => format!("Point #{i}"),
+        Item::Point(i) => match mission.and_then(|m| m.get("points")).and_then(|p| p.get(*i)).and_then(|p| p.get("Name")).and_then(Value::as_str) {
+            Some(n) if !n.is_empty() => format!("Point '{n}'"),
+            _ => format!("Point #{i}"),
+        },
         Item::Text(i) => format!("Map text #{i}"),
         Item::Vertex(t, n, i) => format!(
             "{} '{n}', point {i}",
@@ -736,6 +752,17 @@ mod tests {
             "paths": {"P": [[0, 0, 1], [2, 2, 2]]},
             "environment": {"point_sets": {"S": [{"pos": [3, 3, 0]}, {"pos": [4, 4, 0]}]}}
         })
+    }
+
+    #[test]
+    fn a_selected_thing_is_called_by_its_name_not_its_position() {
+        let mission = m();
+        assert_eq!(describe(Some(&mission), &Item::Ship(0)), "Ship 'One' (id 1)");
+        assert_eq!(describe(Some(&mission), &Item::Ship(1)), "Ship id 2");
+        assert_eq!(describe(Some(&mission), &Item::Ship(9)), "Ship #9");
+        assert_eq!(describe(None, &Item::Ship(0)), "Ship #0");
+        assert_eq!(describe(Some(&mission), &Item::Point(0)), "Point 'Gate'");
+        assert_eq!(describe(Some(&mission), &Item::Start), "The human's start");
     }
 
     #[test]

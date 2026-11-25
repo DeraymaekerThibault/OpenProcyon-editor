@@ -205,10 +205,23 @@ pub fn loaded_from_project(project: &Project, id: &str) -> Result<Loaded, String
     Ok(Loaded { ship_id: id.to_string(), ship: doc.edited.clone(), glb, facts })
 }
 
+/// Where the project's ship `id` comes from, for the 3D tab's status line: a ship only the mod has ("from the mod project"), a retail
+/// ship the mod leaves alone ("retail"), or a retail ship the mod's file changes.
+pub fn ship_origin(project: &Project, id: &str) -> &'static str {
+    let rel = ship_rel(id);
+    let retail = project.doc(&rel).is_some_and(|d| !d.base.is_null());
+    let mod_file = project.dir.join(&rel).is_file() || project.doc(&rel).is_some_and(|d| d.dirty);
+    match (retail, mod_file) {
+        (false, _) => "from the mod project",
+        (true, false) => "retail (from the import)",
+        (true, true) => "retail, changed by the mod",
+    }
+}
+
 /// Fills the 3D view with the project's ship `id` and links the two.
 pub fn show_in_3d(project: &Project, id: &str, view: &mut ShipView, link: &mut Linked) -> Result<(), String> {
     let loaded = loaded_from_project(project, id)?;
-    view.status = format!("{id} from the mod project ({})", crate::ship_view::layers_summary(loaded.facts.as_ref()));
+    view.status = format!("{id} {} ({})", ship_origin(project, id), crate::ship_view::layers_summary(loaded.facts.as_ref()));
     view.set(loaded);
     *link = Linked { rel: Some(ship_rel(id)), generation: view.generation };
     Ok(())
@@ -736,6 +749,7 @@ mod tests {
         p.open_doc(&rel).unwrap();
         let (mut view, mut link) = (ShipView::default(), Linked::default());
         show_in_3d(&p, "Ship_A", &mut view, &mut link).unwrap();
+        assert!(view.status.starts_with("Ship_A retail (from the import)"), "a ship loaded from the import says so: {}", view.status);
         assert_eq!((view.ship_id.as_str(), view.facts.is_some(), view.ship["points"].as_i64()), ("Ship_A", true, Some(10)));
         // The view moves the homing point: one pending step.
         view.commit(vec![Edit::set("/homing", json!([1, 2, 3]))]).unwrap();
