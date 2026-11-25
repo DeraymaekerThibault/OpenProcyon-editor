@@ -538,6 +538,14 @@ fn vertex_noun(t: GeoTable) -> &'static str {
     }
 }
 
+/// Adds a vertex (a dot, for a point set) after the last one of `name` as one undo step (for a volume that is halfway to the first).
+pub fn append_vertex(project: &mut Project, id: &str, kind: Kind, name: &str) -> Result<(), String> {
+    let t = kind.table().ok_or_else(|| format!("a {} has no vertices", kind.noun()))?;
+    let (_, m) = mission_value(project, id)?;
+    let last = mdoc::geo_items(&m, t, name).len().checked_sub(1).ok_or_else(|| format!("the {} '{name}' has no vertex to add after", kind.noun()))?;
+    insert_vertex(project, id, kind, name, last)
+}
+
 /// Adds a vertex (a dot, for a point set) after vertex `after` of `name` as one undo step.
 pub fn insert_vertex(project: &mut Project, id: &str, kind: Kind, name: &str, after: usize) -> Result<(), String> {
     let t = kind.table().ok_or_else(|| format!("a {} has no vertices", kind.noun()))?;

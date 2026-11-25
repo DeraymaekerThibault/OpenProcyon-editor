@@ -319,3 +319,24 @@ fn a_retail_mission_changed_by_the_mod_is_saved_as_a_diff() {
     assert_eq!(&merged, merged_mission(&p, "mission01").unwrap());
     assert_eq!(mdoc::points(&merged).len(), 2);
 }
+
+#[test]
+fn a_vertex_is_added_at_the_end_with_none_selected_and_moved_by_typed_numbers() {
+    let (_r, mut p) = setup("append");
+    let before = snap(&p);
+    geo::append_vertex(&mut p, ID, Kind::Volume, "Area").unwrap();
+    assert_eq!(mdoc::mission_volume(mis(&p), "Area").unwrap().len(), 4, "a volume grows by one corner");
+    p.undo();
+    assert_eq!(snap(&p), before, "one undo step");
+    geo::append_vertex(&mut p, ID, Kind::Path, "Run").unwrap();
+    assert_eq!(mdoc::path_points(mis(&p), "Run").unwrap().len(), 3, "a path grows at its end");
+    geo::append_vertex(&mut p, ID, Kind::PointSet, "Spawn").unwrap();
+    assert!(geo::append_vertex(&mut p, ID, Kind::Volume, "Nope").is_err());
+    assert!(geo::append_vertex(&mut p, ID, Kind::Point, "Gate").is_err(), "a point has no vertices");
+    // the x/y boxes move the vertex by the difference to what they were typed to
+    let v = Item::Vertex(mdoc::GeoTable::Paths, "Run".into(), 1);
+    let at = geo::item_xyz(mis(&p), &v).unwrap();
+    geo::move_items(&mut p, ID, std::slice::from_ref(&v), [250.0 - at[0], 0.0]).unwrap();
+    let now = geo::item_xyz(mis(&p), &v).unwrap();
+    assert_eq!((now[0], now[1], now[2]), (250.0, at[1], at[2]));
+}

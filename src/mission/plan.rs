@@ -480,6 +480,16 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
             let r = geo::turn_items(project, id, selected, yaw);
             note(st, r);
         }
+        if !matches!(selected, [Item::Vertex(..)])
+            && let Some((kind, name)) = st.active.clone()
+            && kind.table().is_some()
+        {
+            // No vertex picked: a new one goes after the last
+            if ui.button("Add vertex").on_hover_text(format!("A new point at the end of the {} '{name}'", kind.noun())).clicked() {
+                let r = geo::append_vertex(project, id, kind, &name);
+                note(st, r);
+            }
+        }
         if let [Item::Vertex(t, name, i)] = selected {
             let kind = match t {
                 GeoTable::Volumes => Kind::Volume,
@@ -493,6 +503,21 @@ fn selection_row(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &
             if ui.button("Delete vertex").clicked() {
                 let r = geo::remove_vertex(project, id, kind, name, *i);
                 note(st, r);
+            }
+            // x and y of the vertex: typed or dragged, one move each (the same step as dragging it on the plan)
+            if let Some(at) = merged_mission(project, id).and_then(|m| geo::item_xyz(m, &selected[0])) {
+                let (mut x, mut y) = (at[0] as f32, at[1] as f32);
+                let mut delta = [0.0, 0.0];
+                if ui.add(egui::DragValue::new(&mut x).speed(1.0).prefix("x ")).changed() {
+                    delta[0] = f64::from(x) - at[0];
+                }
+                if ui.add(egui::DragValue::new(&mut y).speed(1.0).prefix("y ")).changed() {
+                    delta[1] = f64::from(y) - at[1];
+                }
+                if delta != [0.0, 0.0] {
+                    let r = geo::move_items(project, id, &selected[..1], delta);
+                    note(st, r);
+                }
             }
             if *t != GeoTable::Volumes
                 && let Some(z) = merged_mission(project, id).and_then(|m| geo::item_xyz(m, &selected[0])).map(|p| p[2])
