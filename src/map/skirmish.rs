@@ -988,7 +988,7 @@ fn script_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: 
             let mine = crate::checks::for_item(&findings, ri, mdoc::rule_list_key(is_cond), i);
             let head = if mine.is_empty() { ty.to_string() } else { format!("{ty}  ({} problem{})", mine.len(), if mine.len() == 1 { "" } else { "s" }) };
             let wid = egui::Id::new(("t10-item", id, ri, is_cond, i));
-            egui::CollapsingHeader::new(format!("{}. {head}", i + 1)).id_salt(wid).default_open(true).show(ui, |ui| {
+            egui::CollapsingHeader::new(format!("{}. {head}", i + 1)).id_salt(wid).default_open(false).show(ui, |ui| {
                 if st.campaign_only.contains(ty) {
                     ui.colored_label(RED, "campaign only: a skirmish script cannot use this Type (the rule runs and does nothing)");
                 }

@@ -220,7 +220,11 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     // end T6 hook
     // T10 begin: the skirmish section (lobby listing, end rules, script and media forms, play in the lobby); it edits project documents,
     // so it is drawn before the map is read for this frame
-    egui::CollapsingHeader::new("Skirmish").id_salt(("skirmish", &id)).show(ui, |ui| skirmish::show(ui, &mut st.skirmish, project, &id));
+    egui::CollapsingHeader::new("Skirmish").id_salt(("skirmish", &id)).show(ui, |ui| {
+        // Scrolls inside: a tall section (many script rules) must not push "Play in lobby" and the plan out of reach.
+        let h = (ui.ctx().content_rect().height() * 0.5).max(180.0);
+        egui::ScrollArea::vertical().id_salt(("skirmish-scroll", &id)).max_height(h).auto_shrink([false, true]).show(ui, |ui| skirmish::show(ui, &mut st.skirmish, project, &id));
+    });
     // T10 end
     // T7
     let t7_refusals = players::refusals(project, &id);
