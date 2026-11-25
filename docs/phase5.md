@@ -339,10 +339,39 @@ one in meaning.** The hand-written files are the engine's `docs/examples/gate-am
 and `mod.json` of `docs/missions.md` section 1, already in this repository as `tests/fixtures/source/` (and as a mod in
 `tests/fixtures/gates/`, byte-equal to the engine's example).
 
-1. **By hand (T17, needs a display):** a new mod `gates` in an empty folder; "New mission" `gate_ambush`; in the Maps tab the
-   name, description, sky, `world_half` and one `Island04`; in the Missions tab players `Hero`, `Raiders`; the start; three ships
-   (`Dauntless` primary); group `RaiderShips`; volume `Gate Area`; point `The Gate`; the two tasks with their conditions; `victory:
-   objectives`; the three rules (rule 2 from the "ambush on arrival" template, then edited). No JSON file opened.
+1. **By hand (T17, needs a display; the maintainer's rehearsal).** Start from an empty folder, `cargo run`, no JSON file opened at any
+   point, then follow the list; tick each line and write down anything that surprised you. The expected values are those of
+   `tests/fixtures/source/mission.json`.
+   1. Mod tab / left panel: "New mod...", pick a new empty folder, id `gates`. Mod tab: name `Gates`, version `0.1`, category
+      `Missions`, description `A one-mission test.`
+   2. Missions tab: type `gate_ambush` in "New mission", Make. The picker shows it; "Rules and plan" shows an empty rule list and an
+      empty plan.
+   3. Maps tab, map `gate_ambush`: name `Gate Ambush`, description `Two raiders wait at the gate.`, sky `skybox_22` (the dropdown
+      has no `_Layer1` suffix: the hand-written file has `skybox_22_Layer1`, see "Seen running"), `world_half` 1200, place one
+      `Island04` at (-300, 300) (needs the import; without one, skip it and expect the one `objects` difference).
+   4. Missions tab, "Players, ships and groups": add players `Hero` and `Raiders`; the human is `Hero`, start (0, 0, 0), forward (0, 1, 0).
+   5. Add three ships: `Ship_Navy_Cutter` of `Hero` named `Dauntless`, primary, at (0, 0, 0); two `Ship_Pirate_Sloop` of `Raiders`
+      named `Raider One` at (400, 600, 0) and `Raider Two` at (440, 620, 0), both turned 180 degrees on the plan (Turn, 180 deg).
+   6. Add group `RaiderShips`, members `Raider One` and `Raider Two`.
+   7. Plan (beside the rule list): Add volume, click the plan, name `Gate Area`; add a fourth corner and drag the corners to (300, 500),
+      (500, 500), (500, 700), (300, 700) (type the numbers with Grid snap at 100 or off); Add point `The Gate` at (400, 600).
+   8. "Tasks and the end": task `Reach the gate`, text `Sail to the gate.`, not active, required, `complete_when`:
+      `Is Group In Volume`, group `Hero`, volume `Gate Area`, Entire Group off. Task `Clear the gate`, text `Sink both raiders.`, not
+      active, required, `complete_when`: `OP Counter Condition`, counter `raiders sunk`, `Greater Than`, 1; `fail_when`: `Group
+      Destroyed`, `Hero`. Victory: objectives.
+   9. Rules: three new rules. `Start` (when `World Initialize`; do `Set Objective Task Active State` `Reach the gate` TRUE, `Set Current
+      Objective Point` `The Gate`, `OP Set Counter` `raiders sunk` 0). `Arrive at the gate` (when `Enter Volume` `Hero` in `Gate Area`;
+      do `NIS Start`, `NIS Focus camera on Group/Unit` `RaiderShips`, `OP Wait` 4, `NIS End`, `Set Objective Task Active State` `Clear the
+      gate` TRUE, `GroupA to attack GroupB` `RaiderShips` attacks `Hero`, `OP Set Rule Active` `Count raiders sunk` TRUE); the template
+      menu for this rule does not exist yet (T11), so build it from the add menu. `Count raiders sunk`, Run Once off, Is Active off (when
+      `Player Killed A Object` `Hero`, `Ship`; do `OP Add To Counter` `raiders sunk` 1).
+   10. Watch the plan while you click through the rules: the selected rule's volume, point and ships are ringed or outlined in gold;
+      click `Gate Area` on the plan: the list shows rules 2 only plus the task `Reach the gate` (chip "uses volume 'Gate Area'", the `x`
+      clears it); click the point `The Gate`: rule 1.
+   11. Save (Ctrl+S). The problems panel shows no error for the mission. Open the saved folder in a file manager only to compare:
+      `maps/gate_ambush/mission.json` has the same content as the example up to the "Seen running" differences.
+   12. With an import and the game: `--check-mod <mod> --json` clean, then `<game> --mod <mod> --only-mod --map gate_ambush` and fly
+      `Dauntless` into the gate: the task text shows, the cutscene runs, sinking both raiders wins.
 2. **The same steps as a test** (`tests/mission_gate.rs`, headless): it calls only the functions the buttons call (`mission::project`,
    `ships`, `geometry`, `tasks`, `rules`), in that order, on an empty temp folder, then saves.
 3. **"Matches in meaning", checked by the test:** each written file is read back the way the game reads it (`overlay_into` over no
@@ -355,6 +384,35 @@ and `mod.json` of `docs/missions.md` section 1, already in this repository as `t
    gives a typed `MissionDoc`, the test compares the typed values instead of the normalised JSON.
 4. `--check-mod <mod> --json` clean, and `<game> --mod <mod> --only-mod --map gate_ambush` plays to a win (by hand, with the import);
    with requirement 5, the report shows all three rules fired.
+
+### Seen running (T17)
+
+`tests/mission_gate.rs` builds `gate-ambush` with the editor's functions (steps 1 to 11 above, in that order, in a temp folder, saving
+at the end), reads it back with `overlay_into` over no import and `read_merged`, and compares it with `tests/fixtures/source/`. It
+passes: the rule schema is the engine's, the three files are complete, `check_mission` gives no finding for either and `defined_names`
+and `accepted_names` are equal. The comparison found these differences, which the test lists in `KNOWN_GAPS` (it fails when one
+disappears or a new one appears) and which the test closes by hand, then showing that nothing else differs:
+
+| Step | What the editor writes | The example has | Cause |
+| --- | --- | --- | --- |
+| New mission (`map.json`) | no `id` | `"id": "gate_ambush"` | `map::doc::new_map` writes `name` and `world_half` only; the engine may take the id from the folder (not checked) |
+| Maps tab, place scenery | no `player` | `"player": -1` | `view2d::scenery_entry`; whether a missing `player` reads as -1 is not checked |
+| Add ship | ids 2, 3, 4 (the map's `Island04` has 1) | 10, 11, 12; group members follow | the id is the smallest free one and cannot be edited; opaque to the engine |
+| Add ship (Dauntless) | no `rot` | identity `rot` | `add_ship` writes none, a turn by 0 writes nothing |
+| Turn ship (raiders) | `-1.2246469e-16` where the example has `0.0` | `0.0` | `geometry::turn_items` writes `sin(pi)` noise, no rounding |
+
+Smaller points, not differences of the files read back: `Project::create_with` adds `format` and `game_version` to `mod.json` (left out of
+the comparison); the Maps tab's sky dropdown offers `skybox_22` where the example has `skybox_22_Layer1` (the test passes the example's
+spelling to `set_sky`); `environment: {"point_sets": {}}` of the example is a missing `environment` in the editor's file, accepted
+because every key in it is one the engine reads as empty when missing (PROVISIONAL, as the list above: the engine lines were not
+re-checked); rule 2 is built from the add menu because T11's "ambush on arrival" template is not in this tree; there is nothing to
+build for speech and messages (the example's `media.json` has three empty tables, which "New mission" writes). Not run: the by-hand
+rehearsal (no display with an import here), `--check-mod`, and the play-through.
+
+T9 (the plan beside the rules), seen under a software Vulkan driver at 1280 x 720 on the `gates` mod: the Missions tab shows the rule
+list and the plan in two columns from 800 points of width; rule 1 selected rings `The Gate` on the plan in gold. Clicking a name,
+vertex or marker sets the list's "uses ..." filter. Not seen: the highlight of paths and point sets (covered by the headless test
+only), a click on a ship.
 
 What stays unverified until a machine with an import and a display runs it: how any of it looks, drag and drop in the lists, the
 check's speed on a large mission, retail missions as diffs (duplicate rule names, order), `--map` with a retail mission id.
