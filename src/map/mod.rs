@@ -3,5 +3,7 @@
 //! v0.3 freeze; a format change then touches `doc.rs` only.
 //!
 //! - [`doc`]: accessors over a `map.json` held as a `serde_json::Value`.
+//! - [`catalogue`]: scenery types, scenes and skies found by scanning an overlay folder.
 
+pub mod catalogue;
 pub mod doc;
