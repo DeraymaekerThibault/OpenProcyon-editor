@@ -161,7 +161,7 @@ stay editable; nothing remembers the template afterwards. First the three blocks
 until done, next; cutscene: `NIS Start`, teleports and waits, `NIS End`; failsafe: `OP Any Of` and `OP Not` conditions switching
 rules with `OP Set Rule Active`), then "reach a point", "ambush on arrival" (this is `gate-ambush`'s rule 2), "escort to a gate",
 "sink a group to win". Each template has a test: expand into an empty mission, `check_mission` gives no errors.
-Where the files live is an open question (requirement 10): the engine (so scripts use the same ones) or the editor's `templates/`.
+Decided (requirement 10): the templates are the engine's, `content/templates/*.json`, with `authoring::templates()` / `expand_template()` / `template_schema()`, so authoring scripts use the same ones (engine branch `claude/mission-templates`, format in its `docs/modding.md` "Mission templates"). The editor lists them (`mission/templates.rs`), draws the parameter form with the schema form's pickers (group, volume, point, point set, speech line, rule, number, text) from the "+ From template" chip next to "+ New rule", and writes the expansion as one `do_group` step (rules, tasks, and `victory` where the mission has none). The editor holds no template text.
 
 ### P9. Campaign order (S)
 
@@ -260,7 +260,7 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
    `.ogg` shown on the field while typing (P2, P7), task findings on the task row (P4).
 9. **Sound duration** (optional): `authoring::sound_duration(path)`; the engine decodes Vorbis through Bevy's `vorbis` feature
    (`game/Cargo.toml:10`). Why: P7 reads `duration` the way the game would; without it the editor's own Ogg header reader is used.
-10. **Templates as data** (decision first): a template format and the first files in the engine (with an expander in `authoring`),
+10. **Templates as data** (decided: the engine; done on engine branch `claude/mission-templates`, pinned here until it merges): a template format and the first files in the engine (with an expander in `authoring`),
     if templates are to be shared with authoring scripts (roadmap: "a template is a data file, so the community and authoring
     scripts can use the same ones"). Why: P8; otherwise they live in the editor.
 11. **Unique ids across ships, objects, animals and mines** (Phase 4 requirement 10, still missing). Why: groups address ids (P2).
@@ -313,7 +313,7 @@ spike's `src/mission.rs`: T0 turns it into a folder).
 | T8 | Tasks and the end: task list and form, `complete_when` / `fail_when` with the T3 nested lists, `victory` radio, end messages | S | T1, T3; PAR | `src/mission/tasks.rs`, `tests/mission_tasks.rs` |
 | T9 | The map beside the rules: rule selection highlights its geometry and groups on the plan, a click on geometry lists the rules and tasks that read it | M | T5, T7 (same agent as T7 if possible) | `src/mission/plan.rs` (edit), `src/mission/rules_view.rs` (one hook) |
 | T10 | Speech and messages: tables beside the rules, "edit line" / "new line" from a speech field, `.ogg` copy through the guard, Ogg duration reader (pure, Ogg pages built in the test), face picker | M | T2; PAR | `src/mission/speech.rs`, `src/mission/ogg.rs`, `tests/mission_speech.rs` |
-| T11 | Templates: format, expander (one group step), dialogue / cutscene / failsafe, then the four mission templates; each expanded into an empty mission checks clean | M | T2, T3; PAR | `src/mission/templates.rs`, `templates/*.json` (our own text), `tests/mission_templates.rs` |
+| T11 | **Done** (engine part on engine branch `claude/mission-templates`). Templates: format, expander (one group step), dialogue / cutscene / failsafe, then the four mission templates; each expanded into an empty mission checks clean | M | T2, T3; PAR | `src/mission/templates.rs`, `tests/mission_templates.rs`; the files are the engine's `content/templates/*.json` |
 | T12 | Campaign order: drag list into `mod.json` `missions`, unlisted and retail ids shown, campaign counters' "set by" | S | T1; PAR | `src/mission/campaign.rs` |
 | T13 | Launch from here: `fire_rules`, `start_at`, `rule_trace`, autoplay (`PROCYON_AUTOPLAY` + `--script mission`), the `autoplay end` line parsed into fired / never fired (PROVISIONAL), shown in the rule list through the `report` stub | M | none for `launch.rs` (PAR from the start); the panel part after T0 | `src/launch.rs` (edit), `tests/launch_args.rs` (edit), `src/mission/report.rs` |
 | T14 | Retail mission as a diff: open from the import, keyed saves, the P11 limits as messages (append order, duplicate or missing rule names refuse), revert per rule; tests on a synthetic retail-like folder in a temp dir (never game content) | M | T1, T5 | `src/mission/project.rs` (after T1, same agent), `tests/mission_retail.rs` |
@@ -363,7 +363,7 @@ and `mod.json` of `docs/missions.md` section 1, already in this repository as `t
       Objective Point` `The Gate`, `OP Set Counter` `raiders sunk` 0). `Arrive at the gate` (when `Enter Volume` `Hero` in `Gate Area`;
       do `NIS Start`, `NIS Focus camera on Group/Unit` `RaiderShips`, `OP Wait` 4, `NIS End`, `Set Objective Task Active State` `Clear the
       gate` TRUE, `GroupA to attack GroupB` `RaiderShips` attacks `Hero`, `OP Set Rule Active` `Count raiders sunk` TRUE); the template
-      menu for this rule does not exist yet (T11), so build it from the add menu. `Count raiders sunk`, Run Once off, Is Active off (when
+      menu ("+ From template", "Ambush on arrival") writes this rule and `Count raiders sunk` and the task `Clear the gate`: fill in `Hero`, `Gate Area`, `RaiderShips` (then leave the task `Clear the gate` out of step 8: the template adds it); or build it from the add menu. `Count raiders sunk`, Run Once off, Is Active off (when
       `Player Killed A Object` `Hero`, `Ship`; do `OP Add To Counter` `raiders sunk` 1).
    10. Watch the plan while you click through the rules: the selected rule's volume, point and ships are ringed or outlined in gold;
       click `Gate Area` on the plan: the list shows rules 2 only plus the task `Reach the gate` (chip "uses volume 'Gate Area'", the `x`
@@ -405,7 +405,7 @@ Smaller points, not differences of the files read back: `Project::create_with` a
 the comparison); the Maps tab's sky dropdown offers `skybox_22` where the example has `skybox_22_Layer1` (the test passes the example's
 spelling to `set_sky`); `environment: {"point_sets": {}}` of the example is a missing `environment` in the editor's file, accepted
 because every key in it is one the engine reads as empty when missing (PROVISIONAL, as the list above: the engine lines were not
-re-checked); rule 2 is built from the add menu because T11's "ambush on arrival" template is not in this tree; there is nothing to
+re-checked); rule 2 is built from the add menu there (T11's "ambush on arrival" template has since landed and the rehearsal can use it); there is nothing to
 build for speech and messages (the example's `media.json` has three empty tables, which "New mission" writes). Not run: the by-hand
 rehearsal (no display with an import here), `--check-mod`, and the play-through.
 

@@ -16,10 +16,10 @@ name = "procyon-editor"
 path = "src/main.rs"
 
 [dependencies]
-# OpenProcyon#631 (public keyed_lists/extend/merge_keyed, scenery_transform, game_rotation, formation_slots; on top of #626) merged on main as 925d8e4; pinned to that commit until a
-# release tag includes it.
-openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "925d8e4" }
-# Same version and features as the engine's game/Cargo.toml at 925d8e4; keep them equal on every engine upgrade.
+# TEMPORARY pin (T11): the engine branch claude/mission-templates at 1b7a129 (mission templates in `authoring`, on top of main 925d8e4, which has #631).
+# Move this to the commit on engine main once that branch is merged, then to a release tag that includes it.
+openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "1b7a129" }
+# Same version and features as the engine's game/Cargo.toml at 1b7a129 (unchanged from 925d8e4); keep them equal on every engine upgrade.
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 # bevy_egui defaults minus `picking` (map dragging uses egui's own drag sense; the engine does not build bevy_picking).
 bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }
