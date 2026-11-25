@@ -65,7 +65,7 @@ jobs:
         env:
           PROCYON_ASSETS: ${{ runner.temp }}/synth/assets
         run: |
-          for tab in ships 3d playtest map; do
+          for tab in ships 3d playtest map map3d; do
             tools/shot.sh "$RUNNER_TEMP/shots/$tab.png" --mod "$RUNNER_TEMP/synth/mymod" --tab "$tab" --ship Ship_Test --map test_map
           done
       # These are pictures of our own synthetic box ship, never game content (AGENTS.md hard rule 1).

@@ -386,9 +386,9 @@ impl Orbit {
         self.target + Quat::from_rotation_y(self.yaw) * Quat::from_rotation_x(-self.pitch) * Vec3::Z * self.dist
     }
 
-    /// Shows the whole world square (half side `half`) from a slanted view.
+    /// Shows the whole world square (half side `half`) from a slanted view; 3.8 half sides at a steeper angle keeps its near corner inside a wide, short canvas (a screenshot showed 2.2 cutting it off).
     pub fn fit(half: f32) -> Orbit {
-        Orbit { dist: (half * 2.2).clamp(10.0, 50_000.0), ..Orbit::default() }
+        Orbit { dist: (half * 3.8).clamp(10.0, 50_000.0), pitch: 1.0, ..Orbit::default() }
     }
 }
 

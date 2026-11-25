@@ -129,6 +129,11 @@ impl State {
         }
     }
 
+    /// `--select`: selects entries of the shown map when its scene is next built.
+    pub fn select_at_start(&mut self, entries: &[(String, usize)]) {
+        self.select_next = entries.iter().filter_map(|(a, i)| Array::ALL.into_iter().find(|x| x.key() == a).map(|x| Ref::new(x, *i))).collect();
+    }
+
     /// The scenery catalogue of the project's overlay, scanned when first asked for (or after `rescan`).
     fn catalogue(&mut self, project: &Project, rescan: bool) -> &Catalogue {
         if rescan || self.cat.as_ref().is_none_or(|(root, _)| *root != project.root) {

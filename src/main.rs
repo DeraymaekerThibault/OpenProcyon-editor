@@ -111,15 +111,17 @@ fn apply_flags(
             "3d" => Tab::Ship3d,
             "playtest" => Tab::Playtest,
             "mission" => Tab::Mission,
-            "map" => Tab::Map,
+            "map" | "map3d" => Tab::Map,
             _ => Tab::Project,
         };
+        maps.v3.on = t == "map3d";
     }
     if let Some(id) = &f.map
         && let Some(p) = &mut project.project
     {
         maps.show_map(p, id);
     }
+    maps.select_at_start(&f.select);
     if let Some(id) = &f.ship {
         ships.selected = Some(id.clone());
         if *tab == Tab::Ship3d
