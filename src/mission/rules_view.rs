@@ -76,6 +76,7 @@ pub struct State {
     /// The open add menu: which list (true: conditions) and its search.
     menu: Option<(bool, MenuState)>,
     cache: Option<Cache>,
+    auto_opened: bool,
 }
 
 impl State {
@@ -165,6 +166,20 @@ pub fn picker(ui: &mut egui::Ui, project: &mut Project) {
 pub fn picker_with(ui: &mut egui::Ui, project: &mut Project, st: &mut State) {
     let mut acts = vec![];
     let missions = mproject::list_missions(project);
+    // another mod was opened since: forget the mission of the one before
+    if st.mission.as_ref().is_some_and(|id| !missions.iter().any(|m| &m.id == id)) {
+        st.mission = None;
+        st.cache = None;
+        st.auto_opened = false;
+    }
+    // a mod with one mission of its own opens it once, so the tab is not empty at the first look
+    if st.mission.is_none() && !st.auto_opened {
+        st.auto_opened = true;
+        let own: Vec<&mproject::MissionEntry> = missions.iter().filter(|m| m.in_mod).collect();
+        if let [only] = own.as_slice() {
+            open(st, project, &only.id);
+        }
+    }
     ui.horizontal_wrapped(|ui| {
         ui.strong("Mission");
         if missions.is_empty() {
