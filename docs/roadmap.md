@@ -1,6 +1,6 @@
 # OpenProcyon modding tools roadmap
 
-Nov 24, 2026 · @Thibault
+Nov 24, 2026 · @Thibault (status section updated Nov 25, 2026)
 
 ## Summary
 
@@ -19,6 +19,69 @@ Modding with files keeps working the whole time; every engine phase also makes h
 | 6. Live tools | engine | hot reload, effect and look tuning in the running game | after Phase 3 |
 
 About the repository rules: AGENTS.md forbids another fidelity overview, so this plan lives outside the repository. Its work items go into the existing "Modding platform" milestone and #156.
+
+## Where things stand (Nov 25, 2026)
+
+A snapshot for whoever picks the work up next. The plan above stays the plan; this says how far it got.
+
+**Done in code.**
+- **Engine:** the authoring work the editor needs is merged on main.
+  - OpenProcyon #626, #631: keyed merge, scenery transform, formations.
+  - #638: `--rule-report`, `sound_duration`.
+  - #639: templates.
+  - #640: retail `ship_names`, wake keys, the error for teams without a race.
+  - #641: inherited retail warnings.
+  - #646: `visit_fields`, tasks merged by `Name`, the mission, script and media schemas.
+  - #647: duplicate ids, nebula agreement.
+  - #649: ship kills credited, `--lobby` exits, the full `--help`.
+  - #651: the developer console in every singleplayer battle.
+  - #654: duplicate-id false positives, lobby error text, console `win` and `lose` in any battle.
+- **Editor:** Phase 4 (T0 to T12) and Phase 5 (all tasks, including T11 templates) are on `claude/editor-integration` (PR #1 into `main`), pinned to engine main `f1bf09f`.
+- **Copies removed:** the editor's own copies of engine rules are gone for the keyed merge, the damage layer, crew kinds, the scenery transform, formations, the field walk (`visit_fields`) and the Ogg reader. A test checks every mission and media key the editor writes against the engine schemas.
+
+**Verified with real assets.** Three local test rounds (Nov 25) on a maintainer machine with an import:
+- every step of the Phase 4 gate, a skirmish map built only in the editor that lists in the lobby and plays to a win;
+- the gate-ambush mission won after the ship-kill fix;
+- the template expansions;
+- the play-test report;
+- keyed task edits on a retail mission;
+- dock points on a mod's own scenery, in game;
+- the round-1 and round-2 UI fixes.
+
+The round-3 editor fixes are covered only by headless tests so far:
+- the save path keeps keyed lists keyed, with no index pointers and no rewritten values;
+- the Maps tab scrolls;
+- play-test error lines show the real last line;
+- the backdrop state resets per map;
+- one undo step per typed number;
+- several layout fixes.
+
+**Not yet confirmed in a real run.**
+- A `--lobby` win through the Game Summary and the editor showing the run ended. Console `win` makes this testable since #654.
+- A 3D height drag seen in game.
+- A retail mission's ship-kill rule; only mission03 has one, and it is awkward to test.
+- Sinking your own ship: no kill is credited, covered by a unit test only.
+- The Phase 5 gate rebuilt by hand from an empty folder, all the way through.
+- The player "Raiders" missing from the template pickers on the tester's gate mission. The engine accepts players listed only in `mission.json`, so the tester's file probably has another shape. Not reproduced.
+
+**Next work.**
+1. **Round 4 of the local test:** re-check the round-3 fixes above with real assets, plus the open items.
+2. **One rules run for missions and skirmish:** the rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
+   - **Plan:** load both formats into one rules-run resource, with the campaign-only parts (opening, briefing, campaign id) as an optional extra. Behaviour must not change; prove it with `tools/tracediff.py`, same seed and `--fixed-step`, on one mission and one skirmish map (needs assets).
+3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path, then the editor's panels.
+4. **Rules the editor still restates,** to move into the engine:
+   - the inverse rotation maths (`map_edit/orient.rs`, `ship_view/coords.rs`);
+   - the skirmish lobby checklist (`map/skirmish.rs`);
+   - the map catalogue scan;
+   - the bundled-mods lookup (`launch.rs`);
+   - the mission key constants in `mission/doc.rs` (guarded by a schema test).
+5. **Engine checks:** `--check-mod` unknown-key warnings for mission, script and media files, using the new schemas. A nebula vertex outside `world_half` gives no warning yet.
+6. **Phase 6** (live tools) has not started.
+
+**Working notes.**
+- **CI minutes:** the editor repository is private, and its free GitHub Actions minutes ran out on Nov 25, so CI jobs get no runner. Until they come back, the local `tools/check.sh` (GATE OK) is the check. The engine repository's CI runs as usual.
+- **Local tests:** a local agent on the maintainer's machine runs them with real assets, from a numbered step list, and reports PASS, FAIL, PARTIAL or SKIPPED per step. It has no access to this cloud environment; the maintainer pastes its report back.
+- **Shared folders:** run one agent at a time per checkout and build folder. Builds in parallel in the same `target/` overwrite each other.
 
 ## Where we start from
 
