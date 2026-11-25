@@ -59,7 +59,8 @@ impl NewForm {
 pub fn new_form_fields(ui: &mut egui::Ui, f: &mut NewForm, salt: &str) {
     ui.horizontal(|ui| {
         ui.label("Folder");
-        ui.label(f.dir.as_ref().map_or("(none picked)".to_string(), |d| d.display().to_string()));
+        // The button comes first and the path takes what is left, cut with "..." (the whole path on hover): a long path must not
+        // widen the panel it sits in, nor push "Pick..." out of sight.
         if ui.button("Pick...").clicked()
             && let Some(dir) = rfd::FileDialog::new().pick_folder()
         {
@@ -68,6 +69,8 @@ pub fn new_form_fields(ui: &mut egui::Ui, f: &mut NewForm, salt: &str) {
             }
             f.dir = Some(dir);
         }
+        let shown = f.dir.as_ref().map_or("(none picked)".to_string(), |d| d.display().to_string());
+        ui.add(egui::Label::new(shown.as_str()).truncate()).on_hover_text(shown.as_str());
     });
     ui.horizontal(|ui| {
         ui.label("Id");
@@ -189,6 +192,28 @@ mod tests {
 
     fn pending() -> Pending {
         Pending { rel: "ships/Ship_X/ship.json".into(), label: "Edit Ship_X".into(), edits: vec![Edit::set("/speed", json!(9))] }
+    }
+
+    #[test]
+    fn a_long_folder_path_does_not_widen_the_form() {
+        let width = |dir: Option<PathBuf>| {
+            let mut f = NewForm { dir, ..NewForm::default() };
+            let ctx = egui::Context::default();
+            let mut w = 0.0;
+            ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0))), ..Default::default() }, |ui| {
+                let r = ui.scope(|ui| {
+                    ui.set_max_width(280.0);
+                    new_form_fields(ui, &mut f, "t");
+                });
+                w = r.response.rect.width();
+            })
+            .textures_delta
+            .clear();
+            w
+        };
+        let long = PathBuf::from("/home/someone/projects/a/very/deeply/nested/folder/structure/that/goes/on/and/on/for/a/long/while/my-mod");
+        assert!(width(Some(long)) <= 280.5, "the path is cut, not the panel widened");
+        assert!(width(None) <= 280.5);
     }
 
     #[test]
