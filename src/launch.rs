@@ -307,6 +307,8 @@ pub fn read_rule_report(path: &Path) -> Result<Option<RuleReport>, String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModFinding {
     pub error: bool,
+    /// A warning the base game's own files have too (`"inherited": true` in the JSON): not the mod's, never blocks.
+    pub inherited: bool,
     pub file: String,
     pub path: String,
     pub message: String,
@@ -329,8 +331,17 @@ impl ModCheck {
     pub fn errors(&self) -> usize {
         self.findings.iter().filter(|f| f.error).count()
     }
+    /// The mod's own warnings (not the inherited ones).
     pub fn warnings(&self) -> usize {
-        self.findings.len() - self.errors()
+        self.own().count() - self.errors()
+    }
+    /// The findings that are the mod's own: errors and warnings the base game does not have.
+    pub fn own(&self) -> impl Iterator<Item = &ModFinding> {
+        self.findings.iter().filter(|f| !f.inherited)
+    }
+    /// The warnings that come from the base game's own files.
+    pub fn inherited(&self) -> Vec<&ModFinding> {
+        self.findings.iter().filter(|f| f.inherited).collect()
     }
 }
 
@@ -344,7 +355,16 @@ pub fn parse_mod_check(output: &str) -> Result<ModCheck, String> {
     let v: serde_json::Value = serde_json::from_str(output.trim()).map_err(|e| format!("unexpected output of --check-mod: {e}"))?;
     let list = v["findings"].as_array().ok_or("unexpected output of --check-mod: no \"findings\" list")?;
     let text = |f: &serde_json::Value, k: &str| f[k].as_str().unwrap_or_default().to_string();
-    let findings = list.iter().map(|f| ModFinding { error: f["level"] == "error", file: text(f, "file"), path: text(f, "path"), message: text(f, "message") }).collect();
+    let findings = list
+        .iter()
+        .map(|f| ModFinding {
+            error: f["level"] == "error",
+            inherited: f["inherited"].as_bool().unwrap_or(false) && f["level"] != "error",
+            file: text(f, "file"),
+            path: text(f, "path"),
+            message: text(f, "message"),
+        })
+        .collect();
     Ok(ModCheck { findings })
 }
 

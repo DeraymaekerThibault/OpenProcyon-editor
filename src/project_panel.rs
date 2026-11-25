@@ -312,22 +312,34 @@ pub fn problems_panel(ui: &mut egui::Ui, st: &mut State, focus: &mut Focus) {
         }
     });
     egui::ScrollArea::vertical().id_salt("mod-problems").max_height(140.0).show(ui, |ui| {
-        for f in &st.findings {
-            let color = if f.level == Level::Error { egui::Color32::LIGHT_RED } else { egui::Color32::YELLOW };
-            let place = match (f.file.is_empty(), f.path.is_empty()) {
-                (true, _) => String::new(),
-                (false, true) => format!("{}: ", f.file),
-                (false, false) => format!("{} {}: ", f.file, f.path),
-            };
-            let text = egui::RichText::new(format!("{place}{}", f.message)).color(color);
-            if ui.add(egui::Label::new(text).sense(egui::Sense::click())).clicked() && !f.file.is_empty() {
-                *focus = Focus { rel: f.file.clone(), path: f.path.clone() };
-            }
-            if let Some(s) = suggestion_line(f) {
-                ui.label(s);
-            }
+        for f in problems::own(&st.findings) {
+            finding_row(ui, f, focus);
+        }
+        let base = problems::inherited(&st.findings);
+        if !base.is_empty() {
+            egui::CollapsingHeader::new(problems::inherited_heading(base.len())).id_salt("mod-problems-inherited").default_open(false).show(ui, |ui| {
+                for f in base {
+                    finding_row(ui, f, focus);
+                }
+            });
         }
     });
+}
+
+fn finding_row(ui: &mut egui::Ui, f: &Finding, focus: &mut Focus) {
+    let color = if f.level == Level::Error { egui::Color32::LIGHT_RED } else { egui::Color32::YELLOW };
+    let place = match (f.file.is_empty(), f.path.is_empty()) {
+        (true, _) => String::new(),
+        (false, true) => format!("{}: ", f.file),
+        (false, false) => format!("{} {}: ", f.file, f.path),
+    };
+    let text = egui::RichText::new(format!("{place}{}", f.message)).color(color);
+    if ui.add(egui::Label::new(text).sense(egui::Sense::click())).clicked() && !f.file.is_empty() {
+        *focus = Focus { rel: f.file.clone(), path: f.path.clone() };
+    }
+    if let Some(s) = suggestion_line(f) {
+        ui.label(s);
+    }
 }
 
 /// The "did you mean" line under a finding, only when its message does not say so already (the engine puts it in both).
@@ -381,7 +393,7 @@ pub fn schema_named(name: &str) -> serde_json::Value {
 pub fn notes_for(findings: &[Finding], rel: &str) -> Vec<crate::form::FieldNote> {
     findings
         .iter()
-        .filter(|f| f.file == rel)
+        .filter(|f| f.file == rel && !f.inherited)
         .map(|f| crate::form::FieldNote { pointer: crate::edit::dotted_to_pointer(&f.path), level: f.level, message: f.message.clone() })
         .collect()
 }

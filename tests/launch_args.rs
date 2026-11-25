@@ -43,10 +43,12 @@ fn the_mod_check_runs_on_the_absolute_folder_with_json() {
 fn the_mod_check_output_is_read() {
     let out = r#"{"mod": "/m/g", "engine": "0.2.0", "errors": 1, "warnings": 1, "findings": [
         {"level": "error", "file": "ships/A/ship.json", "path": "guns.G", "message": "no such gun"},
-        {"level": "warning", "file": "", "path": "", "message": "unchecked"}]}"#;
+        {"level": "warning", "file": "", "path": "", "message": "unchecked"},
+        {"level": "warning", "file": "maps/r/map.json", "path": "", "message": "retail has it", "inherited": true}]}"#;
     let c = parse_mod_check(out).unwrap();
-    assert_eq!((c.errors(), c.warnings()), (1, 1));
-    assert_eq!(c.findings[0], ModFinding { error: true, file: "ships/A/ship.json".into(), path: "guns.G".into(), message: "no such gun".into() });
+    assert_eq!((c.errors(), c.warnings(), c.inherited().len()), (1, 1, 1), "inherited warnings are neither errors nor the mod's warnings");
+    assert_eq!(c.own().count(), 2);
+    assert_eq!(c.findings[0], ModFinding { error: true, inherited: false, file: "ships/A/ship.json".into(), path: "guns.G".into(), message: "no such gun".into() });
     assert_eq!(c.findings[0].line(), "ships/A/ship.json: guns.G: no such gun");
     assert_eq!(c.findings[1].line(), "unchecked");
     assert!(parse_mod_check("not json").is_err());

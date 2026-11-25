@@ -359,13 +359,18 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         Some(Ok(c)) if c.findings.is_empty() => {
             ui.label("Mod check: no errors, no warnings.");
         }
+        Some(Ok(c)) if c.own().next().is_none() => {
+            ui.label("Mod check: no errors, no warnings.");
+            inherited_group(ui, c);
+        }
         Some(Ok(c)) => {
             ui.label(format!("Mod check (--check-mod): {} errors, {} warnings.", c.errors(), c.warnings()));
             egui::ScrollArea::vertical().id_salt("modcheck").max_height(160.0).show(ui, |ui| {
-                for f in &c.findings {
+                for f in c.own() {
                     let color = if f.error { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
                     ui.colored_label(color, f.line());
                 }
+                inherited_group(ui, c);
             });
         }
     }
@@ -427,6 +432,19 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         ui.separator();
         st.preview.show(ui);
     }
+}
+
+/// The collapsed group of warnings the base game's own files have too (they never block the launch).
+fn inherited_group(ui: &mut egui::Ui, c: &ModCheck) {
+    let base = c.inherited();
+    if base.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new(crate::project::problems::inherited_heading(base.len())).id_salt("modcheck-inherited").default_open(false).show(ui, |ui| {
+        for f in base {
+            ui.colored_label(ui.visuals().warn_fg_color, f.line());
+        }
+    });
 }
 
 #[cfg(test)]

@@ -6,7 +6,13 @@ use serde_json::Value;
 pub use openprocyon::authoring::{Finding, Level};
 
 pub fn run(mission: &Value, map: &Value, media: &Value) -> Vec<Finding> {
-    openprocyon::authoring::check_mission(mission, map, media, false)
+    mod_own(openprocyon::authoring::check_mission(mission, map, media, false))
+}
+
+/// `found` without the warnings the base game's own files have too (`Finding::inherited`; `check_mission` sets none, `check_mod` does):
+/// those are not the mod's and never block anything.
+pub fn mod_own(found: Vec<Finding>) -> Vec<Finding> {
+    found.into_iter().filter(|f| !f.inherited).collect()
 }
 
 /// The findings for one condition or action (`list` "conditions" / "actions", `index` in it) of rule `rule` (its index in `rules`),
@@ -22,6 +28,16 @@ pub fn for_rule(problems: &[Finding], rule: usize) -> Vec<&Finding> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn inherited_findings_are_dropped_from_the_mods_own() {
+        let mut base = Finding::new(Level::Warning, "", "", "", "base");
+        base.inherited = true;
+        let own = Finding::new(Level::Warning, "", "", "", "own");
+        let kept = super::mod_own(vec![base, own]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].message, "own");
+    }
+
     use super::*;
 
     /// The committed worked example (`tests/fixtures/gates`, the engine's `gate-ambush`): (mission, map, media). Only meaningful when

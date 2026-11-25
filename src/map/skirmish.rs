@@ -527,7 +527,7 @@ pub fn replace_item(project: &mut Project, id: &str, index: usize, is_condition:
 
 /// The engine's `--check-mission` of the map's script, as a skirmish script (a campaign-only Type is an error there).
 pub fn check_script(script: &Value, map: &Value, media: &Value) -> Vec<Finding> {
-    openprocyon::authoring::check_mission(script, map, media, true)
+    crate::checks::mod_own(openprocyon::authoring::check_mission(script, map, media, true))
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------

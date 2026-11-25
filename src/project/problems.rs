@@ -59,10 +59,26 @@ pub fn sorted(mut found: Vec<Finding>) -> Vec<Finding> {
     found
 }
 
-/// How many errors and warnings.
+/// How many errors and warnings of the mod itself: warnings the base game's own files have too (`Finding::inherited`) are not counted.
 pub fn counts(found: &[Finding]) -> (usize, usize) {
     let errors = found.iter().filter(|f| f.level == Level::Error).count();
-    (errors, found.len() - errors)
+    let own = found.iter().filter(|f| !f.inherited).count();
+    (errors, own - errors)
+}
+
+/// The findings that are the mod's own, in order.
+pub fn own(found: &[Finding]) -> Vec<&Finding> {
+    found.iter().filter(|f| !f.inherited).collect()
+}
+
+/// The warnings that come from the base game's own files, not the mod. They never block anything.
+pub fn inherited(found: &[Finding]) -> Vec<&Finding> {
+    found.iter().filter(|f| f.inherited).collect()
+}
+
+/// The heading of the collapsed group of inherited warnings.
+pub fn inherited_heading(n: usize) -> String {
+    format!("{n} warnings from the base game's own files (not this mod)")
 }
 
 #[cfg(test)]
@@ -108,5 +124,20 @@ mod tests {
         let s = sorted(vec![f(Level::Warning, "w1"), f(Level::Error, "e1"), f(Level::Warning, "w2"), f(Level::Error, "e2")]);
         assert_eq!(s.iter().map(|f| f.message.as_str()).collect::<Vec<_>>(), ["e1", "e2", "w1", "w2"]);
         assert_eq!(counts(&s), (2, 2));
+    }
+
+    #[test]
+    fn inherited_warnings_are_left_out_of_the_counts_and_the_mods_list() {
+        let f = |level, m: &str, inherited| {
+            let mut f = Finding::in_file(level, "f", "p", m);
+            f.inherited = inherited;
+            f
+        };
+        let found = vec![f(Level::Warning, "base", true), f(Level::Error, "e", false), f(Level::Warning, "own", false), f(Level::Warning, "base2", true)];
+        assert_eq!(counts(&found), (1, 1));
+        assert_eq!(own(&found).iter().map(|f| f.message.as_str()).collect::<Vec<_>>(), ["e", "own"]);
+        assert_eq!(inherited(&found).len(), 2);
+        assert_eq!(inherited_heading(2), "2 warnings from the base game's own files (not this mod)");
+        assert_eq!(counts(&[f(Level::Warning, "base", true)]), (0, 0));
     }
 }
