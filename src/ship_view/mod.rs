@@ -70,6 +70,8 @@ pub struct ShipView {
     pub pending: Vec<Vec<Edit>>,
     /// The text field of the path to a ship folder, `ship.json` or `model.glb`.
     pub path: String,
+    /// A ship id typed in the load box ([`looks_like_id`]); the caller that has the project looks it up and fills the view.
+    pub load_id: Option<String>,
     pub status: String,
     pub armed: Option<Armed>,
     pub new_label: String,
@@ -95,6 +97,7 @@ impl Default for ShipView {
             hovered_point: None,
             pending: vec![],
             path: String::new(),
+            load_id: None,
             status: String::new(),
             armed: None,
             new_label: String::new(),
@@ -143,6 +146,13 @@ impl ShipView {
         self.pending.clear();
         self.generation += 1;
     }
+}
+
+/// Whether the text of the load box names a ship (`Ship_Cutter`) rather than a path: not empty, no folder separator, no file
+/// extension, and no such file or folder in the working folder.
+pub fn looks_like_id(text: &str) -> bool {
+    let t = text.trim();
+    !t.is_empty() && !t.contains(['/', '\\']) && Path::new(t).extension().is_none() && !Path::new(t).exists()
 }
 
 /// A ship read from disk.

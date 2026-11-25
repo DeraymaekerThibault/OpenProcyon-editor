@@ -214,6 +214,29 @@ pub fn show_in_3d(project: &Project, id: &str, view: &mut ShipView, link: &mut L
     Ok(())
 }
 
+/// Fills the 3D view with ship `id`: from the open project (the mod's ship, or the import's as the mod sees it; the view is linked
+/// to the document) or, with no project, from the import's `ships/<id>` folder. Opening a ship for viewing changes nothing.
+pub fn load_by_id(project: Option<&mut Project>, import: Option<&Path>, id: &str, view: &mut ShipView, link: &mut Linked) -> Result<(), String> {
+    match project {
+        Some(p) => {
+            let rel = ship_rel(id);
+            if !p.dir.join(&rel).is_file() && !p.root.join(&rel).is_file() && !p.doc(&rel).is_some_and(|d| !d.edited.is_null()) {
+                return Err(format!("no ship '{id}' in the open mod or the import"));
+            }
+            p.open_doc(&rel).map_err(|e| format!("ship '{id}': {e}"))?;
+            show_in_3d(p, id, view, link)
+        }
+        None => {
+            let dir = import.map(|i| i.join("ships").join(id)).filter(|d| d.is_dir()).ok_or_else(|| format!("no ship '{id}' in the import (open a mod to look in it too)"))?;
+            let loaded = crate::ship_view::load(&dir)?;
+            view.status = format!("{id} from the import ({})", crate::ship_view::layers_summary(loaded.facts.as_ref()));
+            view.set(loaded);
+            *link = Linked::default();
+            Ok(())
+        }
+    }
+}
+
 /// Moves what the 3D view did into the undo stack (one step per user action, labelled "Move <point>") and makes the view's ship
 /// equal the document again, so undo and redo show in the view. Does nothing when the view is not linked to a project ship.
 /// Returns a message when an edit failed (the view is then reset to the document).
@@ -682,6 +705,26 @@ mod tests {
         std::fs::write(&bad, b"nope").unwrap();
         assert!(new_ship_from_glb(&mut p, "Bad", &bad).is_err());
         assert!(new_ship_from_glb(&mut p, "Mine", &own).is_err(), "id taken");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_ship_id_in_the_load_box_is_looked_up_in_the_mod_and_the_import() {
+        use crate::ship_view::looks_like_id;
+        assert!(looks_like_id("Ship_A") && looks_like_id("  Ship_A ") && !looks_like_id("") && !looks_like_id("a/b") && !looks_like_id("x.glb") && !looks_like_id("C:\\x"));
+        let (root, assets, m) = setup("byid");
+        let mut p = Project::open(&m, Some(assets.clone())).unwrap();
+        let (mut view, mut link) = (ShipView::default(), Linked::default());
+        load_by_id(Some(&mut p), Some(&assets), "Ship_A", &mut view, &mut link).unwrap();
+        assert_eq!((view.ship_id.as_str(), link.rel.as_deref()), ("Ship_A", Some(ship_rel("Ship_A").as_str())));
+        assert!(p.dirty_rels().is_empty(), "looking at a ship changes nothing");
+        let e = load_by_id(Some(&mut p), Some(&assets), "Ship_Nope", &mut view, &mut link).unwrap_err();
+        assert!(e.contains("no ship 'Ship_Nope'"), "{e}");
+        // with no project open the import's folder is read
+        let (mut view, mut link) = (ShipView::default(), Linked::default());
+        load_by_id(None, Some(&assets), "Ship_A", &mut view, &mut link).unwrap();
+        assert_eq!(view.ship_id, "Ship_A");
+        assert!(load_by_id(None, Some(&assets), "Ship_Nope", &mut view, &mut link).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -548,6 +548,24 @@ mod tests {
     }
 
     #[test]
+    fn rows_stay_marked_after_saving_and_reopening_the_mod() {
+        let (root, assets, m) = setup("rows_saved");
+        let mut p = Project::open(&m, Some(assets.clone())).unwrap();
+        let i = p.open_doc(Table::Bullets.rel()).unwrap();
+        let table = p.docs[i].edited.clone();
+        edit_entry(&mut p, Table::Bullets, "B1", vec![Edit::set("/lifetime", json!(9))]).unwrap();
+        p.do_edits(Table::Bullets.rel(), "new", duplicate_edits(&table, "B2", "B3").unwrap()).unwrap();
+        p.save();
+        let got = |p: &Project, i: usize| entry_rows(&p.docs[i], "").iter().map(|r| r.tag()).collect::<Vec<_>>();
+        assert_eq!(got(&p, i), ["[changed]", "[retail]", "[added]"], "after the save");
+        drop(p);
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        let i = p.open_doc(Table::Bullets.rel()).unwrap();
+        assert_eq!(got(&p, i), ["[changed]", "[retail]", "[added]"], "after reopening the mod");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_bullet_picker_sets_the_gun_field() {
         let gun = json!({"BulletTypeName_Primary": "B1", "BulletTypeName_Alt": "B2", "range": 3});
         assert_eq!(bullet_fields(&gun), ["BulletTypeName_Primary", "BulletTypeName_Alt"]);

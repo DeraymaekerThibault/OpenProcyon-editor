@@ -228,6 +228,11 @@ fn panel(
     });
     if *tab == Tab::Ship3d {
         egui::Panel::right("ship3d_controls").resizable(true).show(&mut root, |ui| ship_view::panel::controls(ui, &mut ship));
+        if let Some(id) = ship.load_id.take()
+            && let Err(e) = ships_panel::load_by_id(project.project.as_mut(), assets.dir.as_deref(), &id, &mut ship, &mut link)
+        {
+            ship.status = e;
+        }
         // Transparent: the 3D camera draws underneath, in this panel's rect.
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(&mut root, |ui| ship_view::panel::central(ui, &mut ship));
         return Ok(());

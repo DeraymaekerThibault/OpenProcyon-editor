@@ -76,8 +76,14 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
     ui.heading("3D ship");
     ui.horizontal(|ui| {
         let width = (ui.available_width() - 60.0).max(40.0);
-        ui.add(egui::TextEdit::singleline(&mut view.path).desired_width(width)).on_hover_text("A ship folder (ship.json and model.glb), a ship.json or a .glb");
+        ui.add(egui::TextEdit::singleline(&mut view.path).desired_width(width))
+            .on_hover_text("A ship id (from the open mod or the import), a ship folder (ship.json and model.glb), a ship.json or a .glb");
         if ui.button("Load").clicked() {
+            if super::looks_like_id(&view.path) {
+                // Looked up in the open mod and the import by the caller, which has the project.
+                view.load_id = Some(view.path.trim().to_string());
+                return;
+            }
             match load(Path::new(view.path.trim())) {
                 Ok(l) => {
                     view.status = format!("Loaded {} ({})", l.ship_id, super::layers_summary(l.facts.as_ref()));
