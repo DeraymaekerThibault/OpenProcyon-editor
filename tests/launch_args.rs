@@ -52,3 +52,29 @@ fn the_mod_check_output_is_read() {
     assert!(parse_mod_check("not json").is_err());
     assert!(parse_mod_check("{}").is_err());
 }
+
+#[test]
+fn a_mission_launch_uses_the_mission_flag() {
+    let mut l = Launch { only_mod: false, ..Launch::new(Path::new("/m/gates"), "mission03") };
+    l.mission = Some(3);
+    assert_eq!(l.args(), os(&["--mod", "/m/gates", "--mission", "3"]));
+}
+
+#[test]
+fn debug_flags_follow_in_order_and_autoplay_adds_script_and_environment() {
+    let mut l = Launch { only_mod: false, ..Launch::new(Path::new("/m/gates"), "red_rover") };
+    assert!(l.envs().is_empty());
+    l.fire_rules = vec!["Open the gate".into(), "Say hi".into()];
+    l.start_at = Some((100.0, -25.5));
+    l.rule_trace = true;
+    l.autoplay = Some(600);
+    assert_eq!(
+        l.args(),
+        os(&["--mod", "/m/gates", "--map", "red_rover", "--fire-rule", "Open the gate", "--fire-rule", "Say hi", "--start-at", "100,-25.5", "--rule-trace", "--script", "mission"])
+    );
+    assert_eq!(l.envs(), vec![("PROCYON_AUTOPLAY", "600".to_string())]);
+    l.shot = Some(openprocyon_editor::launch::Shot { file: "/s/a.png".into(), frames: vec![5], dist: None, yaw: None, pitch: None });
+    let a = l.args();
+    let shot = a.iter().position(|x| x == "--shot-frame").unwrap();
+    assert!(shot < a.iter().position(|x| x == "--fire-rule").unwrap());
+}

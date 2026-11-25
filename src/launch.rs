@@ -71,16 +71,42 @@ pub struct Launch {
     /// `--only-mod` (the engine's `modding::ONLY_MOD`): the game loads this mod and none of the player's installed mods, so a run is
     /// of this mod alone. On by default.
     pub only_mod: bool,
+    /// Campaign mission N (`--mission N`, which the engine turns into the map `missionNN`, `lib.rs:282`); replaces `--map`. Not with a lobby.
+    pub mission: Option<u32>,
+    /// `--fire-rule "<rule>"`, repeatable: after the world-initialise rules, these rules' actions run in this order (engine `lib.rs:276`,
+    /// `rules/eval.rs:250`). A name that matches no rule only logs a warning.
+    pub fire_rules: Vec<String>,
+    /// `--start-at x,y`: places the primary ship (game units; engine `lib.rs:275`).
+    pub start_at: Option<(f32, f32)>,
+    /// `--rule-trace`: the game logs why rules have not fired (engine `rules/cli.rs:40`).
+    pub rule_trace: bool,
+    /// Unattended autoplay of this many game seconds: `PROCYON_AUTOPLAY=<n>` in the environment and `--script mission` (the autopilot).
+    /// The game quits when the mission ends and logs one `autoplay end` line (see `launch_report`). The engine has no flag for it.
+    pub autoplay: Option<u32>,
 }
 
 impl Launch {
     /// A launch of `map` from the mod in `mod_dir`; the folder is made absolute (the game runs in another working directory).
     pub fn new(mod_dir: &Path, map: &str) -> Launch {
-        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None, lobby: None, only_mod: true }
+        Launch {
+            mod_dir: absolute(mod_dir),
+            map: map.to_string(),
+            ship: None,
+            shot: None,
+            lobby: None,
+            only_mod: true,
+            mission: None,
+            fire_rules: vec![],
+            start_at: None,
+            rule_trace: false,
+            autoplay: None,
+        }
     }
 
     /// The command line, in the engine's flag order:
-    /// `--mod <abs> [--only-mod] --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]`, or, for a
+    /// `--mod <abs> [--only-mod] --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]
+    /// [--fire-rule <rule>]... [--start-at X,Y] [--rule-trace] [--script mission]`, with `--mission N` in place of `--map <id>` when
+    /// `mission` is set (the environment of an autoplay run is in [`Launch::envs`]), or, for a
     /// lobby launch, `--mod <abs> [--only-mod] --lobby <spec>` (no `--map`: with it the game skips the lobby; no `--ship`: the
     /// lobby's Auto Assign picks the fleet).
     pub fn args(&self) -> Vec<OsString> {
@@ -90,6 +116,8 @@ impl Launch {
         }
         if let Some(lobby) = &self.lobby {
             a.extend(["--lobby".into(), lobby.spec(&self.map).into()]);
+        } else if let Some(n) = self.mission {
+            a.extend(["--mission".into(), n.to_string().into()]);
         } else {
             a.extend(["--map".into(), self.map.clone().into()]);
         }
@@ -105,12 +133,29 @@ impl Launch {
                 }
             }
         }
+        for rule in &self.fire_rules {
+            a.extend(["--fire-rule".into(), rule.clone().into()]);
+        }
+        if let Some((x, y)) = self.start_at {
+            a.extend(["--start-at".into(), format!("{x},{y}").into()]);
+        }
+        if self.rule_trace {
+            a.push("--rule-trace".into());
+        }
+        if self.autoplay.is_some() {
+            a.extend(["--script".into(), "mission".into()]);
+        }
         a
+    }
+
+    /// The environment variables the game needs besides the arguments: `PROCYON_AUTOPLAY=<seconds>` for an autoplay run.
+    pub fn envs(&self) -> Vec<(&'static str, String)> {
+        self.autoplay.map(|n| ("PROCYON_AUTOPLAY", n.to_string())).into_iter().collect()
     }
 
     /// Starts the game and returns at once; poll the child with `try_wait`.
     pub fn spawn(&self) -> std::io::Result<Child> {
-        Command::new(game_bin()).args(self.args()).spawn()
+        Command::new(game_bin()).args(self.args()).envs(self.envs()).spawn()
     }
 
     /// Like [`Launch::spawn`], with the child's stderr written to `stderr_file` (a file never fills up like a pipe nobody reads).
@@ -119,7 +164,7 @@ impl Launch {
             crate::project::guard::create_dir_all(parent, None).map_err(std::io::Error::other)?;
         }
         let log = crate::project::guard::create_file(stderr_file, None).map_err(std::io::Error::other)?;
-        Command::new(game_bin()).args(self.args()).stdout(Stdio::null()).stderr(log).spawn()
+        Command::new(game_bin()).args(self.args()).envs(self.envs()).stdout(Stdio::null()).stderr(log).spawn()
     }
 }
 
