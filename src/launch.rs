@@ -4,6 +4,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+use openprocyon::authoring::RuleReport;
+
 /// The game binary: `PROCYON_GAME_BIN` if set, else `openprocyon` (found on PATH when spawned).
 pub fn game_bin() -> PathBuf {
     bin_from(std::env::var_os("PROCYON_GAME_BIN"))
@@ -81,8 +83,11 @@ pub struct Launch {
     /// `--rule-trace`: the game logs why rules have not fired (engine `rules/cli.rs:40`).
     pub rule_trace: bool,
     /// Unattended autoplay of this many game seconds: `PROCYON_AUTOPLAY=<n>` in the environment and `--script mission` (the autopilot).
-    /// The game quits when the mission ends and logs one `autoplay end` line (see `launch_report`). The engine has no flag for it.
+    /// The game quits when the mission ends. What the rules did is in the rule report ([`Launch::rule_report`]).
     pub autoplay: Option<u32>,
+    /// `--rule-report <file>`: the game writes what each rule of the mission did to this file when the battle ends
+    /// (`openprocyon::authoring::RuleReport`; [`read_rule_report`]).
+    pub rule_report: Option<PathBuf>,
 }
 
 impl Launch {
@@ -100,12 +105,13 @@ impl Launch {
             start_at: None,
             rule_trace: false,
             autoplay: None,
+            rule_report: None,
         }
     }
 
     /// The command line, in the engine's flag order:
     /// `--mod <abs> [--only-mod] --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]
-    /// [--fire-rule <rule>]... [--start-at X,Y] [--rule-trace] [--script mission]`, with `--mission N` in place of `--map <id>` when
+    /// [--fire-rule <rule>]... [--start-at X,Y] [--rule-trace] [--rule-report <abs>] [--script mission]`, with `--mission N` in place of `--map <id>` when
     /// `mission` is set (the environment of an autoplay run is in [`Launch::envs`]), or, for a
     /// lobby launch, `--mod <abs> [--only-mod] --lobby <spec>` (no `--map`: with it the game skips the lobby; no `--ship`: the
     /// lobby's Auto Assign picks the fleet).
@@ -141,6 +147,9 @@ impl Launch {
         }
         if self.rule_trace {
             a.push("--rule-trace".into());
+        }
+        if let Some(f) = &self.rule_report {
+            a.extend(["--rule-report".into(), absolute(f).into()]);
         }
         if self.autoplay.is_some() {
             a.extend(["--script".into(), "mission".into()]);
@@ -189,6 +198,18 @@ pub fn exit_report(code: Option<i32>, success: bool, output: &str) -> Option<Str
 pub struct Game {
     child: Child,
     log: PathBuf,
+    /// The `--rule-report` file this run was given (in the temp folder), if any; read once the game has ended ([`Game::report`]).
+    report: Option<PathBuf>,
+}
+
+impl Drop for Game {
+    fn drop(&mut self) {
+        if self.owns_report()
+            && let Some(p) = &self.report
+        {
+            let _ = crate::project::guard::remove_file(p, None);
+        }
+    }
 }
 
 /// How a [`Game`] stands.
@@ -200,14 +221,40 @@ pub enum GameState {
 }
 
 impl Game {
-    /// Starts `launch` with the output captured in a file in the temp folder.
+    /// Starts `launch` with the output captured in a file in the temp folder. Unless `launch` brings its own, the game is given a
+    /// `--rule-report` file in the temp folder too (not for a screenshot run, which ends before a battle does).
     pub fn spawn(launch: &Launch) -> std::io::Result<Game> {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let log = std::env::temp_dir().join(format!("procyon-editor-game-{}-{}.log", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let stem = format!("procyon-editor-game-{}-{n}", std::process::id());
+        let log = std::env::temp_dir().join(format!("{stem}.log"));
+        let mut launch = launch.clone();
+        let mut own_report = None;
+        if launch.rule_report.is_none() && launch.shot.is_none() {
+            let report = std::env::temp_dir().join(format!("{stem}.rules.json"));
+            crate::project::guard::check_writable(&report, None).map_err(std::io::Error::other)?;
+            // A leftover of an earlier run with the same name must not pass for this run's report.
+            let _ = crate::project::guard::remove_file(&report, None);
+            launch.rule_report = Some(report.clone());
+            own_report = Some(report);
+        }
         let out = crate::project::guard::create_file(&log, None).map_err(std::io::Error::other)?;
         let err = out.try_clone()?;
         let child = Command::new(game_bin()).args(launch.args()).envs(launch.envs()).stdout(out).stderr(err).spawn()?;
-        Ok(Game { child, log })
+        Ok(Game { child, log, report: launch.rule_report.clone().or(own_report) })
+    }
+
+    /// What the rules did in this run, from the `--rule-report` file; call it once the game has ended ([`Game::poll`]; the game may
+    /// rewrite the file while it runs, the last write wins). `Ok(None)`: no file, because the game ended before a battle with
+    /// mission rules did (or crashed). The temp file goes when the [`Game`] is dropped.
+    pub fn report(&self) -> Result<Option<RuleReport>, String> {
+        let Some(path) = &self.report else { return Ok(None) };
+        read_rule_report(path)
+    }
+
+    /// The report file is one of ours (in the temp folder, named for this run), not one the caller's `Launch` brought.
+    fn owns_report(&self) -> bool {
+        self.report.as_deref().is_some_and(|p| p.parent() == self.log.parent() && p.extension().is_some_and(|e| e == "json"))
     }
 
     /// Whether it still runs; once it ended, the report (and the log file is removed).
@@ -239,6 +286,20 @@ impl Game {
         let mut bytes = Vec::new();
         let _ = f.read_to_end(&mut bytes);
         String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+/// Parses the `--rule-report` JSON.
+pub fn parse_rule_report(text: &str) -> Result<RuleReport, String> {
+    serde_json::from_str(text).map_err(|e| format!("the rule report is not what this editor expects (engine version?): {e}"))
+}
+
+/// Reads a `--rule-report` file: `Ok(None)` when there is none, an error when it cannot be read or parsed.
+pub fn read_rule_report(path: &Path) -> Result<Option<RuleReport>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => parse_rule_report(&t).map(Some),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
     }
 }
 
@@ -482,7 +543,7 @@ mod tests {
         let out = std::fs::File::create(&log).unwrap();
         let err = out.try_clone().unwrap();
         let child = Command::new("sh").args(["-c", "echo out line; echo 'bad map' >&2; exit 3"]).stdout(out).stderr(err).spawn().unwrap();
-        let mut g = Game { child, log: log.clone() };
+        let mut g = Game { child, log: log.clone(), report: None };
         let state = loop {
             match g.poll() {
                 GameState::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
@@ -493,10 +554,45 @@ mod tests {
         assert!(r.contains("code 3") && r.contains("out line") && r.contains("bad map"), "{r}");
         assert!(!log.exists(), "the log is removed");
         let child = Command::new("sleep").arg("30").spawn().unwrap();
-        let mut g = Game { child, log };
+        let mut g = Game { child, log, report: None };
         assert_eq!(g.poll(), GameState::Running);
         g.stop();
         assert!(matches!(g.poll(), GameState::Ended(_)));
+    }
+
+    const REPORT: &str = r#"{"mission":"gates","outcome":"victory","play_time":412.5,"rules":[
+        {"name":"Open the gate","fired":true,"runs":2,"first_run":10.0,"last_run":300.5,"active":true},
+        {"name":"Never happens","fired":false,"runs":0,"active":false}]}"#;
+
+    #[test]
+    fn a_rule_report_is_read_and_a_missing_or_broken_one_is_told_apart() {
+        let r = parse_rule_report(REPORT).unwrap();
+        assert_eq!((r.mission.as_str(), r.outcome, r.play_time), ("gates", openprocyon::authoring::RuleReportOutcome::Victory, 412.5));
+        assert_eq!((r.rules[0].runs, r.rules[0].first_run, r.rules[0].last_run), (2, Some(10.0), Some(300.5)));
+        assert!(!r.rules[1].fired && r.rules[1].first_run.is_none());
+        assert!(parse_rule_report("{\"mission\":1}").unwrap_err().contains("rule report"));
+        let dir = std::env::temp_dir().join(format!("procyon-editor-report-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("r.json");
+        assert_eq!(read_rule_report(&file), Ok(None));
+        std::fs::write(&file, REPORT).unwrap();
+        assert_eq!(read_rule_report(&file).unwrap().unwrap(), r);
+        std::fs::write(&file, "{ cut").unwrap();
+        assert!(read_rule_report(&file).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_game_reports_after_it_ended_and_its_own_file_goes_away() {
+        let dir = std::env::temp_dir();
+        let log = dir.join(format!("procyon-editor-game-test2-{}.log", std::process::id()));
+        let report = dir.join(format!("procyon-editor-game-test2-{}.rules.json", std::process::id()));
+        std::fs::write(&report, REPORT).unwrap();
+        let child = Command::new("true").spawn().unwrap();
+        let g = Game { child, log, report: Some(report.clone()) };
+        assert_eq!(g.report().unwrap().unwrap().rules.len(), 2);
+        drop(g);
+        assert!(!report.exists(), "the temp report is removed");
     }
 
     #[test]

@@ -32,6 +32,8 @@ pub struct State {
     held: Option<Launch>,
     check: Option<Result<ModCheck, String>>,
     child: Option<launch::Game>,
+    /// What the rules did in the last game run (`--rule-report`); `Ok(None)`: the game wrote none.
+    report: Option<Result<Option<openprocyon::authoring::RuleReport>, String>>,
     status: String,
     /// The last game run ended with an error (its report is in `status`).
     failed: bool,
@@ -72,6 +74,7 @@ impl Default for State {
             held: None,
             check: None,
             child: None,
+            report: None,
             status: String::new(),
             failed: false,
             version: None,
@@ -153,6 +156,7 @@ impl State {
 
     fn start(&mut self, l: &Launch) {
         self.failed = false;
+        self.report = None;
         match launch::Game::spawn(l) {
             Ok(c) => {
                 self.child = Some(c);
@@ -222,6 +226,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if let Some(g) = st.child.as_mut()
         && let launch::GameState::Ended(report) = g.poll()
     {
+        st.report = Some(g.report());
         st.child = None;
         st.failed = report.is_some();
         st.status = report.unwrap_or_else(|| "The game ended.".into());
@@ -338,6 +343,13 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         } else {
             ui.label(&st.status);
         }
+    }
+    match &st.report {
+        Some(Ok(Some(r))) if st.child.is_none() => crate::mission::report::draw(ui, r),
+        Some(Err(e)) => {
+            ui.colored_label(ui.visuals().warn_fg_color, e);
+        }
+        _ => {}
     }
     match &st.check {
         None => {}

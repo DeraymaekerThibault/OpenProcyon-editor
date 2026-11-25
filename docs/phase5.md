@@ -10,7 +10,7 @@ the plan in `docs/roadmap.md` (Phase 5, "The low-code mission editor", backlog B
   formats may change freely and the editor follows them; Phase 5 starts now, the freeze gates the release only. Today neither file
   has a `format` key, a schema or a typed loader: the game reads both as untyped JSON (`campaign.rs:400-404`, `load_as::<Value>`), and
   `authoring::schemas()` has no mission or media schema (`authoring.rs:110-114`).
-- **Engine checked.** Everything below about the engine was read at the editor's pin `f91542f` (since moved to `925d8e4`, OpenProcyon#631; the findings below stand unless a later note says otherwise) (engine source read only). The engine
+- **Engine checked.** Everything below about the engine was read at the editor's pin `f91542f` (since moved to `925d8e4`, OpenProcyon#631, then to `e344068`, on top of OpenProcyon#638, #639 and #640; the findings below stand unless a later note says otherwise) (engine source read only). The engine
   checkout also has an unmerged branch `claude/authoring-expose` (`ae444cb`, one commit over the pin) that makes the keyed-list merge
   (`keyed_lists`, `extend`, `merge_keyed`), `scenery_transform`, `game_rotation` and `formation_slots` public in `authoring`; it is not
   in the pin, so nothing here relies on it.
@@ -182,9 +182,10 @@ reference walk of P3; the author can untick them); "start here" on the plan sets
 **The report (which rules fired, which never did): needs an engine feature.** Today the engine keeps per rule `fired` and `ran`
 (private, `state.rs:40-43`) and `Script::never_fired()` (public, `state.rs:423-425`), but writes them only as one log line at the end
 of an unattended autoplay run (`PROCYON_AUTOPLAY=<seconds>` with `--script mission`, `smoke/mod.rs:259-295`: `autoplay end
-outcome=.. never_fired=[..]`) and in the console's `rules` command. Until requirement 5, the editor offers "Autoplay report" (that
-autoplay run, its stderr parsed; PROVISIONAL: parsing a log line) and shows the never-fired rules in the rule list. A human
-play-test has no report until the engine writes one.
+outcome=.. never_fired=[..]`) and in the console's `rules` command. Since requirement 5 (done, OpenProcyon#638) the editor passes `--rule-report <temp file>` to the game and reads
+the file after the game exits (`authoring::RuleReport`): outcome, play time, and per rule fired / runs / first and last run / active,
+never-fired rules highlighted, in the "Play-test report" section of the Missions tab and under the Play-test tab's buttons. No file
+(the game was closed before a battle with mission rules ended, or crashed) is said so; the log parser it replaced is removed.
 Engine needs: 5.
 
 ### P11. A retail mission as a diff (M)
@@ -243,7 +244,10 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
 4. **Rule schema: an `area` and a one-line `summary` per Type** (and a description per field). Missing: `to_json` gives `name`, `role`,
    `origin`, `handler`, `campaign_only`, `fields` only (`schema.rs:969-977`); the areas exist only as headings of `docs/rule-types.md`.
    Why: the searchable, grouped add menu (P5) without an editor-side table.
-5. **A play-test report file:** `--rule-report <file>` (name PROVISIONAL) writing JSON when the mission ends or the game quits: per rule
+5. **A play-test report file: DONE** (OpenProcyon#638, pin `e344068`): `--rule-report <file>` writes `authoring::RuleReport` (mission, outcome
+   victory/defeat/quit, play_time, rules with fired, runs, first_run, last_run, active); the editor passes it to every game it
+   starts and reads it after the game exits (`launch::Game::report`, drawn by `mission::report`); the autoplay-log parser is removed.
+   The original request, kept for the record: `--rule-report <file>` (name PROVISIONAL) writing JSON when the mission ends or the game quits: per rule
    (by index and name) whether it fired, how many times and first at which game time, its state at the end (inactive, waiting in an
    `OP Wait`), tasks with their end state, the outcome. Missing: the data is in `Script` (`fired`, `ran`, `state.rs:40-43`;
    `never_fired`, `state.rs:423`) but leaves the game only as an autoplay log line (`smoke/mod.rs:294`). Why: P10's report for a human
@@ -258,7 +262,9 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
    pictures (`authoring.rs:192-194`); `rules::cli::check_map_in(dir, lookups)` does (`rules/cli.rs:117`) but is not in `authoring`
    and needs files. Task findings carry `rule: "task 'X'"` and no task index (`check.rs:35`). Why: a wrong ship `type` and a missing
    `.ogg` shown on the field while typing (P2, P7), task findings on the task row (P4).
-9. **Sound duration** (optional): `authoring::sound_duration(path)`; the engine decodes Vorbis through Bevy's `vorbis` feature
+9. **Sound duration: DONE** (OpenProcyon#638, pin `e344068`): `authoring::sound_duration(path)` decodes to the end with the game's own
+   decoder; the editor's Ogg reader (`mission/ogg.rs`) is removed and `mission::speech::sound_seconds` calls the engine, caching the
+   answer by path, modification time and size (the speech rows ask every frame). The original request (optional): `authoring::sound_duration(path)`; the engine decodes Vorbis through Bevy's `vorbis` feature
    (`game/Cargo.toml:10`). Why: P7 reads `duration` the way the game would; without it the editor's own Ogg header reader is used.
 10. **Templates as data** (decision first): a template format and the first files in the engine (with an expander in `authoring`),
     if templates are to be shared with authoring scripts (roadmap: "a template is a data file, so the community and authoring
@@ -312,10 +318,10 @@ spike's `src/mission.rs`: T0 turns it into a folder).
 | T7 | Mission plan: map scene greyed underneath, ships and start markers, volumes (polygon edit reused from `map::nebula`), paths, points, point sets, map text; add, delete, rename following references (T2 `refs`) as one group step | L | T1, T2; PAR with T5, T6 | `src/mission/plan.rs`, `src/mission/geometry.rs`, `tests/mission_plan.rs` |
 | T8 | Tasks and the end: task list and form, `complete_when` / `fail_when` with the T3 nested lists, `victory` radio, end messages | S | T1, T3; PAR | `src/mission/tasks.rs`, `tests/mission_tasks.rs` |
 | T9 | The map beside the rules: rule selection highlights its geometry and groups on the plan, a click on geometry lists the rules and tasks that read it | M | T5, T7 (same agent as T7 if possible) | `src/mission/plan.rs` (edit), `src/mission/rules_view.rs` (one hook) |
-| T10 | Speech and messages: tables beside the rules, "edit line" / "new line" from a speech field, `.ogg` copy through the guard, Ogg duration reader (pure, Ogg pages built in the test), face picker | M | T2; PAR | `src/mission/speech.rs`, `src/mission/ogg.rs`, `tests/mission_speech.rs` |
+| T10 | Speech and messages: tables beside the rules, "edit line" / "new line" from a speech field, `.ogg` copy through the guard, duration read by the engine's `sound_duration` (a synthetic 0.5 s tone embedded as hex in the test), face picker | M | T2; PAR | `src/mission/speech.rs`, `tests/mission_speech.rs` |
 | T11 | Templates: format, expander (one group step), dialogue / cutscene / failsafe, then the four mission templates; each expanded into an empty mission checks clean | M | T2, T3; PAR | `src/mission/templates.rs`, `templates/*.json` (our own text), `tests/mission_templates.rs` |
 | T12 | Campaign order: drag list into `mod.json` `missions`, unlisted and retail ids shown, campaign counters' "set by" | S | T1; PAR | `src/mission/campaign.rs` |
-| T13 | Launch from here: `fire_rules`, `start_at`, `rule_trace`, autoplay (`PROCYON_AUTOPLAY` + `--script mission`), the `autoplay end` line parsed into fired / never fired (PROVISIONAL), shown in the rule list through the `report` stub | M | none for `launch.rs` (PAR from the start); the panel part after T0 | `src/launch.rs` (edit), `tests/launch_args.rs` (edit), `src/mission/report.rs` |
+| T13 | Launch from here: `fire_rules`, `start_at`, `rule_trace`, autoplay (`PROCYON_AUTOPLAY` + `--script mission`), the rule report (`--rule-report`, read with `authoring::RuleReport`) shown through `mission/report.rs` | M | none for `launch.rs` (PAR from the start); the panel part after T0 | `src/launch.rs` (edit), `tests/launch_args.rs` (edit), `src/mission/report.rs` |
 | T14 | Retail mission as a diff: open from the import, keyed saves, the P11 limits as messages (append order, duplicate or missing rule names refuse), revert per rule; tests on a synthetic retail-like folder in a temp dir (never game content) | M | T1, T5 | `src/mission/project.rs` (after T1, same agent), `tests/mission_retail.rs` |
 | T15 | Engine side (a separate checkout, with the maintainer's go-ahead): requirements 5, 2, 1, 4 first, then 6 and 8; merge `ae444cb` (3) and move the pin | L | PAR with everything | in the engine, not here; then `Cargo.toml` pin (maintainer) |
 | T16 | Retire the spike: `src/mission/spike.rs`, `src/mission_panel.rs`, the "Mission (spike)" tab; `checks.rs` reads project documents | S | T5 | delete those; touches `src/main.rs`, `src/lib.rs`, `src/checks.rs` |
@@ -424,7 +430,7 @@ check's speed on a large mission, retail missions as diffs (duplicate rule names
 fine; adds, deletes and renames append or restate (P11). Mitigation: the editor says so on the Missions tab; the maintainer decides how far retail
    diffs go for v0.3.
 2. No mission or media schema (1): forms spell keys by hand in `mission/doc.rs`; a format change touches that file only.
-3. The play-test report rests on a log line until requirement 5; a change of the line's wording breaks it silently (a test pins
+3. (Resolved: the play-test report reads the engine's `--rule-report` file since the pin `e344068`.) It rested on a log line until requirement 5; a change of the line's wording breaks it silently (a test pins
    the parser to the engine's format string only by copy, PROVISIONAL).
 4. Rule list performance: `check_mission` on every edit and a few hundred egui rows (a 433-item generated mission) are not measured.
 5. Templates' home (10) undecided: built in the editor first, they may have to move.

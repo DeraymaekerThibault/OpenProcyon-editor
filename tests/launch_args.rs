@@ -78,3 +78,13 @@ fn debug_flags_follow_in_order_and_autoplay_adds_script_and_environment() {
     let shot = a.iter().position(|x| x == "--shot-frame").unwrap();
     assert!(shot < a.iter().position(|x| x == "--fire-rule").unwrap());
 }
+
+#[test]
+fn the_rule_report_flag_comes_after_the_trace_and_before_the_script() {
+    let mut l = Launch { only_mod: false, ..Launch::new(Path::new("/m/gates"), "mission03") };
+    assert!(!l.args().iter().any(|a| a == "--rule-report"));
+    l.rule_trace = true;
+    l.rule_report = Some("/tmp/r.json".into());
+    l.autoplay = Some(60);
+    assert_eq!(l.args(), os(&["--mod", "/m/gates", "--map", "mission03", "--rule-trace", "--rule-report", "/tmp/r.json", "--script", "mission"]));
+}
