@@ -3,6 +3,7 @@
 
 pub mod checks;
 pub mod compare;
+pub mod dotenv;
 pub mod edit;
 pub mod export;
 pub mod form;

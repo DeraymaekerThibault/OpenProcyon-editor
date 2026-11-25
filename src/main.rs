@@ -45,6 +45,8 @@ fn find_assets() -> Assets {
 struct Flags(startup::Args);
 
 fn main() {
+    // `.env` first, before anything reads the environment or starts a thread (the real environment wins).
+    openprocyon_editor::dotenv::load();
     let flags = match startup::parse(std::env::args().skip(1)) {
         Ok(f) => f,
         Err(e) => {
