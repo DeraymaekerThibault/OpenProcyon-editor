@@ -2,7 +2,7 @@
 //! It ships no game content and reads only what the player imported with the engine (docs/roadmap.md).
 
 use openprocyon_editor::ship_view::{self, ShipView};
-use openprocyon_editor::{maps_panel, mission_panel, missions_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
+use openprocyon_editor::{maps_panel, missions_panel, playtest_panel, project_panel, ships_panel, startup, weapons_panel, which_mod};
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
@@ -57,7 +57,6 @@ fn main() {
     App::new()
         .insert_resource(find_assets())
         .insert_resource(Flags(flags))
-        .init_resource::<mission_panel::State>()
         .init_resource::<maps_panel::State>()
         .init_resource::<project_panel::State>()
         .init_resource::<project_panel::Focus>()
@@ -110,7 +109,6 @@ fn apply_flags(
             "weapons" => Tab::Weapons,
             "3d" => Tab::Ship3d,
             "playtest" => Tab::Playtest,
-            "mission" => Tab::Mission,
             "missions" => Tab::Missions,
             "map" | "map3d" => Tab::Map,
             _ => Tab::Project,
@@ -153,7 +151,6 @@ enum Tab {
     Project,
     Ships,
     Weapons,
-    Mission,
     Missions,
     Map,
     Ship3d,
@@ -161,7 +158,7 @@ enum Tab {
 }
 
 impl Tab {
-    const ALL: [(Tab, &'static str); 8] = [
+    const ALL: [(Tab, &'static str); 7] = [
         (Tab::Project, "Mod"),
         (Tab::Ships, "Ships"),
         (Tab::Weapons, "Weapons"),
@@ -169,7 +166,6 @@ impl Tab {
         (Tab::Ship3d, "3D ship"),
         (Tab::Playtest, "Play-test & export"),
         (Tab::Missions, "Missions"),
-        (Tab::Mission, "Mission (spike)"),
     ];
 }
 
@@ -178,7 +174,6 @@ fn panel(
     mut contexts: EguiContexts,
     assets: Res<Assets>,
     mut tab: ResMut<Tab>,
-    mut mission: ResMut<mission_panel::State>,
     mut map: ResMut<maps_panel::State>,
     mut project: ResMut<project_panel::State>,
     mut focus: ResMut<project_panel::Focus>,
@@ -213,8 +208,6 @@ fn panel(
     });
     egui::Panel::bottom("problems").resizable(true).show(&mut root, |ui| {
         project_panel::problems_panel(ui, &mut project, &mut focus);
-        ui.separator();
-        egui::CollapsingHeader::new("Mission problems (spike)").default_open(false).show(ui, |ui| mission_panel::problems(ui, &mission));
     });
     // A click in the problems list names a file: show the tab that edits it (the tab then selects the ship or entry and the field).
     if !focus.rel.is_empty() {
@@ -258,7 +251,6 @@ fn panel(
             Tab::Project => project_panel::tab(ui, &mut project),
             Tab::Ships => go3d = ships_panel::tab(ui, &mut ships, &mut project, &mut focus, &mut ship, &mut link, assets.dir.as_deref().filter(|d| d.is_dir())),
             Tab::Weapons => weapons_panel::tab(ui, &mut weapons, &mut project, &mut focus, assets.dir.as_deref().filter(|d| d.is_dir())),
-            Tab::Mission => mission_panel::show(ui, &mut mission),
             Tab::Missions => missions_panel::tab(ui, &mut project),
             Tab::Map => {}
             Tab::Ship3d => {}

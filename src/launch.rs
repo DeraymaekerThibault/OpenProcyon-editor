@@ -224,11 +224,6 @@ pub fn check_mod(mod_dir: &Path) -> Result<ModCheck, String> {
     })
 }
 
-/// Starts map `map_id` of the mod in `mod_dir` without a screenshot (kept for the spike panels).
-pub fn spawn(mod_dir: &Path, map_id: &str) -> std::io::Result<Child> {
-    Launch::new(mod_dir, map_id).spawn()
-}
-
 fn absolute(p: &Path) -> PathBuf {
     std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
 }

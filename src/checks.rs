@@ -21,22 +21,29 @@ pub fn for_rule(problems: &[Finding], rule: usize) -> Vec<&Finding> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::mission::spike::{Mission, fixture_dir};
+
+    /// The committed worked example (`tests/fixtures/gates`, the engine's `gate-ambush`): (mission, map, media). Only meaningful when
+    /// running from a checkout.
+    pub(crate) fn gates_fixture() -> (Value, Value, Value) {
+        let at = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/gates/maps/gate_ambush");
+        let read = |f: &str| serde_json::from_slice::<Value>(&std::fs::read(at.join(f)).unwrap()).unwrap();
+        (read("mission.json"), read("map.json"), read("media.json"))
+    }
 
     #[test]
     fn the_worked_example_has_no_errors() {
-        let m = Mission::load(&fixture_dir()).unwrap();
-        let p = run(&m.mission, &m.map, &m.media);
+        let (mission, map, media) = gates_fixture();
+        let p = run(&mission, &map, &media);
         assert!(p.iter().all(|p| p.level != Level::Error), "{p:?}");
     }
 
     #[test]
     fn a_broken_volume_name_is_a_problem_on_that_field() {
-        let mut m = Mission::load(&fixture_dir()).unwrap();
-        m.mission["rules"][1]["conditions"][0]["Volume Name"] = "Gate Aera".into();
-        let p = run(&m.mission, &m.map, &m.media);
+        let (mut mission, map, media) = gates_fixture();
+        mission["rules"][1]["conditions"][0]["Volume Name"] = "Gate Aera".into();
+        let p = run(&mission, &map, &media);
         let hit = p.iter().find(|p| p.field == "Volume Name").unwrap_or_else(|| panic!("no problem: {p:?}"));
         assert_eq!(hit.level, Level::Error);
         assert_eq!(hit.suggestion.as_deref(), Some("Gate Area"), "the near miss as data");

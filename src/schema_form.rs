@@ -602,8 +602,8 @@ mod tests {
 
     #[test]
     fn names_come_from_the_mission() {
-        let fx = crate::mission::Mission::load(&crate::mission::fixture_dir()).unwrap();
-        let n = Names::collect(&fx.mission, &fx.map, &fx.media);
+        let (mission, map, media) = crate::checks::tests::gates_fixture();
+        let n = Names::collect(&mission, &map, &media);
         assert_eq!(n.of("volume"), ["Gate Area"]);
         assert_eq!(n.of("point"), ["The Gate"]);
         assert_eq!(n.of("task"), ["Clear the gate", "Reach the gate"]);

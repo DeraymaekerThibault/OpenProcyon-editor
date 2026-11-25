@@ -36,7 +36,7 @@ the plan in `docs/roadmap.md` (Phase 5, "The low-code mission editor", backlog B
 | `map/catalogue.rs`, `map/players.rs` | overlay scanning (scenery types, skies); id allocation across `objects`, `ships`, `mines` |
 | `launch.rs`, `playtest_panel.rs` | `Launch` (`--mod --only-mod --map`), `--check-mod --json` before a run, `spawn_logged` (stderr to a file, which the play-test report reads, P10) |
 | `which_mod.rs`, `export.rs`, `project::problems`, `compare.rs` | "which mod?" on the first edit of a retail mission, export, problems panel, compare and revert per field |
-| `mission.rs`, `mission_panel.rs` (spike) | retired by T16; the fixture `tests/fixtures/gates` (the engine's `gate-ambush` worked example, byte-equal to `docs/examples/gate-ambush.mission.json`) stays and is the gate's reference |
+| `mission.rs`, `mission_panel.rs` (spike) | retired (T16 done: the files and the tab are gone, `checks.rs` tests read the fixture directly, `--tab mission` is no longer a tab name); the fixture `tests/fixtures/gates` (the engine's `gate-ambush` worked example, byte-equal to `docs/examples/gate-ambush.mission.json`) stays and is the gate's reference |
 
 ## Packages, in build order
 

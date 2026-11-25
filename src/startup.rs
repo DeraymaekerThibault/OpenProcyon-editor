@@ -21,7 +21,7 @@ pub struct Args {
 }
 
 /// The tab names `--tab` accepts.
-pub const TABS: [&str; 9] = ["mod", "ships", "weapons", "3d", "playtest", "mission", "missions", "map", "map3d"];
+pub const TABS: [&str; 8] = ["mod", "ships", "weapons", "3d", "playtest", "missions", "map", "map3d"];
 
 /// Reads the flags from `args` (without the program name). Unknown flags and missing values are errors, so a typo in a script fails
 /// instead of silently opening something else. Paths are made absolute against the working folder.
