@@ -233,14 +233,20 @@ fn is_problem_line(line: &str) -> bool {
     line.split_whitespace().take(4).any(|w| matches!(w.trim_end_matches(':'), "WARN" | "ERROR")) || line.contains("panicked at")
 }
 
-/// What the game says went wrong: the last `n` WARN/ERROR lines of `text` (escape sequences stripped), or, when there are none,
-/// the last `n` lines whatever they are.
+/// Whether a line reads like a failure whatever its level word: "error", "cannot" or "panicked" in any case.
+fn mentions_failure(line: &str) -> bool {
+    let l = line.to_lowercase();
+    l.contains("error") || l.contains("cannot") || l.contains("panicked")
+}
+
+/// What the game says went wrong: the last `n` of the WARN/ERROR lines, the lines that say error, cannot or panicked, and the last
+/// few lines of the output (the game's real last words often have no level word), in the order printed and each once.
 pub fn error_lines(text: &str, n: usize) -> String {
     let text = strip_ansi(text);
     let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
-    let problems: Vec<&str> = lines.iter().copied().filter(|l| is_problem_line(l)).collect();
-    let pick = if problems.is_empty() { &lines } else { &problems };
-    pick[pick.len().saturating_sub(n)..].join("\n")
+    let tail_from = lines.len().saturating_sub(3);
+    let picked: Vec<&str> = lines.iter().enumerate().filter(|(i, l)| *i >= tail_from || is_problem_line(l) || mentions_failure(l)).map(|(_, l)| *l).collect();
+    picked[picked.len().saturating_sub(n)..].join("\n")
 }
 
 /// What to tell the player when the game ended: `None` for a clean exit (code 0), else the exit code (or that a signal ended it)
@@ -608,8 +614,14 @@ mod tests {
     fn escape_sequences_go_and_the_warnings_and_errors_are_what_is_shown() {
         assert_eq!(strip_ansi("\u{1b}[2m2026\u{1b}[0m \u{1b}[31;1mERROR\u{1b}[0m x\u{1b}]0;title\u{7}y"), "2026 ERROR xy");
         let log = "\u{1b}[32m INFO\u{1b}[0m starting\n\u{1b}[33m WARN\u{1b}[0m bevy: slow\n\u{1b}[32m INFO\u{1b}[0m loading\n\u{1b}[31mERROR\u{1b}[0m engine: bad map\n\u{1b}[32m INFO\u{1b}[0m bye";
-        assert_eq!(error_lines(log, 8), " WARN bevy: slow\nERROR engine: bad map");
-        assert_eq!(error_lines(log, 1), "ERROR engine: bad map");
+        assert_eq!(error_lines(log, 8), " WARN bevy: slow\n INFO loading\nERROR engine: bad map\n INFO bye");
+        assert_eq!(error_lines(log, 1), " INFO bye");
+        // The lobby's last line has no level word; the three unrelated WARN lines before it must not hide it.
+        let lobby = "WARN xsettings\nWARN software adapter\nWARN XRandR\nINFO starting\nINFO lobby\nlobby scenario cannot launch: IDGS_X_PLEASE_SELECT_A_RACE";
+        let r = error_lines(lobby, 8);
+        assert!(r.ends_with("lobby scenario cannot launch: IDGS_X_PLEASE_SELECT_A_RACE") && r.contains("WARN XRandR"), "{r}");
+        assert_eq!(r.matches("lobby scenario").count(), 1, "a line that is both tail and failure is listed once");
+        assert!(error_lines("Something Failed: PANICKED here\nb\nc\nd\ne", 8).starts_with("Something Failed"));
         assert_eq!(error_lines("a\nb\nc", 2), "b\nc");
         assert!(!last_lines(log, 3).contains('\u{1b}'));
         let l = Launch::new(Path::new("/m"), "x");
