@@ -424,7 +424,15 @@ pub const SHIP_PLAYER_KEY: &str = "player";
 /// A new player slot. PROVISIONAL: the defaults (not playable, race 4 "open", formation 0 "none", facing +y) are guesses; the engine
 /// reads a missing key as its own default (`game/src/scenario/spawn.rs`).
 pub fn new_player(name: &str, team: i64, start: [f64; 3]) -> Value {
-    serde_json::json!({"name": name, "team": team, "start": start, "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": false, "race": 4})
+    new_player_of(name, team, start, OPEN_RACE)
+}
+
+/// The race number that means "open": no fleet type of its own (a player of it takes its team's).
+pub const OPEN_RACE: u64 = 4;
+
+/// Like [`new_player`], with fleet type `race`.
+pub fn new_player_of(name: &str, team: i64, start: [f64; 3], race: u64) -> Value {
+    serde_json::json!({"name": name, "team": team, "start": start, "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": false, "race": race})
 }
 
 /// The key of a team's fleet type, a number as a player's `race` (engine `TeamDoc::race`, default 4).

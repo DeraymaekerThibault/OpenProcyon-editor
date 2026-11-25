@@ -118,7 +118,19 @@ pub fn add_player(project: &mut Project, id: &str, name: Option<&str>, at: Optio
     let team = if doc::teams(map).is_empty() { -1 } else { 0 };
     let at = at.unwrap_or([0.0, 0.0]);
     let start = [super::view2d::short_f64(f64::from(at[0])), super::view2d::short_f64(f64::from(at[1])), 0.0];
-    maps::add_entry(project, id, Array::Players, doc::new_player(&name, team, start))
+    // A player on a team takes the team's race (the lobby would do so for an open one, but the form then shows what the slot is).
+    let race = doc::teams(map).get(usize::try_from(team).unwrap_or(usize::MAX)).and_then(doc::team_race).unwrap_or(doc::OPEN_RACE);
+    maps::add_entry(project, id, Array::Players, doc::new_player_of(&name, team, start, race))
+}
+
+/// `Team 1`: the team's name id, or "team N" (its index) for a team with none.
+pub fn team_label(map: &Value, index: usize) -> String {
+    doc::teams(map).get(index).and_then(doc::team_name_id).filter(|n| !n.is_empty()).map_or_else(|| format!("team {index}"), str::to_string)
+}
+
+/// The player's name, or "player N" for a slot with none.
+pub fn player_label(map: &Value, index: usize) -> String {
+    doc::players(map).get(index).and_then(doc::player_name).filter(|n| !n.is_empty()).map_or_else(|| format!("player {index}"), str::to_string)
 }
 
 /// Sets one field of player `index` as one undo step. A new name must differ from every other player's (the key of a map that
@@ -497,28 +509,39 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
 }
 
 /// Does what the panel asked, as one undo step. Returns the entry to select on the plan, when the action made or moved a start.
+/// `label(map, index)` of the map as it is now (the index itself when the map cannot be read).
+fn label_in(project: &Project, id: &str, index: usize, label: fn(&Value, usize) -> String) -> String {
+    map_of(project, id).map_or_else(|_| index.to_string(), |m| label(m, index))
+}
+
 pub fn apply(st: &mut Panel, project: &mut Project, id: &str, action: Action) -> Option<Ref> {
     let mut select = None;
     let r: Result<String, String> = match action {
         Action::AddPlayerAtCentre => add_player(project, id, None, None).map(|i| {
             st.selected = Some(i);
             select = Some(Ref::new(Array::Players, i));
-            format!("Added player {i}.")
+            format!("Added player {}.", label_in(project, id, i, player_label))
         }),
         Action::Arm(a) => {
             st.armed = if st.armed == Some(a) { None } else { Some(a) };
             Ok(if st.armed.is_some() { "Click on the plan to place the start (Esc stops).".into() } else { String::new() })
         }
         Action::Set { index, field, value } => set_field(project, id, index, field, value).map(|()| String::new()),
-        Action::DeletePlayer(i) => delete_player(project, id, i).map(|()| {
-            st.selected = None;
-            format!("Deleted player {i}.")
-        }),
-        Action::AddTeam => add_team(project, id, "").map(|i| format!("Added team {i}.")),
+        Action::DeletePlayer(i) => {
+            let label = label_in(project, id, i, player_label);
+            delete_player(project, id, i).map(|()| {
+                st.selected = None;
+                format!("Deleted player {label}.")
+            })
+        }
+        Action::AddTeam => add_team(project, id, "").map(|i| format!("Added team {}.", label_in(project, id, i, team_label))),
         Action::RenameTeam(i, n) => rename_team(project, id, i, &n).map(|()| String::new()),
         Action::SetTeamRace(i, r) => set_team_race(project, id, i, r).map(|()| String::new()),
         Action::SetTeamLock(i, on) => set_team_lock(project, id, i, on).map(|()| String::new()),
-        Action::DeleteTeam(i) => delete_team(project, id, i).map(|()| format!("Deleted team {i}.")),
+        Action::DeleteTeam(i) => {
+            let label = label_in(project, id, i, team_label);
+            delete_team(project, id, i).map(|()| format!("Deleted team {label}."))
+        }
     };
     match r {
         Ok(info) => {
@@ -535,8 +558,8 @@ pub fn apply(st: &mut Panel, project: &mut Project, id: &str, action: Action) ->
 pub fn place_click(st: &mut Panel, project: &mut Project, id: &str, at: [f32; 2]) -> Option<Ref> {
     let arm = st.armed.take()?;
     let r = match arm {
-        Arm::NewPlayer => add_player(project, id, None, Some(at)).map(|i| (i, format!("Added player {i} at {:.0}, {:.0}.", at[0], at[1]))),
-        Arm::StartOf(i) => set_start(project, id, i, at).map(|()| (i, format!("Start of player {i} placed at {:.0}, {:.0}.", at[0], at[1]))),
+        Arm::NewPlayer => add_player(project, id, None, Some(at)).map(|i| (i, format!("Added player {} at {:.0}, {:.0}.", label_in(project, id, i, player_label), at[0], at[1]))),
+        Arm::StartOf(i) => set_start(project, id, i, at).map(|()| (i, format!("Start of player {} placed at {:.0}, {:.0}.", label_in(project, id, i, player_label), at[0], at[1]))),
     };
     match r {
         Ok((i, info)) => {
@@ -722,6 +745,24 @@ mod tests {
         rename_team(&mut p, "red", 0, "Blue").unwrap();
         assert_eq!(doc::team_ids(map(&p, "red")), vec!["Blue", "T2"]);
         assert_eq!(refusals(&p, "mine"), Refusals::default(), "a whole map takes both");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_new_player_takes_its_teams_race_and_the_messages_name_the_team() {
+        let (root, mut p) = setup("playerrace");
+        set_team_race(&mut p, "mine", 0, 2).unwrap();
+        let i = add_player(&mut p, "mine", None, None).unwrap();
+        assert_eq!(doc::player_race(&doc::players(map(&p, "mine"))[i]), Some(2), "the first team is Pirate");
+        let mut st = Panel::default();
+        apply(&mut st, &mut p, "mine", Action::AddTeam);
+        let n = doc::teams(map(&p, "mine")).len();
+        assert_eq!(st.info, format!("Added team {}.", team_label(map(&p, "mine"), n - 1)));
+        assert!(st.info.contains("Team") && !st.info.contains(&format!("team {}", n - 1)), "{}", st.info);
+        apply(&mut st, &mut p, "mine", Action::DeleteTeam(n - 1));
+        assert!(st.info.starts_with("Deleted team Team"), "{}", st.info);
+        apply(&mut st, &mut p, "mine", Action::AddPlayerAtCentre);
+        assert!(st.info.starts_with("Added player Player"), "{}", st.info);
         let _ = std::fs::remove_dir_all(&root);
     }
 
