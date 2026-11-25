@@ -101,6 +101,13 @@ pub fn crew_name(kind: CrewKind, suffix: &str) -> Result<String, String> {
     Ok(format!("Crew_{}_{suffix}", kind.word()))
 }
 
+/// Why a wake cannot be added: its entry needs an fx the editor has no source for.
+fn no_wake_fx(key: &str) -> String {
+    format!(
+        "the {key} entries need an fx (the engine derives it from the hull size, which the editor does not know) and no existing {key} entry has one to copy; ship.json's {key} array replaces the model's nodes (PROVISIONAL, engine requirement: wake entries that fill pos and fx from the node, as engines do)"
+    )
+}
+
 /// The edits that add a point of `kind` at `pos` (game axes) as the entry `label` (for a crew place the whole node name, see
 /// [`crew_name`]; ignored for tow ends and homing).
 pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, pos: [f64; 3]) -> Result<Vec<Edit>, String> {
@@ -122,10 +129,19 @@ pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, p
                 Kind::Wake => ("wakes", "WakePlacement"),
                 _ => ("flags", "FlagAttachmentPoint"),
             };
-            let entry = json!({"label": label, "pos": pos_value(pos)});
+            let mut entry = json!({"label": label, "pos": pos_value(pos)});
             let has_array = ship.get(key).is_some_and(Value::is_array);
             let model_nodes = facts.is_some_and(|f| f.points.iter().any(|p| p.kind == model_kind));
             match (has_array, model_nodes, kind) {
+                // The engine's WakeDoc requires pos and fx and has no node lookup: a wake appended to a list borrows the fx of the last
+                // entry that has one; with none to copy the add is refused (PROVISIONAL: the best fx may differ by position or hull size).
+                (true, _, Kind::Wake) => {
+                    let list = ship.get(key).and_then(Value::as_array);
+                    let fx = list.and_then(|a| a.iter().rev().find_map(|w| w.get("fx").and_then(Value::as_str).filter(|f| !f.is_empty())));
+                    let Some(fx) = fx else { return Err(no_wake_fx(key)) };
+                    entry["fx"] = json!(fx);
+                    Ok(vec![Edit::set(format!("/{key}/-"), entry)])
+                }
                 (true, _, _) => Ok(vec![Edit::set(format!("/{key}/-"), entry)]),
                 (false, false, _) => Ok(vec![Edit::set(format!("/{key}"), Value::Array(vec![entry]))]),
                 (false, true, Kind::Flag) => {
@@ -140,9 +156,7 @@ pub fn add_point(ship: &Value, facts: Option<&Facts>, kind: Kind, label: &str, p
                     Ok(vec![Edit::set("/engines", Value::Array(list))])
                 }
                 // A wake entry needs pos and fx and has no node lookup (ships.rs WakeDoc); the fx comes from the hull size, unknown here.
-                (false, true, _) => Err(format!(
-                    "the model has {key} nodes and ship.json's {key} array replaces all of them; each entry needs an fx the engine derives from the hull size, which the editor does not know (PROVISIONAL, engine requirement: wake entries that fill pos and fx from the node, as engines do)"
-                )),
+                (false, true, _) => Err(no_wake_fx(key)),
             }
         }
         Kind::Crew(k) => {
@@ -329,7 +343,8 @@ mod tests {
         assert_eq!(add_refusal(&ship, Some(&f), Kind::Engine), None);
         assert_eq!(add_refusal(&ship, Some(&f), Kind::Gun), None);
         assert_eq!(add_refusal(&ship, None, Kind::Wake), None, "no model nodes: a new array");
-        assert_eq!(add_refusal(&json!({"wakes": []}), Some(&f), Kind::Wake), None, "an array in ship.json: append");
+        assert_eq!(add_refusal(&json!({"wakes": [{"pos": [0, 0, 0], "fx": "W"}]}), Some(&f), Kind::Wake), None, "an array with an fx to copy: append");
+        assert!(add_refusal(&json!({"wakes": []}), Some(&f), Kind::Wake).is_some_and(|m| m.contains("fx")), "an empty array: no fx to copy");
         assert!(add_refusal(&ship, None, Kind::TowTower).is_some(), "a tow end needs the other end");
     }
 
@@ -357,5 +372,65 @@ mod tests {
         let out = run(&json!({}), &add_point(&json!({}), None, Kind::Homing, "", [1.0, 2.0, 3.0]).unwrap());
         assert_eq!(out["homing"], json!([1.0, 2.0, 3.0]));
         assert!(add_point(&json!({}), None, Kind::Boarding, "b", [0.0; 3]).is_err());
+    }
+
+    #[test]
+    fn a_wake_added_to_a_list_copies_the_last_fx_and_is_refused_without_one() {
+        let ship = json!({"wakes": [{"pos": [0, 0, 0], "fx": "Wake_A"}, {"pos": [1, 0, 0]}, {"pos": [2, 0, 0], "fx": "Wake_B"}, {"pos": [3, 0, 0]}]});
+        let edits = add_point(&ship, None, Kind::Wake, "W", [4.0, 5.0, 6.0]).unwrap();
+        assert_eq!(edits, vec![Edit::set("/wakes/-", json!({"label": "W", "pos": [4.0, 5.0, 6.0], "fx": "Wake_B"}))]);
+        assert_eq!(run(&ship, &edits)["wakes"][4]["fx"], "Wake_B");
+        for list in [json!([]), json!([{"pos": [0, 0, 0]}]), json!([{"pos": [0, 0, 0], "fx": ""}])] {
+            let ship = json!({"wakes": list});
+            let err = add_point(&ship, None, Kind::Wake, "W", [0.0; 3]).unwrap_err();
+            assert!(err.contains("fx"), "{err}");
+            assert_eq!(add_refusal(&ship, None, Kind::Wake), Some(err));
+        }
+        // the model's own wake nodes and no list: the same reason
+        let f = facts();
+        assert_eq!(add_refusal(&json!({}), Some(&f), Kind::Wake), add_refusal(&json!({"wakes": []}), None, Kind::Wake));
+        // engines are unchanged: no fx is invented
+        let e = add_point(&json!({"engines": [{"label": "E", "pos": [0, 0, 0], "fx": "X"}]}), None, Kind::Engine, "E2", [0.0; 3]).unwrap();
+        assert_eq!(e, vec![Edit::set("/engines/-", json!({"label": "E2", "pos": [0.0, 0.0, 0.0]}))]);
+    }
+
+    /// The engine's own `check_mod` on a synthetic mod over a synthetic base (no game content: a ship with no model and no sections).
+    /// Returns the error findings as `file: path: message`.
+    fn engine_errors(ship: &Value) -> Vec<String> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("openprocyon-editor-wake-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let _ = std::fs::remove_dir_all(&root);
+        let (base, mod_dir) = (root.join("base"), root.join("mod"));
+        let put = |dir: &std::path::Path, rel: &str, v: &Value| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, v.to_string()).unwrap();
+        };
+        for rel in ["data/weapons/guns.json", "data/weapons/bullets.json", "ships/Ship_T/geometry.json"] {
+            put(&base, rel, &json!({}));
+        }
+        put(&mod_dir, "mod.json", &json!({"id": "wake_test"}));
+        put(&mod_dir, "ships/Ship_T/ship.json", ship);
+        let found = openprocyon::authoring::check_mod(&mod_dir, Some(&base));
+        let _ = std::fs::remove_dir_all(&root);
+        found.into_iter().filter(|f| f.level == openprocyon::authoring::Level::Error).map(|f| format!("{}: {}: {}", f.file, f.path, f.message)).collect()
+    }
+
+    #[test]
+    fn the_engine_loads_a_ship_with_the_added_wake_and_rejects_one_without_fx() {
+        let ship_with = |wakes: Value| {
+            json!({"race": "Navy", "core_hp": 10, "points": 5, "wakes": wakes,
+                "physics": {"Mass": 1, "MaxThrust": 1, "MaxSpeed": 1, "RotationalFriction": 1, "MaxAngularAcceleration": 1}})
+        };
+        let ship = ship_with(json!([{"pos": [0, 0, 0], "fx": "Wake_A"}]));
+        assert_eq!(engine_errors(&ship), Vec::<String>::new());
+        let added = run(&ship, &add_point(&ship, None, Kind::Wake, "W", [1.0, 2.0, 3.0]).unwrap());
+        assert_eq!(engine_errors(&added), Vec::<String>::new(), "the added wake loads: {}", added["wakes"]);
+        // what the old code wrote: the same entry with no fx
+        let mut old = added.clone();
+        old["wakes"][1].as_object_mut().unwrap().remove("fx");
+        let errs = engine_errors(&old);
+        assert!(errs.iter().any(|e| e.contains("fx")), "{errs:?}");
     }
 }
