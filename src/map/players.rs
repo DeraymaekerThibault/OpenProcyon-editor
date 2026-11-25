@@ -7,7 +7,7 @@
 //! in the engine's keyed rule; `teams` is not keyed, so a team cannot be added or deleted there and the panel says why
 //! ([`refusals`]).
 //!
-//! The formation preview calls the engine: [`openprocyon::ship::formation_slots`], the function the skirmish spawner uses
+//! The formation preview calls the engine: [`openprocyon::authoring::formation_slots`], the function the skirmish spawner uses
 //! (`game/src/scenario/spawn.rs` places a fleet at `start` turned to `forward`; the same conversion is done here). What the engine
 //! does not tell the editor is which ships a player gets and how big they are (that is the lobby's, at play time): the preview shows
 //! [`PREVIEW_SHIPS`] ships of [`PREVIEW_RADIUS`] each, both PROVISIONAL and changeable in the panel.
@@ -20,7 +20,7 @@ use crate::map_edit::plan_view::PlanView;
 use crate::project::Project;
 use bevy::math::{Quat, Vec3};
 use bevy_egui::egui::{self, Color32, Rect, Stroke};
-use openprocyon::ship::{Formation, formation_slots};
+use openprocyon::authoring::{Formation, formation_slots};
 use serde_json::{Value, json};
 
 /// Ships drawn in a formation preview. PROVISIONAL: a guess (a skirmish fleet has a few ships).

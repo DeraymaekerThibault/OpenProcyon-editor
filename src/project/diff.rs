@@ -661,7 +661,6 @@ mod tests {
         let d = compute_with(&Fake, "x.json", DocKind::Extends, &base, &edited, &Value::Null, Some("p"));
         let file = d.file.unwrap();
         assert_eq!(file, json!({"extends": "p", "items": [{"k": "b", "v": 3}, {"k": "c"}]}));
-        assert_eq!(keyed::extend(&Fake, "x.json", base.clone(), &file).unwrap().0, edited);
         let d = compute_with(&Fake, "y.json", DocKind::Extends, &base, &edited, &Value::Null, Some("p"));
         assert_eq!(d.file.unwrap()["items"], edited["items"], "another file: whole list");
     }

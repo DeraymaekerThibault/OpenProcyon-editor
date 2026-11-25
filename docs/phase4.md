@@ -52,13 +52,13 @@ would warn). Moving an object is fine (`set`), adding, deleting or reordering is
 teams), with a way to remove an entry (engine requirement 1); (b) the editor writes the whole array and the export warns. Build (a)
 in `diff` behind a trait the engine's rule fills; until then P1 saves moves as `set` and refuses add/delete on an `extends` map
 with a message (a map whole in the mod is fine: a new map is one's own).
-Built (T3, T4): `src/map/project.rs` and `src/project/keyed.rs`. `project::keyed::KeyedRule` carries the engine's rule as its default
-(PROVISIONAL: a copy of the engine's private `keyed_defaults`, held to the engine by `tests/keyed_engine.rs`: `objects`/`ships`/`mines` by `id`, `nebulae`/`players` by
+Built (T3, T4): `src/map/project.rs` and `src/project/keyed.rs`. `project::keyed::EngineRule` asks the engine for its rule
+(`authoring::keyed_lists`, no copy since the pin moved to `925d8e4`: `objects`/`ships`/`mines` by `id`, `nebulae`/`players` by
 `name`, `"merge"` overrides, `{"<key>": X, "$remove": true}`), so add and delete on an extending map are keyed entries; they are
 refused only where the list below has an entry with no key (retail decoration), the list is not keyed (`teams`), or the file says
 `"merge": {"<list>": false}`. The engine's overlay merges such a file (the editor's merged view and the play-test read that); the editor's own
 `keyed::extend` is only a model that the tests hold to `keyed::engine_extend` (the engine through `overlay_into` + `read_merged`).
-Engine needs: 1 (keyed merge: done; still wanted public: `keyed_defaults`, so the copy can go), 2 (schemas), 13 (`merge_rule`, already requirement 3 of Phase 3).
+Engine needs: 1 (keyed merge: done, and public as `authoring::{keyed_lists, extend, merge_keyed}` since #631), 2 (schemas), 13 (`merge_rule`, already requirement 3 of Phase 3).
 Before freeze: documents, map list, new map, undo, diff of moves, the refusal. After freeze: keyed arrays (needs the engine's rule).
 
 ### P2. Top-down 2D view (M)

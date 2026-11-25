@@ -2,12 +2,10 @@
 //! (`id`, `name`) can be changed entry by entry instead of being written whole, so a mod that adds one island to a retail map does
 //! not restate the map's `objects`.
 //!
-//! The engine merges such a file itself (`authoring::overlay_into`, docs/modding.md "Changing one entry of a list"), and the editor
-//! reads that merged result ([`engine_extend`] runs it on a scratch folder for tests). What the engine keeps private is the rule
-//! itself (`modding::keyed_defaults`, `merge_keyed`, `extend`), and the editor needs it to WRITE a file (which lists may add and
-//! delete one entry, [`diff_list`]), so this module keeps a copy. PROVISIONAL: the copy, until the engine exposes the rule; the
-//! conformance test `tests/keyed_engine.rs` fails when the engine's behaviour and the copy differ. The `$remove` spelling is
-//! the engine's PROVISIONAL one too.
+//! The engine owns the rule and the merge: [`openprocyon::authoring::keyed_lists`] says which lists merge by key, and
+//! [`openprocyon::authoring::extend`] / [`openprocyon::authoring::merge_keyed`] merge. The editor only needs the rule to WRITE a file
+//! (which lists may add and delete one entry, [`diff_list`]); it asks the engine ([`EngineRule`]) and keeps no copy. The `$remove`
+//! spelling is the engine's PROVISIONAL one too.
 //!
 //! The rule: in an extends file, which lists merge by key by default; a file may override with `"merge": {"/objects": "id"}` (merge
 //! by that field) or `"merge": {"/objects": false}` (replace whole). A diff entry whose key matches a parent entry is deep-merged
@@ -18,26 +16,19 @@ use serde_json::{Map, Value};
 
 use crate::edit::pointer;
 
-/// Which lists of a file merge by key by default. PROVISIONAL: a copy of the engine's private `keyed_defaults`, see the module doc.
+/// Which lists of a file merge by key by default: the engine's answer ([`EngineRule`]), or a stand-in in tests.
 pub trait KeyedRule {
-    /// `(pointer, key field)` of the lists that merge by key in the extends file `rel` (a path inside the assets). The default is the
-    /// engine's rule: in `maps/<id>/map.json` `objects`, `ships` and `mines` by `id`, `nebulae` and `players` by `name`; `mission.json`
-    /// and `script.json` have their own entries; every other file replaces its lists whole.
-    fn lists(&self, rel: &str) -> Vec<(String, String)> {
-        let parts: Vec<&str> = rel.split('/').collect();
-        let pairs: &[(&str, &str)] = match parts[..] {
-            ["maps", _, "map.json"] => &[("/objects", "id"), ("/ships", "id"), ("/mines", "id"), ("/nebulae", "name"), ("/players", "name")],
-            ["maps", _, "mission.json"] => &[("/ships", "id"), ("/rules", "name"), ("/points", "Name")],
-            ["maps", _, "script.json"] => &[("/rules", "name")],
-            _ => &[],
-        };
-        pairs.iter().map(|(p, f)| (p.to_string(), f.to_string())).collect()
-    }
+    /// `(pointer, key field)` of the lists that merge by key in the extends file `rel` (a path inside the assets).
+    fn lists(&self, rel: &str) -> Vec<(String, String)>;
 }
 
-/// The engine's rule as [`KeyedRule`]'s default.
+/// The engine's rule: `authoring::keyed_lists`.
 pub struct EngineRule;
-impl KeyedRule for EngineRule {}
+impl KeyedRule for EngineRule {
+    fn lists(&self, rel: &str) -> Vec<(String, String)> {
+        openprocyon::authoring::keyed_lists(rel).into_iter().map(|(p, f)| (p.to_string(), f.to_string())).collect()
+    }
+}
 
 /// No list merges by key (what the code before the keyed merge did).
 pub struct NoKeyed;
@@ -188,156 +179,11 @@ fn entry_diff(base: &Map<String, Value>, edited: &Map<String, Value>, path: &mut
     out
 }
 
-// ---- the merge itself (a model of the engine's, used to test the diff; `tests/keyed_engine.rs` holds it to the engine) ----
-
-/// Objects merge key by key, anything else is replaced (the engine's `merge`).
-pub fn deep_merge(base: &mut Value, over: &Value) {
-    match (base, over) {
-        (Value::Object(b), Value::Object(o)) => {
-            for (k, v) in o {
-                deep_merge(b.entry(k.clone()).or_insert(Value::Null), v)
-            }
-        }
-        (b, o) => *b = o.clone(),
-    }
-}
-
-fn object_slot<'a>(v: &'a mut Value, ptr: &str) -> Option<&'a mut Value> {
-    let mut at = v;
-    for token in ptr.strip_prefix('/')?.split('/') {
-        let key = token.replace("~1", "/").replace("~0", "~");
-        at = at.as_object_mut()?.entry(key).or_insert(Value::Null);
-    }
-    Some(at)
-}
-
-/// Merges the diff `entries` into the list at `ptr` of `base` by `field`. Returns warnings (a removal of an entry the list has not).
-/// Errors as the engine does: the list is not a list, a parent entry has no key or two share one, a diff entry has no key.
-pub fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value]) -> Result<Vec<String>, String> {
-    let err = |m: String| format!("merges '{ptr}': {m}");
-    let slot = object_slot(base, ptr).ok_or_else(|| err("the file being extended has no object on that path".into()))?;
-    if slot.is_null() {
-        *slot = Value::Array(vec![]);
-    }
-    let Value::Array(list) = slot else { return Err(err("the file being extended has no list there".into())) };
-    let keys = keys_of(list, field).map_err(|e| err(format!("the list being extended: {e}")))?;
-    let mut items: Vec<Option<Value>> = std::mem::take(list).into_iter().map(Some).collect();
-    let mut index: std::collections::HashMap<String, usize> = keys.into_iter().enumerate().map(|(i, k)| (k, i)).collect();
-    let mut warnings = vec![];
-    for (n, entry) in entries.iter().enumerate() {
-        let Some(obj) = entry.as_object() else { return Err(err(format!("entry {n} is not an object"))) };
-        let Some(k) = key_text(obj.get(field)) else { return Err(err(format!("entry {n} has no '{field}'"))) };
-        let remove = obj.get("$remove") == Some(&Value::Bool(true));
-        let mut change = entry.clone();
-        if let Some(o) = change.as_object_mut() {
-            o.shift_remove("$remove");
-        }
-        match (index.get(&k).copied(), remove) {
-            (Some(i), true) => {
-                items[i] = None;
-                index.remove(&k);
-            }
-            (None, true) => warnings.push(err(format!("removes {field} {k}, which is not in the list being extended"))),
-            (Some(i), false) => deep_merge(items[i].as_mut().expect("indexed entries are present"), &change),
-            (None, false) => {
-                index.insert(k, items.len());
-                items.push(Some(change));
-            }
-        }
-    }
-    if let Some(Value::Array(out)) = object_slot(base, ptr) {
-        *out = items.into_iter().flatten().collect();
-    }
-    Ok(warnings)
-}
-
-fn take_list(diff: &mut Value, ptr: &str) -> Result<Option<Vec<Value>>, String> {
-    let Some((parent, last)) = ptr.rsplit_once('/').filter(|(_, last)| !last.is_empty()) else {
-        return Err(format!("merges '{ptr}': not a JSON pointer to a key (like \"/objects\")"));
-    };
-    let last = last.replace("~1", "/").replace("~0", "~");
-    let mut at = &mut *diff;
-    for token in parent.split('/').skip(1) {
-        let key = token.replace("~1", "/").replace("~0", "~");
-        at = match at.as_object_mut().and_then(|o| o.get_mut(&key)) {
-            Some(next) => next,
-            None => return Ok(None),
-        };
-    }
-    match at.as_object_mut().and_then(|o| o.shift_remove(&last)) {
-        None => Ok(None),
-        Some(Value::Array(list)) => Ok(Some(list)),
-        Some(_) => Err(format!("merges '{ptr}': the file's value there is not a list")),
-    }
-}
-
-/// What the extends file `diff` (named `rel`) does to its `parent`: the engine's `extend`. Lists of [`effective`] merge by key, the
-/// rest as the plain merge does, then `set`; `extends`, `merge` and `set` are dropped. Returns the result and the warnings.
-pub fn extend(rule: &dyn KeyedRule, rel: &str, mut parent: Value, diff: &Value) -> Result<(Value, Vec<String>), String> {
-    let mut diff = diff.clone();
-    let own_merge = diff.as_object_mut().filter(|o| o.get("merge").is_some_and(Value::is_object)).and_then(|o| o.shift_remove("merge"));
-    let mut lists = vec![];
-    for (ptr, field) in effective(rule, rel, own_merge.as_ref()) {
-        if diff.pointer(&ptr).is_some_and(Value::is_array) {
-            lists.push((ptr.clone(), field, take_list(&mut diff, &ptr)?.unwrap_or_default()));
-        }
-    }
-    // A pointer the file names that nothing merges by default and the diff has no list for is an error in the engine.
-    for (ptr, v) in own_merge.as_ref().and_then(Value::as_object).into_iter().flatten() {
-        if v.is_string() && !lists.iter().any(|(p, _, _)| p == ptr) && !diff.pointer(ptr).is_some_and(Value::is_array) {
-            return Err(format!("merges '{ptr}': the file has no list there"));
-        }
-    }
-    deep_merge(&mut parent, &diff);
-    let obj = parent.as_object_mut().ok_or("the merged file is not a JSON object")?;
-    obj.shift_remove("extends");
-    let set = obj.shift_remove("set");
-    let mut warnings = vec![];
-    for (ptr, field, list) in lists {
-        warnings.extend(merge_keyed(&mut parent, &ptr, &field, &list)?);
-    }
-    if let Some(Value::Object(set)) = set {
-        for (ptr, value) in set {
-            match parent.pointer_mut(&ptr) {
-                Some(slot) => *slot = value,
-                None => return Err(format!("sets '{ptr}', which does not exist")),
-            }
-        }
-    }
-    Ok((parent, warnings))
-}
-
-/// What the ENGINE makes of the extends file `diff` (named `rel`) laid over `parent`: the same inputs as [`extend`], but run through
-/// the engine's own `authoring::overlay_into` and `read_merged` on a scratch folder, so the result is the engine's by construction.
-/// `Err`: the engine skipped the file (its reason, as the engine words it). Warnings are the engine's. This is the oracle that tests
-/// compare [`extend`] and the diff against; the editor's merged view reads the engine's overlay directly and does not need it.
+/// What the engine makes of the extends file `diff` (named `rel`) laid over `parent`: [`openprocyon::authoring::extend`], the loader's
+/// own merge. `Err`: the engine would skip the file (its reason). This is the oracle the tests compare the diff against; the editor
+/// never merges itself.
 pub fn engine_extend(rel: &str, parent: &Value, diff: &Value) -> Result<(Value, Vec<String>), String> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let dir = crate::overlay::scratch(&format!("engine-extend-{}", N.fetch_add(1, Ordering::Relaxed)));
-    let _ = crate::project::guard::remove_dir_all(&dir, None);
-    let (assets, m, out) = (dir.join("assets"), dir.join("mod"), dir.join("out"));
-    let write = |root: &std::path::Path, rel: &str, v: &Value| -> Result<(), String> {
-        let path = root.join(rel);
-        crate::project::guard::create_dir_all(path.parent().expect("a file path"), None)?;
-        crate::project::guard::write(&path, v.to_string(), None)
-    };
-    let result = (|| {
-        let parent_id = diff.get("extends").and_then(Value::as_str).ok_or("the file has no 'extends'")?;
-        let parent_rel = openprocyon::authoring::extends_parent(rel, parent_id).ok_or("no parent file for that path")?;
-        write(&assets, &parent_rel, parent)?;
-        write(&m, rel, diff)?;
-        let report = openprocyon::authoring::overlay_into(&assets, std::slice::from_ref(&m), &out)?;
-        let entry = report.mods.first().ok_or("the engine reports no mod")?;
-        if let Some((_, why)) = entry.skipped.first() {
-            return Err(why.clone());
-        }
-        let warnings = entry.warnings.iter().map(|(_, w)| w.clone()).collect();
-        let merged = openprocyon::authoring::read_merged(&out, rel).map_err(|e| e.to_string())?;
-        Ok((merged, warnings))
-    })();
-    let _ = crate::project::guard::remove_dir_all(&dir, None);
-    result
+    openprocyon::authoring::extend(rel, parent.clone(), diff)
 }
 
 /// The pointer of the list `key` at the top of a file (`objects` is `/objects`).
@@ -393,52 +239,8 @@ mod tests {
                 (rel == "x.json").then(|| ("/items".to_string(), "k".to_string())).into_iter().collect()
             }
         }
-        let (out, _) = extend(&Fake, "x.json", json!({"items": [{"k": 1, "v": 1}]}), &json!({"items": [{"k": 1, "v": 2}, {"k": 2}]})).unwrap();
-        assert_eq!(out, json!({"items": [{"k": 1, "v": 2}, {"k": 2}]}));
-        // another file: the list is replaced whole
-        let (out, _) = extend(&Fake, "y.json", json!({"items": [{"k": 1, "v": 1}]}), &json!({"items": [{"k": 2}]})).unwrap();
-        assert_eq!(out, json!({"items": [{"k": 2}]}));
-    }
-
-    #[test]
-    fn extend_merges_matches_appends_and_removes_by_key() {
-        let diff = json!({
-            "extends": "red",
-            "objects": [{"id": 2, "pos": [6, 6, 0]}, {"id": 1, "$remove": true}, {"id": 7, "type": "New", "pos": [1, 1, 1]}],
-            "nebulae": [{"name": "N2", "storm": true}]
-        });
-        let (out, warn) = extend(&EngineRule, MAP, base(), &diff).unwrap();
-        assert!(warn.is_empty());
-        assert_eq!(out["objects"], json!([{"id": 2, "type": "B", "pos": [6, 6, 0]}, {"id": 3, "type": "C", "pos": [9, 9, 0]}, {"id": 7, "type": "New", "pos": [1, 1, 1]}]));
-        assert_eq!(out["nebulae"], json!([{"name": "N1", "storm": false}, {"name": "N2", "storm": true}]));
-        assert_eq!(out["teams"], base()["teams"]);
-        assert!(out.get("extends").is_none());
-    }
-
-    #[test]
-    fn extend_removal_of_a_missing_entry_warns_and_set_counts_after_the_merge() {
-        let diff = json!({"objects": [{"id": 9, "$remove": true}, {"id": 1, "$remove": true}], "set": {"/objects/0/type": "Z"}});
-        let (out, warn) = extend(&EngineRule, MAP, base(), &diff).unwrap();
-        assert_eq!(warn.len(), 1, "{warn:?}");
-        assert_eq!(out["objects"][0], json!({"id": 2, "type": "Z", "pos": [5, 5, 0]}), "the pointer counts the entries after the keyed merge");
-        let bad = extend(&EngineRule, MAP, base(), &json!({"set": {"/objects/9/type": "Z"}}));
-        assert!(bad.is_err());
-        let nokey = extend(&EngineRule, MAP, base(), &json!({"objects": [{"type": "x"}]}));
-        assert!(nokey.unwrap_err().contains("has no 'id'"));
-        let dup = extend(&EngineRule, MAP, json!({"objects": [{"id": 1}, {"id": 1}]}), &json!({"objects": [{"id": 1}]}));
-        assert!(dup.unwrap_err().contains("same 'id'"));
-    }
-
-    #[test]
-    fn extend_merge_false_replaces_whole_and_a_named_field_merges_other_lists() {
-        let (out, _) = extend(&EngineRule, MAP, base(), &json!({"merge": {"/objects": false}, "objects": [{"id": 5}]})).unwrap();
-        assert_eq!(out["objects"], json!([{"id": 5}]));
-        assert!(out.get("merge").is_none());
-        let (out, _) = extend(&EngineRule, MAP, base(), &json!({"merge": {"/teams": "name_id"}, "teams": [{"name_id": "T1", "x": 1}, {"name_id": "T2"}]})).unwrap();
-        assert_eq!(out["teams"], json!([{"name_id": "T1", "x": 1}, {"name_id": "T2"}]));
-        // a list the parent has not: the entries are the list
-        let (out, _) = extend(&EngineRule, MAP, json!({}), &json!({"ships": [{"id": 1}]})).unwrap();
-        assert_eq!(out["ships"], json!([{"id": 1}]));
+        assert_eq!(effective(&Fake, "x.json", None), [("/items".to_string(), "k".to_string())]);
+        assert!(effective(&Fake, "y.json", None).is_empty());
     }
 
     fn roundtrip(base: &Value, edited: &Value, field: &str) -> ListDiff {
@@ -446,7 +248,7 @@ mod tests {
         let d = diff_list(field, b, e, "/l");
         if let ListDiff::Entries { entries, .. } | ListDiff::SameKeys { entries, .. } = &d {
             let mut v = json!({"l": base});
-            merge_keyed(&mut v, "/l", field, entries).unwrap();
+            openprocyon::authoring::merge_keyed(&mut v, "/l", field, entries).unwrap();
             assert_eq!(v["l"], *edited, "merging {entries:?}");
         }
         d

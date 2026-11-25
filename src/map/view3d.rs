@@ -29,7 +29,6 @@ use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use bevy_egui::egui;
-use openprocyon::scenario;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -46,15 +45,13 @@ const IN_FLIGHT: usize = 4;
 
 // ---- placement ----
 
-/// The world transform of a scenery object: the engine's own rule (`scenario::scenery_transform` with `scenario::game_rotation`,
-/// game/src/scenario/spawn.rs:555 and :567 at the pinned engine f91542f): the translation is `pos` in Bevy axes minus the rotated
-/// origin, the origin being the object's `scene_origin` or else the height of the type's first dock point in `docks`; the rotation
-/// is the game's 3x3 `rot` matrix changed to Bevy axes (B = C M Cᵀ). Both are public at the pinned engine (not yet in `authoring`),
-/// so the editor calls them instead of restating them; a test pins the behaviour. PROVISIONAL: `docks` is `data/docks.json` as the
-/// overlay holds it (the engine also merges each ship's `docks.json`, which no scenery uses); engine requirement: `authoring::{scenery_transform, game_rotation}`
-/// (OpenProcyon#631), after which this wrapper may use those paths.
+/// The world transform of a scenery object: the engine's own rule (`authoring::scenery_transform` with `authoring::game_rotation`): the
+/// translation is `pos` in Bevy axes minus the rotated origin, the origin being the object's `scene_origin` or else the height of the
+/// type's first dock point in `docks`; the rotation is the game's 3x3 `rot` matrix changed to Bevy axes. The editor calls them instead
+/// of restating them; a test pins the behaviour. PROVISIONAL: `docks` is `data/docks.json` as the overlay holds it (the engine also
+/// merges each ship's `docks.json`, which no scenery uses).
 pub fn placement(object: &Value, docks: &Value) -> Transform {
-    scenario::scenery_transform(object, scenario::game_rotation(&object["rot"]), docks)
+    openprocyon::authoring::scenery_transform(object, openprocyon::authoring::game_rotation(&object["rot"]), docks)
 }
 
 /// What an entry of the plan is, for how it is drawn.
@@ -93,7 +90,7 @@ pub fn items(map: &Value, scene: &Scene, docks: &Value) -> Vec<Item> {
         let label = scene.markers.get(marker).map(|m| m.label.clone()).unwrap_or_default();
         let (kind, tf, facing, model) = match which {
             Array::Objects => (ItemKind::Scenery, placement(e, docks), Vec3::ZERO, doc::scene(e).filter(|s| !s.is_empty()).map(str::to_string)),
-            Array::Ships => (ItemKind::Ship, at, (scenario::game_rotation(&e["rot"]) * Vec3::NEG_Z).normalize_or_zero(), None),
+            Array::Ships => (ItemKind::Ship, at, (openprocyon::authoring::game_rotation(&e["rot"]) * Vec3::NEG_Z).normalize_or_zero(), None),
             Array::Mines => (ItemKind::Mine, at, Vec3::ZERO, None),
             _ => {
                 let f = doc::player_forward(e).map_or(Vec3::ZERO, |f| game_vec_to_bevy(Vec3::new(f[0] as f32, f[1] as f32, f[2] as f32)).normalize_or_zero());

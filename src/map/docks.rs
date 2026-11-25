@@ -10,7 +10,7 @@
 //!   frame, `yaw` (radians, default 0) turns the node's forward `-z` about Bevy y, `label` ends in the number that picks the base's
 //!   crane clip (`DockPoint3` is 3), `layer` is optional and not edited here. A non-`Ship_` type is always dockable; `tender` only
 //!   counts for ships. The spawn takes each object's `type` as the key (game/src/scenario/spawn.rs:109 and :122).
-//! - placement: `scenario::scenery_transform` (spawn.rs:555-562) puts the model so the FIRST dock point's height (game z) lies at the
+//! - placement: `authoring::scenery_transform` puts the model so the FIRST dock point's height (game z) lies at the
 //!   object's `pos` z unless the object has a `scene_origin`: moving that point's z moves the object. [`super::view3d::placement`]
 //!   is that call, fed the edited docks, so the view shows what the engine will do.
 //! - crew: `data::crew_nodes::load_scenery` reads `data/crew_nodes.json` by scenery type (game/src/data/crew_nodes.rs:69-91);

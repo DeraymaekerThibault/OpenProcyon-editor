@@ -9,8 +9,8 @@ use crate::edit::escape;
 use openprocyon::data::derive::{Facts, Point};
 use serde_json::Value;
 
-/// What a crew place is for, from its name `Crew_<Kind>_...`. PROVISIONAL: a mirror of the engine's private list of kinds;
-/// engine requirement: authoring: the crew node kinds.
+/// What a crew place is for, from its name `Crew_<Kind>_...`. The kinds are the engine's (`authoring::CREW_KINDS`); this enum is their
+/// typed form for the pickers, and a test holds the two lists equal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CrewKind {
     Walk,
@@ -39,8 +39,7 @@ impl CrewKind {
 
     /// The kind a node name spells (`Crew_Gun_A` is `Gun`), or `None` when it is no crew node name.
     pub fn of_name(name: &str) -> Option<CrewKind> {
-        let rest = name.strip_prefix("Crew_")?;
-        let word = rest.split_once('_').map_or(rest, |s| s.0);
+        let word = openprocyon::authoring::crew_kind(name)?;
         CrewKind::ALL.into_iter().find(|k| k.word() == word)
     }
 }
@@ -198,13 +197,9 @@ pub fn hardpoints(ship: &Value, facts: Option<&Facts>) -> Vec<Hardpoint> {
     out
 }
 
-/// Whether a model layer is a damaged variant of a section (`PirateSloopShipDamage_Layer2` over `PirateSloopShip_Layer2`). The engine
-/// drops these from the hull (its `authoring::check_mod` and ship art skip every layer whose name contains `Damage_`), so the view
-/// neither draws nor picks them by default. PROVISIONAL mirror of the engine's private test (game/src/authoring/check_mod.rs,
-/// game/src/shipart.rs at b2c01f5); engine requirement in docs/phase3.md: expose it in `authoring`.
-pub fn is_damage_layer(name: &str) -> bool {
-    name.contains("Damage_")
-}
+/// Whether a model layer is a damaged variant of a section (`PirateSloopShipDamage_Layer2` over `PirateSloopShip_Layer2`): the engine's
+/// own test, which drops these from the hull, so the view neither draws nor picks them by default.
+pub use openprocyon::authoring::is_damage_layer;
 
 /// The `sections` entry whose `layer` is the mesh node `layer`: its label and the entry.
 pub fn section_for_layer<'a>(ship: &'a Value, layer: &str) -> Option<(&'a str, &'a Value)> {
@@ -342,6 +337,11 @@ mod tests {
         assert_eq!(CrewKind::of_name("Crew_Count_3"), Some(CrewKind::Count));
         assert_eq!(CrewKind::of_name("Crew_Climb"), Some(CrewKind::Climb));
         assert_eq!(CrewKind::of_name("Gun_Crew"), None);
+    }
+
+    #[test]
+    fn crew_kinds_are_the_engines() {
+        assert_eq!(CrewKind::ALL.map(CrewKind::word), openprocyon::authoring::CREW_KINDS);
     }
 
     #[test]

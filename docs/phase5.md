@@ -239,7 +239,7 @@ Checked against the pin `f91542f`. "Missing" means not found in the source or th
    (`"$after": "<name>"` or similar), because rules run in order and new ones are appended (`modding.rs:192-195`). Why: P1, P4, P11
    on retail missions without restating retail lists.
 3. **The keyed rule public in `authoring`** (`keyed_lists` / `extend` / `merge_keyed`): done on the engine branch
-   `claude/authoring-expose` (`ae444cb`), not merged. Why: `project::keyed`'s PROVISIONAL copy goes when the pin moves.
+   OpenProcyon#631 (pin `925d8e4`): merged, and the editor's copy is gone (`project::keyed` calls them).
 4. **Rule schema: an `area` and a one-line `summary` per Type** (and a description per field). Missing: `to_json` gives `name`, `role`,
    `origin`, `handler`, `campaign_only`, `fields` only (`schema.rs:969-977`); the areas exist only as headings of `docs/rule-types.md`.
    Why: the searchable, grouped add menu (P5) without an editor-side table.
@@ -328,8 +328,8 @@ Right after T0: T1, T2, T4. After T1: T6, T8 (also needs T3), T12; after T1 and 
 calls, T5 owns it after; other tasks fill their own module's `show`. `src/mission/doc.rs`: T0 writes it; a later task that needs a
 new key adds one accessor there in its own commit (small, append-only, rebase on conflict). `src/map/doc.rs`: only T0 (the move).
 `src/map/skirmish.rs`: T2 (calls), then T5 (draw call). `src/schema_form.rs`: T3 only. `src/checks.rs`: T0 (imports), T5, T16 in that
-order. `src/mission/project.rs`: T1 then T14. `src/mission/plan.rs`: T7 then T9. `src/project/keyed.rs` stays as is until the engine's
-requirement 2 or 3 lands (then one task updates the copy and `tests/keyed_engine.rs`).
+order. `src/mission/project.rs`: T1 then T14. `src/mission/plan.rs`: T7 then T9. `src/project/keyed.rs` calls the engine's keyed
+merge since the pin `925d8e4` (requirement 3 landed).
 After each task: `tools/check.sh` prints `GATE OK` before the commit (AGENTS.md); commits per task; no push without the maintainer.
 
 ## Phase 5 gate, and how it is checked
