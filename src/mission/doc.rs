@@ -529,6 +529,94 @@ pub fn script_rules(script: &Value) -> &[Value] {
     list(script, KEY_RULES)
 }
 
+// T1: the lists a mission can add to or delete from, for `mission::project`'s refusals (the keyed ones are `ships`, `rules`, `points`).
+
+/// The path of keys to a list of `mission.json` that has entries one can add and delete (`environment` ones are nested).
+pub fn list_path(list: MissionList) -> Vec<&'static str> {
+    match list {
+        MissionList::Players => vec![KEY_PLAYERS],
+        MissionList::Alliances => vec![KEY_ALLIANCES],
+        MissionList::Ships => vec![KEY_SHIPS],
+        MissionList::Points => vec![KEY_POINTS],
+        MissionList::Tasks => vec![KEY_TASKS],
+        MissionList::Rules => vec![KEY_RULES],
+        MissionList::MapText => vec![KEY_MAP_TEXT],
+        MissionList::Nebulae => vec![KEY_ENVIRONMENT, ENV_NEBULAE],
+        MissionList::Animals => vec![KEY_ENVIRONMENT, ENV_ANIMALS],
+    }
+}
+
+/// The pointer of a list ([`list_path`]).
+pub fn list_pointer(list: MissionList) -> String {
+    pointer(&list_path(list))
+}
+
+/// The raw entries of a list (empty when the key is missing or not an array).
+pub fn list_entries(mission: &Value, list: MissionList) -> &[Value] {
+    let mut at = mission;
+    for k in list_path(list) {
+        match at.get(k) {
+            Some(v) => at = v,
+            None => return &[],
+        }
+    }
+    at.as_array().map_or(&[], Vec::as_slice)
+}
+
+/// The key a keyed list's entries are told apart by (the engine's keyed merge: `ships` by `id`, `rules` by `name`, `points` by
+/// `Name`); `None` for a list the engine does not key.
+pub fn list_key(list: MissionList) -> Option<&'static str> {
+    match list {
+        MissionList::Ships => Some(SHIP_ID),
+        MissionList::Rules => Some(RULE_NAME),
+        MissionList::Points => Some(POINT_NAME),
+        _ => None,
+    }
+}
+
+/// What one entry of a list is called in an undo label.
+pub fn list_noun(list: MissionList) -> &'static str {
+    match list {
+        MissionList::Players => "player",
+        MissionList::Alliances => "alliance",
+        MissionList::Ships => "ship",
+        MissionList::Points => "point",
+        MissionList::Tasks => "task",
+        MissionList::Rules => "rule",
+        MissionList::MapText => "map text",
+        MissionList::Nebulae => "nebula",
+        MissionList::Animals => "animal",
+    }
+}
+
+/// The lists of `mission.json` an entry can be added to or deleted from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionList {
+    Players,
+    Alliances,
+    Ships,
+    Points,
+    Tasks,
+    Rules,
+    MapText,
+    Nebulae,
+    Animals,
+}
+
+impl MissionList {
+    pub const ALL: [MissionList; 9] = [
+        MissionList::Players,
+        MissionList::Alliances,
+        MissionList::Ships,
+        MissionList::Points,
+        MissionList::Tasks,
+        MissionList::Rules,
+        MissionList::MapText,
+        MissionList::Nebulae,
+        MissionList::Animals,
+    ];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,6 +745,16 @@ mod tests {
         assert_eq!(new_record("N", "V")["Polygon Name"], "V");
         assert_eq!(flag_text(true), "TRUE");
         assert_eq!((mission_nebulae_pointer(), volumes_pointer(), volume_pointer("a")), ("/environment/nebulae".to_string(), "/volumes".to_string(), "/volumes/a".to_string()));
+    }
+
+    #[test]
+    fn list_paths_and_keys() {
+        let m = json!({"rules": [{}], "environment": {"animals": [{}, {}]}});
+        assert_eq!((list_entries(&m, MissionList::Rules).len(), list_entries(&m, MissionList::Animals).len(), list_entries(&m, MissionList::Tasks).len()), (1, 2, 0));
+        assert_eq!((list_pointer(MissionList::Nebulae), list_pointer(MissionList::MapText)), ("/environment/nebulae".to_string(), "/map_text".to_string()));
+        let keyed: Vec<_> = MissionList::ALL.iter().filter_map(|l| list_key(*l)).collect();
+        assert_eq!(keyed, ["id", "Name", "name"]);
+        assert!(MissionList::ALL.iter().all(|l| !list_noun(*l).is_empty()));
     }
 
     #[test]
