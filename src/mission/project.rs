@@ -21,8 +21,7 @@ use crate::map::project::map_rel;
 use crate::project::{DocKind, Project, keyed};
 
 const MOD_FILE: &str = "mod.json";
-/// The key of `mod.json` that lists a mod's missions in order (PROVISIONAL: named here only, T12 reads it too).
-const MOD_MISSIONS: &str = "missions";
+use super::doc::MOD_MISSIONS;
 
 /// Whether `id` is a retail mission: `missionNN` (two digits), `tutorial` or `basic_tutorial`. PROVISIONAL (docs/missions.md section 1).
 pub fn is_retail_id(id: &str) -> bool {

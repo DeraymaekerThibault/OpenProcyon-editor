@@ -23,5 +23,7 @@ pub mod tasks;
 pub mod media;
 pub mod refs;
 pub mod rules;
+// T10
+pub mod ogg;
 
 pub use spike::{Mission, fixture_dir};
