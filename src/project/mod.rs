@@ -178,6 +178,9 @@ pub struct Command {
     pub edits: Vec<Edit>,
     /// The document before the step; undoing restores it exactly (an applied edit leaves created parents behind).
     before: Value,
+    /// The step came from typing or dragging a field, so the next such edit of the same field may join it. A button action (Reset,
+    /// Revert, add, remove) never does, and a save ends it ([`Project::save`]).
+    open: bool,
 }
 
 /// What a save did.
@@ -222,6 +225,8 @@ pub struct Project {
     redo: Vec<Command>,
     notices: Vec<Notice>,
     scratch: String,
+    /// The files in the mod folder at the last overlay build ([`layers::listing`]); a difference in [`Project::poll`] rebuilds it.
+    files: std::collections::BTreeSet<String>,
 }
 
 impl Drop for Project {
@@ -249,8 +254,10 @@ impl Project {
             return Err(format!("{} is not a folder", dir.display()));
         }
         let import = import.filter(|d| d.is_dir()).map(|d| std::path::absolute(&d).unwrap_or(d));
+        guard::check_project_dir(&dir, import.as_deref())?;
         let scratch = format!("project-{}", NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed));
-        let mut p = Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch };
+        let mut p =
+            Project { root: dir.clone(), dir, import, report: ModReport::default(), docs: vec![], undo: vec![], redo: vec![], notices: vec![], scratch, files: Default::default() };
         p.rebuild()?;
         if p.dir.join("mod.json").is_file()
             && let Err(e) = p.open_doc("mod.json")
@@ -272,6 +279,7 @@ impl Project {
     pub fn create_with(dir: &Path, import: Option<PathBuf>, new: &NewMod) -> Result<(Project, bool), String> {
         let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let imp = import.as_deref();
+        guard::check_project_dir(&dir, imp)?;
         for rel in &new.folders {
             check_rel(rel)?;
         }
@@ -306,6 +314,7 @@ impl Project {
         };
         let (root, report) = crate::overlay::build(&base, std::slice::from_ref(&self.dir), &crate::overlay::scratch(&self.scratch))?;
         (self.root, self.report) = (root, report);
+        self.files = layers::listing(&self.dir);
         Ok(())
     }
 
@@ -405,9 +414,16 @@ impl Project {
 
     /// Applies `edits` to the document `rel` as one undoable step, all or nothing: when one fails, the document is left as it was and
     /// the error names the step. Clears the redo stack.
-    /// Consecutive sets of the same one field with the same label are merged into one step (typing in a form field).
+    /// Consecutive sets of the same one field with the same label are merged into one step (typing in a form field), unless a save or
+    /// a [`Project::do_step`] came between.
     pub fn do_edits(&mut self, rel: &str, label: &str, edits: Vec<Edit>) -> Result<(), String> {
         self.push_edits(rel, label, edits, true)
+    }
+
+    /// What a form's edits are saved as: typing or dragging one box ([`Project::do_edits`], joins the typing before it), anything
+    /// else (a Reset, Set, add, remove button) a step of its own ([`Project::do_step`]).
+    pub fn apply_form(&mut self, rel: &str, label: &str, edits: Vec<Edit>, typing: bool) -> Result<(), String> {
+        if typing { self.do_edits(rel, label, edits) } else { self.do_step(rel, label, edits) }
     }
 
     /// [`Project::do_edits`] as a step of its own, never merged with the one before (one drag of a point in the 3D view).
@@ -433,6 +449,7 @@ impl Project {
         };
         if let Some(last) = self.undo.last_mut()
             && coalesce
+            && last.open
             && self.redo.is_empty()
             && last.rel == rel
             && last.label == label
@@ -444,7 +461,7 @@ impl Project {
             last.edits[0].old = first_old;
             return Ok(());
         }
-        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before });
+        self.undo.push(Command { rel: rel.to_string(), label: label.to_string(), edits: applied, before, open: coalesce });
         if self.undo.len() > MAX_UNDO {
             self.undo.remove(0);
         }
@@ -496,6 +513,8 @@ impl Project {
     /// equal in meaning to the one on disk is not written.
     pub fn save(&mut self) -> SaveReport {
         let mut report = SaveReport::default();
+        // What was saved is a point to come back to: the next edit of the same field is a new step, not part of the one before.
+        self.undo.iter_mut().for_each(|c| c.open = false);
         for rel in self.dirty_rels() {
             match self.save_doc(&rel) {
                 Ok((outcome, warnings)) => {
@@ -590,6 +609,23 @@ impl Project {
         let mut out: Vec<Notice> = std::mem::take(&mut self.notices);
         let mut reload = vec![];
         let mut touched = false;
+        // Files added or removed by hand (or by a script): the layer list is the engine's report of the folder, so build it again.
+        let now = layers::listing(&self.dir);
+        if now != self.files {
+            let names = |a: &std::collections::BTreeSet<String>, b: &std::collections::BTreeSet<String>| {
+                let v: Vec<&str> = a.difference(b).map(String::as_str).take(3).collect();
+                (a.difference(b).count(), v.join(", "))
+            };
+            let (added, removed) = (names(&now, &self.files), names(&self.files, &now));
+            let mut parts = vec![];
+            for (what, (n, list)) in [("added", added), ("removed", removed)] {
+                if n > 0 {
+                    parts.push(format!("{what} {list}{}", if n > 3 { format!(" and {} more", n - 3) } else { String::new() }));
+                }
+            }
+            out.push(Notice { rel: String::new(), text: format!("mod folder changed: {}", parts.join("; ")), conflict: false });
+            touched = true;
+        }
         for d in &mut self.docs {
             let now = FileStamp::of(&self.dir.join(&d.rel));
             if stamp::same(&now, &d.disk) {
@@ -910,6 +946,27 @@ mod tests {
     }
 
     #[test]
+    fn a_file_added_or_removed_by_hand_shows_in_the_layers_at_the_next_poll() {
+        let (root, assets, m) = setup("handfile");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        assert!(p.poll().is_empty());
+        write(&m, "data/render/look.json", r#"{"a": 1}"#);
+        let notes = p.poll();
+        assert!(notes.iter().any(|n| n.text.contains("added data/render/look.json")), "{notes:?}");
+        assert!(p.layer_rows().iter().any(|r| r.file == "data/render/look.json"), "{:?}", p.layer_rows());
+        assert!(p.poll().is_empty(), "announced once");
+        std::fs::remove_file(m.join("data/render/look.json")).unwrap();
+        let notes = p.poll();
+        assert!(notes.iter().any(|n| n.text.contains("removed data/render/look.json")), "{notes:?}");
+        assert!(!p.layer_rows().iter().any(|r| r.file == "data/render/look.json"));
+        // the editor's own save is not announced as a change by hand
+        p.do_edits("ships/Ship_X/ship.json", "e", vec![Edit::set("/speed", json!(9))]).unwrap();
+        assert!(p.save().errors.is_empty());
+        assert!(p.poll().is_empty(), "own writes are known");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn paths_outside_the_mod_are_refused() {
         let (root, _assets, m) = setup("paths");
         let mut p = Project::open(&m, None).unwrap();
@@ -952,6 +1009,37 @@ mod tests {
         assert_eq!(doc(&mut p)["version"], "3");
         drop(p);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reset_button_is_its_own_step_and_a_save_ends_typing() {
+        let (root, assets, m) = setup("resetstep");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        let rel = "ships/Ship_X/ship.json";
+        let speed = |p: &Project| p.doc(rel).unwrap().edited["speed"].clone();
+        let typed = |p: &mut Project, v: i64| p.apply_form(rel, "Edit Ship_X", vec![Edit::set("/speed", json!(v))], true).unwrap();
+        // type 7, 70, then the Reset button (same field, same label, one set), then Undo
+        typed(&mut p, 7);
+        typed(&mut p, 70);
+        p.apply_form(rel, "Edit Ship_X", vec![Edit::set("/speed", json!(3))], false).unwrap();
+        assert_eq!(speed(&p), json!(3));
+        p.undo();
+        assert_eq!(speed(&p), json!(70), "undoing the reset brings the typed value back");
+        p.undo();
+        assert_eq!(speed(&p), json!(3), "the typing was one step");
+        p.redo();
+        p.redo();
+        // typing after a reset is a new step too, not part of the reset
+        typed(&mut p, 9);
+        p.undo();
+        assert_eq!(speed(&p), json!(3));
+        // a save ends the typing step
+        typed(&mut p, 7);
+        assert!(p.save().errors.is_empty());
+        typed(&mut p, 70);
+        p.undo();
+        assert_eq!(speed(&p), json!(7), "back to the saved value");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

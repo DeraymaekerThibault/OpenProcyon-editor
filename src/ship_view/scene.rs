@@ -451,6 +451,17 @@ mod tests {
     }
 
     #[test]
+    fn the_layer_count_does_not_count_damage_variants() {
+        use super::super::layers_summary;
+        assert_eq!(layers_summary(None), "0 layers");
+        let mut f = facts();
+        assert_eq!(layers_summary(Some(&f)), "1 layer");
+        let layer = |name: &str| Layer { name: name.into(), aabb: [[0.0; 3], [1.0; 3]], tris: vec![] };
+        f.layers.extend([layer("Hull_Two"), layer("HullDamage_Main"), layer("HullDamage_Two")]);
+        assert_eq!(layers_summary(Some(&f)), "2 layers (+2 damage variants)");
+    }
+
+    #[test]
     fn distance_to_a_segment_clamps_at_the_ends() {
         let (a, b) = (Vec2::ZERO, Vec2::new(10.0, 0.0));
         assert_eq!(distance_to_segment(Vec2::new(5.0, 3.0), a, b), 3.0);

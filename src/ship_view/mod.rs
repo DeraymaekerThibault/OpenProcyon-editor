@@ -37,6 +37,15 @@ pub struct ViewInput {
     pub scroll: f32,
 }
 
+/// "10 layers (+2 damage variants)": the layers the view shows, and how many more are damage variants it does not draw.
+pub fn layers_summary(facts: Option<&Facts>) -> String {
+    let all = facts.map_or(&[][..], |f| &f.layers[..]);
+    let damage = all.iter().filter(|l| points::is_damage_layer(&l.name)).count();
+    let shown = all.len() - damage;
+    let plural = |n: usize, w: &str| format!("{n} {w}{}", if n == 1 { "" } else { "s" });
+    if damage == 0 { plural(shown, "layer") } else { format!("{} (+{})", plural(shown, "layer"), plural(damage, "damage variant")) }
+}
+
 /// What a click on the hull will add (set by the "Add" buttons).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Armed {
@@ -113,6 +122,12 @@ impl ShipView {
             self.pending.push(applied);
         }
         Ok(())
+    }
+
+    /// Empties the view (another mod was opened); what the user switched on for display stays.
+    pub fn clear(&mut self) {
+        let (generation, show_damage) = (self.generation + 1, self.show_damage);
+        *self = ShipView { generation, show_damage, ..ShipView::default() };
     }
 
     /// Replaces the ship with `loaded` (the pending edits of the old one are dropped by the caller's choice: they belong to it).

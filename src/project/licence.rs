@@ -1,6 +1,9 @@
 //! The licence of a new mod: a short list, and the notice written to the mod's `LICENSE` file. The editor ships no licence texts
 //! (PROVISIONAL: a notice with the SPDX id, the holder and the URL, not the full text; the modder replaces it before sharing).
 
+/// The line the editor writes into every `LICENSE` notice; the export plan finds it to warn that the notice is not a licence text.
+pub const NOTICE_MARKER: &str = "This file is a notice, not the licence text.";
+
 /// The licences offered for a new mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Licence {
@@ -54,7 +57,7 @@ impl Licence {
             Some(u) => s.push_str(&format!("\nThis mod is offered under {}. The full text is at:\n{u}\n", self.label())),
             None => s.push_str("\nAll rights reserved: nobody may copy or share this mod without the holder's permission.\n"),
         }
-        s.push_str("\nThis file is a notice, not the licence text. Replace it with the full text of the licence before you share the mod.\n");
+        s.push_str(&format!("\n{NOTICE_MARKER} Replace it with the full text of the licence before you share the mod.\n"));
         s.push_str("The mod holds only your own work and changes to the game's data, never a copy of the game's files.\n");
         s
     }

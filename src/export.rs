@@ -67,8 +67,13 @@ pub fn plan(mod_dir: &Path, import: Option<&Path>) -> Result<ExportPlan, String>
     collect(mod_dir, "", &mut files)?;
     files.sort();
     let mut warnings = Vec::new();
-    if !["LICENSE", "LICENSE.txt", "LICENSE.md"].iter().any(|n| files.iter().any(|f| f == n)) {
-        warnings.push("no LICENSE file: say under which licence others may use the mod".to_string());
+    match ["LICENSE", "LICENSE.txt", "LICENSE.md"].iter().find(|n| files.iter().any(|f| f == *n)) {
+        None => warnings.push("no LICENSE file: say under which licence others may use the mod".to_string()),
+        // the notice the editor writes for a new mod (it names the licence but is not its text)
+        Some(n) if std::fs::read_to_string(mod_dir.join(n)).is_ok_and(|t| t.contains(crate::project::licence::NOTICE_MARKER)) => {
+            warnings.push(format!("{n} is only a notice; replace it with the full licence text before sharing"));
+        }
+        Some(_) => {}
     }
     for f in &files {
         if let Some(imp) = import
@@ -154,6 +159,18 @@ mod tests {
         assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
         assert!(p.warnings[0].contains("ships/Ship_X/ship.json") && p.warnings[0].contains("identical to the player's import"));
         assert!(plan(&m, None).unwrap().warnings.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_licence_file_that_is_only_the_editors_notice_is_warned() {
+        use crate::project::licence::Licence;
+        let (root, m) = sample("notice");
+        assert!(plan(&m, None).unwrap().warnings.is_empty(), "a real licence text is fine");
+        put(&m, "LICENSE", Licence::CcBy4.notice("Gates", "Ada").as_bytes());
+        let w = plan(&m, None).unwrap().warnings;
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("LICENSE is only a notice") && w[0].contains("full licence text"), "{w:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

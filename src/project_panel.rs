@@ -29,6 +29,8 @@ pub struct State {
     seconds: f32,
     /// A change made with no mod open, waiting for the answer to "which mod?" (see [`crate::which_mod`]).
     pub ask: crate::which_mod::Asking,
+    /// Counts the times the user opened or made a mod folder; the tabs forget their selection when it changes ([`forget_selection`]).
+    pub opened: u64,
 }
 
 impl State {
@@ -42,6 +44,7 @@ impl State {
                     false => format!("Opened {}.", dir.display()),
                 };
                 self.install(p, status);
+                self.opened += 1;
             }
             Err(e) => self.status = e,
         }
@@ -97,6 +100,28 @@ impl State {
             }
         }
     }
+}
+
+/// After another mod folder was opened: the ships, weapons and 3D selections belong to the old project, so they are cleared.
+/// `seen` is the caller's last [`State::opened`]; returns whether it cleared. (Choosing a mod for a first edit made with none open
+/// does not count: the selection is what the user is editing.)
+pub fn forget_selection(
+    seen: &mut u64,
+    project: &State,
+    ships: &mut crate::ships_panel::State,
+    weapons: &mut crate::weapons_panel::State,
+    view: &mut crate::ship_view::ShipView,
+    link: &mut crate::ships_panel::Linked,
+) -> bool {
+    if *seen == project.opened {
+        return false;
+    }
+    *seen = project.opened;
+    ships.forget();
+    weapons.forget();
+    view.clear();
+    *link = Default::default();
+    true
 }
 
 /// The Bevy system that drives [`State::tick`].
@@ -280,10 +305,15 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
             ui.label(format!("{}/mod.json{}", p.dir.display(), if p.docs[i].dirty { " (unsaved)" } else { "" }));
             let schema = mod_schema();
             let notes = notes_for(&st.findings, "mod.json");
-            let edits =
-                crate::form::show(ui, &schema, &p.docs[i].edited, &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] }, egui::Id::new("mod.json form"));
+            let (edits, typing) = crate::form::show_typed(
+                ui,
+                &schema,
+                &p.docs[i].edited,
+                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] },
+                egui::Id::new("mod.json form"),
+            );
             if !edits.is_empty()
-                && let Err(e) = p.do_edits("mod.json", "Edit mod.json", edits)
+                && let Err(e) = p.apply_form("mod.json", "Edit mod.json", edits, typing)
             {
                 st.status = e;
             }
@@ -316,6 +346,34 @@ pub fn notes_for(findings: &[Finding], rel: &str) -> Vec<crate::form::FieldNote>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_another_mod_clears_the_selections_but_choosing_a_mod_for_an_edit_does_not() {
+        let dir = std::env::temp_dir().join(format!("procyon-editor-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut st = State::default();
+        let (mut ships, mut weapons, mut view, mut link) =
+            (crate::ships_panel::State::default(), crate::weapons_panel::State::default(), crate::ship_view::ShipView::default(), crate::ships_panel::Linked::default());
+        ships.selected = Some("Ship_A".into());
+        weapons.selected = Some("Gun_A".into());
+        view.ship_id = "Ship_A".into();
+        let mut seen = 0;
+        assert!(!forget_selection(&mut seen, &st, &mut ships, &mut weapons, &mut view, &mut link), "nothing opened yet");
+        st.open(&dir.join("one"), None, true);
+        assert!(st.project.is_some());
+        assert!(forget_selection(&mut seen, &st, &mut ships, &mut weapons, &mut view, &mut link));
+        assert!((ships.selected.is_none(), weapons.selected.is_none(), view.ship_id.is_empty()) == (true, true, true));
+        // `install` (the which-mod answer) leaves the selection alone
+        ships.selected = Some("Ship_B".into());
+        let (p, _) = Project::create(&dir.join("two"), None).unwrap();
+        st.install(p, String::new());
+        assert!(!forget_selection(&mut seen, &st, &mut ships, &mut weapons, &mut view, &mut link));
+        assert_eq!(ships.selected.as_deref(), Some("Ship_B"));
+        st.open(&dir.join("three"), None, true);
+        assert!(forget_selection(&mut seen, &st, &mut ships, &mut weapons, &mut view, &mut link));
+        drop(st);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn did_you_mean_is_printed_once() {

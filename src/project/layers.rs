@@ -46,6 +46,26 @@ pub struct LayerRow {
     pub note: String,
 }
 
+/// The files in the mod folder `dir` (relative paths with `/`), without dot entries and without following symlinks; the layer list
+/// is rebuilt when this changes. Capped, so a huge folder cannot stall the once-a-second poll.
+pub fn listing(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
+    fn walk(dir: &std::path::Path, prefix: &str, out: &mut std::collections::BTreeSet<String>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let (Some(kind), true) = (e.file_type().ok(), !name.starts_with('.') && out.len() < 50_000) else { continue };
+            let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+            if kind.is_dir() {
+                walk(&e.path(), &rel, out);
+            } else if kind.is_file() {
+                out.insert(rel);
+            }
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    walk(dir, "", &mut out);
+    out
+}
+
 /// The rows for one mod: unsaved documents, skipped files (with the reason), then overridden, merged, extends, added and texture
 /// files. `entry` is `None` before the overlay was built.
 pub fn rows(entry: Option<&ModEntry>, dirty: &[String]) -> Vec<LayerRow> {

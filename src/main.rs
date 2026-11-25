@@ -52,6 +52,8 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // A scratch folder an editor that was killed left behind (symlinks into the import, merged files, pictures).
+    openprocyon_editor::overlay::remove_stale();
     App::new()
         .insert_resource(find_assets())
         .insert_resource(Flags(flags))
@@ -79,6 +81,8 @@ fn main() {
         // After the 3D view's own Update systems: its edits go to the undo stack, undo and redo show in the view.
         .add_systems(PostUpdate, ships_panel::sync_system)
         .run();
+    // A normal quit: the projects have been dropped; what the previews and the map view made goes too.
+    openprocyon_editor::overlay::remove_own();
 }
 
 /// `--mod`, `--tab` and `--ship`, once at start.
@@ -95,6 +99,8 @@ fn apply_flags(
     let f = &flags.0;
     if let Some(dir) = &f.mod_dir {
         project.open(dir, assets.dir.clone().filter(|d| d.is_dir()), false);
+        // the start-up mod is not "another mod": `--ship` below selects in it, and the tabs must not clear that
+        project.opened = 0;
     }
     if let Some(t) = f.tab.as_deref() {
         *tab = match t {
@@ -168,11 +174,13 @@ fn panel(
     mut link: ResMut<ships_panel::Linked>,
     mut weapons: ResMut<weapons_panel::State>,
     mut playtest: ResMut<playtest_panel::State>,
+    mut seen_opened: Local<u64>,
 ) -> Result {
     project_panel::shortcuts(contexts.ctx_mut()?, &mut project);
+    project_panel::forget_selection(&mut seen_opened, &project, &mut ships, &mut weapons, &mut ship, &mut link);
     let ctx = contexts.ctx_mut()?;
     let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().layer_id(egui::LayerId::background()).max_rect(ctx.viewport_rect()));
-    egui::Panel::left("side").resizable(true).show(&mut root, |ui| {
+    egui::Panel::left("side").resizable(true).default_size(300.0).size_range(260.0..=420.0).show(&mut root, |ui| {
         ui.heading("OpenProcyon Editor");
         ui.separator();
         let dir = assets.dir.as_ref().map_or("(no per-user folder on this system)".into(), |d| d.display().to_string());

@@ -53,6 +53,8 @@ struct St<'a> {
     /// Unknown keys as `(pointer, keys the schema lists there)`.
     unknown: Vec<(String, Vec<String>)>,
     out: Vec<Edit>,
+    /// How many of `out` came from a text box or a number box.
+    typed: usize,
     drawn: Vec<bool>,
     /// The focus changed this frame: open its sections and scroll to it once.
     fresh: bool,
@@ -62,6 +64,12 @@ struct St<'a> {
 /// Draws `doc` as a form for `schema` and returns the edits made this frame (JSON pointers relative to `doc`), empty when nothing changed.
 /// `id` must be unique per open form (it keys the open sections and the text boxes of the form).
 pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: egui::Id) -> Vec<Edit> {
+    show_typed(ui, schema, doc, ctx, id).0
+}
+
+/// [`show`], and whether the edits are typing or dragging one box (so they may join the step before); `false` for a button (Reset,
+/// Set, add, remove, move, rename), which is always a step of its own.
+pub fn show_typed(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: egui::Id) -> (Vec<Edit>, bool) {
     let root = Node::from_schema(schema);
     let unknown = openprocyon::authoring::unknown_keys(schema, doc).into_iter().map(|(p, keys)| (edit::dotted_to_pointer(&p), keys)).collect();
     let focus_key = id.with("focus");
@@ -75,8 +83,11 @@ pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: e
             d.remove_temp::<String>(focus_key);
         }
     });
-    let mut st = St { ctx, doc, unknown, out: vec![], drawn: vec![false; ctx.findings.len()], fresh, id };
-    ui.push_id(id, |ui| {
+    let mut st = St { ctx, doc, unknown, out: vec![], typed: 0, drawn: vec![false; ctx.findings.len()], fresh, id };
+    // An explicit id (not `push_id`): egui derives the ids of the widgets inside from the parent's widget count, so a button that appears
+    // above the form (the first edit makes "Revert file" show up) would give every box a new id and the box being typed in would
+    // lose focus and its text state.
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
         if root.is_compound() {
             st.notes(ui, "");
             st.body(ui, &root, "");
@@ -93,7 +104,8 @@ pub fn show(ui: &mut egui::Ui, schema: &Value, doc: &Value, ctx: &FormCtx, id: e
             }
         }
     });
-    st.out
+    let typing = !st.out.is_empty() && st.typed == st.out.len();
+    (st.out, typing)
 }
 
 fn level_color(l: Level) -> Color32 {
@@ -429,12 +441,14 @@ impl<'a> St<'a> {
             }
             Kind::Integer(_) | Kind::Number(_) => {
                 if let Some(e) = self.number(ui, &node.kind, ptr, v) {
+                    self.typed += 1;
                     self.out.push(e);
                 }
             }
             Kind::String => {
                 let mut s = v.as_str().unwrap_or_default().to_string();
                 if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0)).changed() {
+                    self.typed += 1;
                     self.out.push(Edit::set(ptr, json!(s)));
                 }
             }
@@ -457,6 +471,7 @@ impl<'a> St<'a> {
                     if let Some(item) = item
                         && let Some(e) = self.number(ui, &item.kind, &model::child_pointer(ptr, &i.to_string()), x)
                     {
+                        self.typed += 1;
                         self.out.push(e);
                     }
                 }
@@ -582,6 +597,55 @@ mod tests {
         openprocyon::authoring::schemas().into_iter().find(|(n, _)| *n == name).unwrap().1
     }
 
+    /// One frame at `t` with `events`; `above` draws that many buttons before the form, the way the panel's buttons come and go.
+    fn run(egui_ctx: &egui::Context, doc: &Value, base: &Value, above: usize, events: Vec<egui::Event>) -> (Vec<Edit>, Vec<(String, egui::Pos2, egui::Vec2)>) {
+        let schema = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let ctx = FormCtx { base: Some(base), findings: &[], focus: None, hidden: &[] };
+        let mut out = vec![];
+        let mut full = egui_ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            for i in 0..above {
+                let _ = ui.button(format!("above {i}"));
+            }
+            out = show(ui, &schema, doc, &ctx, egui::Id::new("ship form"));
+        });
+        full.textures_delta.clear();
+        let mut texts = vec![];
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Pos2, egui::Vec2)>) {
+            match shape {
+                egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos, t.galley.size())),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        full.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        (out, texts)
+    }
+
+    #[test]
+    fn a_button_appearing_above_the_form_does_not_take_focus_from_the_box_being_typed_in() {
+        let base = json!({"race": "Navy", "points": 10});
+        let doc = json!({"race": "Navy", "points": 10});
+        let egui_ctx = egui::Context::default();
+        let (_, texts) = run(&egui_ctx, &doc, &base, 0, vec![]);
+        let (_, texts2) = run(&egui_ctx, &doc, &base, 0, vec![]);
+        assert_eq!(texts.len(), texts2.len());
+        let (_, pos, size) = texts2.iter().find(|(t, _, _)| t == "points").cloned().expect("a points label");
+        let click = egui::pos2(pos.x + size.x + 8.0 + 10.0, pos.y + size.y / 2.0);
+        let button = |pressed| egui::Event::PointerButton { pos: click, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        run(&egui_ctx, &doc, &base, 0, vec![egui::Event::PointerMoved(click), button(true)]);
+        run(&egui_ctx, &doc, &base, 0, vec![button(false)]);
+        run(&egui_ctx, &doc, &base, 0, vec![]);
+        let focused = egui_ctx.memory(|m| m.focused()).expect("the click put the number box in edit mode");
+        assert!(egui_ctx.read_response(focused).is_some(), "the focused box exists");
+        // the first edit makes a button appear above the form: the same box is still there, still focused
+        for above in [1, 2, 0, 3] {
+            run(&egui_ctx, &doc, &base, above, vec![]);
+            run(&egui_ctx, &doc, &base, above, vec![]);
+            assert_eq!(egui_ctx.memory(|m| m.focused()), Some(focused), "{above} buttons above");
+            assert!(egui_ctx.read_response(focused).is_some(), "{above} buttons above: the box kept its id");
+        }
+    }
+
     #[test]
     fn the_ship_form_draws_and_returns_no_edits_without_input() {
         let ship: Value = serde_json::from_str(include_str!("../../tests/fixtures/form/ship.json")).unwrap();
@@ -704,6 +768,20 @@ mod tests {
         assert!(t.iter().any(|x| x.contains("unknown key `sigth`")), "{t:?}");
         assert!(!t.iter().any(|x| x.contains("unknown key `entity`") || x.contains("unknown key `skipped_guns`")), "{t:?}");
         assert_eq!(t.iter().filter(|x| *x == "Remove").count(), 1, "Remove only for the mod's own typo: {t:?}");
+    }
+
+    #[test]
+    fn with_no_mod_open_the_retail_file_is_its_own_base_so_every_field_is_inherited() {
+        // what the ship and weapons tabs pass with no project: base == the document
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let doc = json!({"race": "Navy", "points": 10, "entity": 7, "skipped_guns": ["a"]});
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: None, hidden: &[] });
+        assert!(has(&t, "inherited") && has(&t, "`entity`") && has(&t, "`skipped_guns`"), "{t:?}");
+        assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("Rename") || x.contains("unknown key")), "{t:?}");
+        let guns = json!({"Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "response": 3}});
+        let entry = &guns["Test Gun"];
+        let t = painted(&schema("guns.schema.json"), entry, &FormCtx { base: Some(entry), findings: &[], focus: None, hidden: &[] });
+        assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("unknown key")), "{t:?}");
     }
 
     #[test]
