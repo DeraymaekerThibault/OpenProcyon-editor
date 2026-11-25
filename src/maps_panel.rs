@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::map::catalogue::{self, Catalogue};
 use crate::map::doc::{self, Array};
+use crate::map::players;
 use crate::map::project::{self as maps, MapEntry};
 use crate::map::settings;
 use crate::map::view2d::{self, Ref, Scene, Shape};
@@ -50,6 +51,9 @@ pub struct State {
     rect: Rect,
     /// [`project_panel::State::opened`] last seen: another mod folder resets the tab.
     seen_opened: u64,
+    // T7 players, teams, starts
+    players: players::Panel,
+    // end T7
 }
 
 impl Default for State {
@@ -74,6 +78,9 @@ impl Default for State {
             info: String::new(),
             rect: Rect::NOTHING,
             seen_opened: 0,
+            // T7
+            players: players::Panel::default(),
+            // end T7
         }
     }
 }
@@ -86,6 +93,9 @@ impl State {
         self.fit = true;
         self.place = None;
         self.turning = None;
+        // T7
+        self.players.reset();
+        // end T7
     }
 
     /// Shows the map `id` of `project` (opening it over the import): errors go to the tab's message line.
@@ -179,6 +189,9 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         egui::CollapsingHeader::new("Map settings").id_salt(("map-settings", &id)).show(ui, |ui| settings::show(ui, &mut st.settings, project, &id, &skies));
     }
     // end T6 hook
+    // T7
+    let t7_refusals = players::refusals(project, &id);
+    // end T7
     let Some(map) = maps::merged_view(project, &id) else {
         st.map = None;
         return save;
@@ -228,6 +241,17 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     });
     ui.label(selection_text);
     message(ui, st);
+    // T7: the players and teams section; what it asks for is done below with the other changes
+    st.players.follow_plan(&view2d::selected_refs(&scene, &st.sel));
+    if let Some(r) = st.players.take_plan_select() {
+        st.select_next = vec![r];
+    }
+    let mut t7_action = None;
+    egui::CollapsingHeader::new("Players and teams").default_open(false).show(ui, |ui| t7_action = players::show(ui, &mut st.players, map, &t7_refusals));
+    if st.players.armed.is_some() {
+        st.place = None;
+    }
+    // end T7
 
     if std::mem::take(&mut st.fit) {
         st.view.fit_world(ui.available_rect_before_wrap(), st.view.world_half, 24.0);
@@ -255,6 +279,12 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     if escape && st.place.take().is_some() {
         st.info = "Placing stopped.".into();
     }
+    // T7: Esc stops a start being placed; the formation preview is drawn over the plan
+    if escape && st.players.armed.take().is_some() {
+        st.players.info = "Placing stopped.".into();
+    }
+    players::draw_formations(&ui.painter_at(rect), &st.view, rect, map, &st.players);
+    // end T7
 
     // At most one change per frame, against the scene that was drawn.
     if let Some(delta) = out.committed {
@@ -265,6 +295,12 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
         let label = change_label("Turn", &scene, &st.sel);
         done(st, maps::change_entries(project, &id, &label, &changes), "");
+    } else if let Some(a) = t7_action.take() {
+        // T7
+        if let Some(r) = players::apply(&mut st.players, project, &id, a) {
+            st.select_next = vec![r];
+        }
+        // end T7
     } else if let Some(Act::Turn(yaw)) = act {
         let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
         let label = change_label("Turn", &scene, &st.sel);
@@ -273,6 +309,17 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         delete_selected(st, project, &id, &scene);
     } else if act == Some(Act::Duplicate) {
         duplicate_selected(st, project, &id, &scene);
+    } else if out.response.clicked_by(egui::PointerButton::Primary)
+        && out.hovered.is_none()
+        && st.players.armed.is_some()
+        && let Some(at) = out.cursor_world
+    {
+        // T7: a click on empty plan adds a player's start (or moves the one being placed)
+        let at = view2d::placement_pos(at, &scene, &st.view.snap);
+        if let Some(r) = players::place_click(&mut st.players, project, &id, at) {
+            st.select_next = vec![r];
+        }
+        // end T7
     } else if out.response.clicked_by(egui::PointerButton::Primary)
         && out.hovered.is_none()
         && let (Some(ty), Some(at)) = (st.place.clone(), out.cursor_world)
@@ -705,6 +752,26 @@ mod tests {
         assert_eq!(doc::objects(maps::merged_view(p, "red").unwrap()).len(), 2);
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    // T7
+    #[test]
+    fn an_armed_click_on_the_plan_adds_a_player_with_its_start_as_one_undo_step() {
+        let (root, mut rig) = Rig::new("t7click");
+        rig.open_red();
+        rig.st.players.armed = Some(players::Arm::NewPlayer);
+        let at = rig.at([60.0, -40.0]);
+        rig.click(at);
+        let m = rig.map();
+        let p = &doc::players(&m)[0];
+        let s = doc::player_start(p).unwrap();
+        assert!((s[0] - 60.0).abs() < 0.5 && (s[1] + 40.0).abs() < 0.5, "{s:?}");
+        assert_eq!((rig.st.players.armed, rig.st.players.selected, rig.st.error.clone()), (None, Some(0), None));
+        assert_eq!(rig.st.sel.len(), 1, "the new start is selected on the plan");
+        rig.project().undo();
+        assert!(rig.project().undo_label().is_none(), "ONE step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    // end T7
 
     #[test]
     fn the_map_lists_and_a_new_map_opens_on_a_mod_of_its_own() {

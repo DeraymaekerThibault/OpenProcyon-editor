@@ -385,6 +385,57 @@ pub fn backdrop_rel(map_id: &str) -> String {
     format!("maps/{map_id}/backdrop.png")
 }
 
+// T7
+
+/// The fields of a player a form edits; the key is what the edit's pointer ends with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerField {
+    Name,
+    Team,
+    Playable,
+    Race,
+    Formation,
+}
+
+impl PlayerField {
+    pub fn key(self) -> &'static str {
+        match self {
+            PlayerField::Name => "name",
+            PlayerField::Team => "team",
+            PlayerField::Playable => "playable",
+            PlayerField::Race => "race",
+            PlayerField::Formation => "formation",
+        }
+    }
+}
+
+/// The key of a team's text (what a skirmish script names), as the last pointer segment of an edit.
+pub const TEAM_NAME_KEY: &str = "name_id";
+
+/// The key of the owner of a pre-placed ship, as the last pointer segment of an edit.
+pub const SHIP_PLAYER_KEY: &str = "player";
+
+/// A new player slot. PROVISIONAL: the defaults (not playable, race 4 "open", formation 0 "none", facing +y) are guesses; the engine
+/// reads a missing key as its own default (`game/src/scenario/spawn.rs`).
+pub fn new_player(name: &str, team: i64, start: [f64; 3]) -> Value {
+    serde_json::json!({"name": name, "team": team, "start": start, "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": false, "race": 4})
+}
+
+/// A new team named `name_id`.
+pub fn new_team(name_id: &str) -> Value {
+    serde_json::json!({ TEAM_NAME_KEY: name_id })
+}
+
+/// Every player name, in slot order (players without a name are skipped).
+pub fn player_names(map: &Value) -> Vec<&str> {
+    players(map).iter().filter_map(player_name).collect()
+}
+
+/// Every team's `name_id`, in order ("" for a team without one, so that indices stay right).
+pub fn team_ids(map: &Value) -> Vec<&str> {
+    teams(map).iter().map(|t| team_name_id(t).unwrap_or("")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
