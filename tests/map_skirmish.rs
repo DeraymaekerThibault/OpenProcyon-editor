@@ -400,3 +400,15 @@ fn play_in_lobby_uses_the_lobby_launch_of_the_play_test() {
     assert!(!args.iter().any(|a| a == "--map" || a == "--ship"), "{args:?}");
     assert_eq!(args[..2], ["--mod", "/abs/mod"]);
 }
+
+#[test]
+fn the_checklist_flags_a_team_without_race_as_a_hint_and_new_teams_get_one() {
+    let mut map = doc::new_map("m");
+    map["teams"] = json!([{"name_id": "NAVY"}, doc::new_team("T2")]);
+    let item = |m: &Value| sk::checklist(m).into_iter().find(|c| c.text.contains("every team has a race")).expect("the item is there when the map has teams");
+    let c = item(&map);
+    assert!(!c.ok && !c.blocking && c.hint.contains("NAVY") && !c.hint.contains("T2"), "{c:?}");
+    map["teams"][0]["race"] = json!(0);
+    assert!(item(&map).ok);
+    assert!(sk::checklist(&doc::new_map("m")).iter().all(|c| !c.text.contains("every team has a race")), "no teams, no item");
+}

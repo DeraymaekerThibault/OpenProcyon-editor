@@ -33,6 +33,20 @@ pub const PREVIEW_RADIUS: f32 = 17.0;
 /// The races the form offers by name (docs/phase4.md P5: 0 Navy, 2 Pirate, 3 Procyon, 4 open; the others are unverified, PROVISIONAL).
 pub const RACES: [(u64, &str); 4] = [(0, "Navy"), (2, "Pirate"), (3, "Procyon"), (4, "Open")];
 
+/// The race a new team gets: the first team Navy, the second Pirate, the third Procyon, then round again (a map's usual sides).
+/// PROVISIONAL: a guess; the form lets the author pick.
+pub fn default_team_race(teams_so_far: usize) -> u64 {
+    [0, 2, 3][teams_so_far % 3]
+}
+
+/// What race 4 means (the engine's `Race::Unchosen`: "no fleet type"): a player's slot is chosen in the lobby or takes the team's race.
+pub const OPEN_RACE_HELP: &str = "4 = open: no fleet type of its own. A team of this race leaves the choice to the players in the lobby; a player of this race takes its team's.";
+
+/// The hover text of a race in a picker: the number the file holds, and what "Open" means.
+pub fn race_help(n: u64) -> String {
+    if n == 4 { format!("race {n}: {OPEN_RACE_HELP}") } else { format!("race {n} in the file") }
+}
+
 /// The text for a race number.
 pub fn race_label(race: Option<u64>) -> String {
     match race {
@@ -165,7 +179,30 @@ pub fn delete_player(project: &mut Project, id: &str, index: usize) -> Result<()
 pub fn add_team(project: &mut Project, id: &str, name_id: &str) -> Result<usize, String> {
     let map = map_of(project, id)?;
     let name_id = if name_id.trim().is_empty() { unique_team_id(map) } else { name_id.trim().to_string() };
-    maps::add_entry(project, id, Array::Teams, doc::new_team(&name_id))
+    let race = default_team_race(doc::teams(map).len());
+    maps::add_entry(project, id, Array::Teams, doc::new_team_of(&name_id, race))
+}
+
+/// Sets team `index`'s fleet type (`race`, a number as a player's) as one undo step.
+pub fn set_team_race(project: &mut Project, id: &str, index: usize, race: u64) -> Result<(), String> {
+    let (rel, map) = (rel_of(id)?, map_of(project, id)?);
+    let team = doc::teams(map).get(index).ok_or_else(|| format!("{rel}: no team {index}"))?;
+    if doc::team_race(team) == Some(race) {
+        return Ok(());
+    }
+    let name = doc::team_name_id(team).filter(|n| !n.is_empty()).map_or_else(|| format!("team {index}"), str::to_string);
+    project.do_step(&rel, &format!("Set race of {name}"), vec![Edit::set(pointer(&["teams", &index.to_string(), doc::TEAM_RACE_KEY]), json!(race))])
+}
+
+/// Turns team `index`'s `lock` on or off as one undo step (written as a boolean; a retail "TRUE" text counts as on).
+pub fn set_team_lock(project: &mut Project, id: &str, index: usize, on: bool) -> Result<(), String> {
+    let (rel, map) = (rel_of(id)?, map_of(project, id)?);
+    let team = doc::teams(map).get(index).ok_or_else(|| format!("{rel}: no team {index}"))?;
+    if doc::team_lock(team) == on {
+        return Ok(());
+    }
+    let name = doc::team_name_id(team).filter(|n| !n.is_empty()).map_or_else(|| format!("team {index}"), str::to_string);
+    project.do_step(&rel, &format!("Set lock of {name}"), vec![Edit::set(pointer(&["teams", &index.to_string(), doc::TEAM_LOCK_KEY]), json!(on))])
 }
 
 /// Sets team `index`'s `name_id` as one undo step.
@@ -224,6 +261,8 @@ pub enum Action {
     DeletePlayer(usize),
     AddTeam,
     RenameTeam(usize, String),
+    SetTeamRace(usize, u64),
+    SetTeamLock(usize, bool),
     DeleteTeam(usize),
 }
 
@@ -371,7 +410,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
                     action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(-1) });
                 }
                 for (t, name) in teams.iter().enumerate() {
-                    if ui.selectable_label(team == t as i64, format!("{t}  {name}")).clicked() {
+                    if ui.selectable_label(team == t as i64, if name.is_empty() { format!("team {t}") } else { (*name).to_string() }).clicked() {
                         action = Some(Action::Set { index: i, field: PlayerField::Team, value: json!(t) });
                     }
                 }
@@ -384,7 +423,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
             let race = doc::player_race(p);
             egui::ComboBox::from_id_salt(("player-race", i)).selected_text(race_label(race)).show_ui(ui, |ui| {
                 for (n, name) in RACES {
-                    if ui.selectable_label(race == Some(n), format!("{n}  {name}")).clicked() {
+                    if ui.selectable_label(race == Some(n), name).on_hover_text(race_help(n)).clicked() {
                         action = Some(Action::Set { index: i, field: PlayerField::Race, value: json!(n) });
                     }
                 }
@@ -407,21 +446,39 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, map: &Value, refusals: &Refusals)
         };
     }
     ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Teams");
-        for (t, name) in teams.iter().enumerate() {
-            ui.label(format!("{t}"));
+    ui.label("Teams");
+    for (t, name) in teams.iter().enumerate() {
+        ui.horizontal_wrapped(|ui| {
+            // The name is the label; the number is the one a player's "Team" refers to, shown only as a hover.
             if let Some(n) = text_box(ui, &mut st.text, egui::Id::new(("team-name", t)), name, 110.0) {
                 action = Some(Action::RenameTeam(t, n));
+            }
+            let team = &doc::teams(map)[t];
+            let race = doc::team_race(team);
+            egui::ComboBox::from_id_salt(("team-race", t))
+                .selected_text(match race {
+                    None => "race: none".to_string(),
+                    Some(_) => format!("race: {}", race_label(race)),
+                })
+                .show_ui(ui, |ui| {
+                    for (n, rname) in RACES {
+                        if ui.selectable_label(race == Some(n), rname).on_hover_text(race_help(n)).clicked() {
+                            action = Some(Action::SetTeamRace(t, n));
+                        }
+                    }
+                });
+            let mut lock = doc::team_lock(team);
+            if ui.checkbox(&mut lock, "Lock").on_hover_text("The game file's \"Race Lock\" (PROVISIONAL: the engine does not read it)").changed() {
+                action = Some(Action::SetTeamLock(t, lock));
             }
             if ui.add_enabled(refusals.teams.is_none(), egui::Button::new("x")).on_hover_text("Delete this team; its players go to no team").clicked() {
                 action = Some(Action::DeleteTeam(t));
             }
-        }
-        if ui.add_enabled(refusals.teams.is_none(), egui::Button::new("Add team")).clicked() {
-            action = Some(Action::AddTeam);
-        }
-    });
+        });
+    }
+    if ui.add_enabled(refusals.teams.is_none(), egui::Button::new("Add team")).clicked() {
+        action = Some(Action::AddTeam);
+    }
     if let Some(why) = &refusals.teams {
         ui.colored_label(Color32::LIGHT_RED, format!("Teams cannot be added or deleted here: {why}"));
     }
@@ -459,6 +516,8 @@ pub fn apply(st: &mut Panel, project: &mut Project, id: &str, action: Action) ->
         }),
         Action::AddTeam => add_team(project, id, "").map(|i| format!("Added team {i}.")),
         Action::RenameTeam(i, n) => rename_team(project, id, i, &n).map(|()| String::new()),
+        Action::SetTeamRace(i, r) => set_team_race(project, id, i, r).map(|()| String::new()),
+        Action::SetTeamLock(i, on) => set_team_lock(project, id, i, on).map(|()| String::new()),
         Action::DeleteTeam(i) => delete_team(project, id, i).map(|()| format!("Deleted team {i}.")),
     };
     match r {
@@ -663,6 +722,27 @@ mod tests {
         rename_team(&mut p, "red", 0, "Blue").unwrap();
         assert_eq!(doc::team_ids(map(&p, "red")), vec!["Blue", "T2"]);
         assert_eq!(refusals(&p, "mine"), Refusals::default(), "a whole map takes both");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_new_team_has_a_race_and_the_form_sets_race_and_lock_as_one_step_each() {
+        let (root, mut p) = setup("teamrace");
+        let t = add_team(&mut p, "mine", "").unwrap();
+        let team = &doc::teams(map(&p, "mine"))[t];
+        assert_eq!((doc::team_race(team), doc::team_lock(team)), (Some(default_team_race(2)), false));
+        set_team_race(&mut p, "mine", t, 3).unwrap();
+        set_team_lock(&mut p, "mine", t, true).unwrap();
+        let team = &doc::teams(map(&p, "mine"))[t];
+        assert_eq!((doc::team_race(team), doc::team_lock(team), team["lock"].clone()), (Some(3), true, json!(true)));
+        let label = p.undo_label().map(str::to_string);
+        set_team_lock(&mut p, "mine", t, true).unwrap();
+        assert_eq!(p.undo_label().map(str::to_string), label, "no change, no step");
+        assert!(set_team_race(&mut p, "mine", 9, 0).is_err());
+        // an old team with no race gets one on an extending map too (a set of a key the parent lacks)
+        set_team_race(&mut p, "red", 0, 0).unwrap();
+        assert_eq!(doc::team_race(&doc::teams(map(&p, "red"))[0]), Some(0));
+        assert!(doc::team_lock(&json!({"lock": "TRUE"})) && !doc::team_lock(&json!({"lock": "FALSE"})), "retail's text spelling reads too");
         let _ = std::fs::remove_dir_all(&root);
     }
 

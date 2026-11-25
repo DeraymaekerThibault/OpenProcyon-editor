@@ -427,9 +427,34 @@ pub fn new_player(name: &str, team: i64, start: [f64; 3]) -> Value {
     serde_json::json!({"name": name, "team": team, "start": start, "forward": [0.0, 1.0, 0.0], "formation": 0, "playable": false, "race": 4})
 }
 
-/// A new team named `name_id`.
+/// The key of a team's fleet type, a number as a player's `race` (engine `TeamDoc::race`, default 4).
+pub const TEAM_RACE_KEY: &str = "race";
+
+/// The key of a team's "Race Lock" as the game file holds it (engine `TeamDoc::lock`: not read by the engine, any JSON value).
+pub const TEAM_LOCK_KEY: &str = "lock";
+
+/// A team's `race` number (the lobby takes the team's fleet type from it).
+pub fn team_race(team: &Value) -> Option<u64> {
+    team.get(TEAM_RACE_KEY)?.as_u64()
+}
+
+/// Whether a team's `lock` is on: `true` or the text "TRUE" (retail's spelling; PROVISIONAL: the type of the retail value is unverified).
+pub fn team_lock(team: &Value) -> bool {
+    match team.get(TEAM_LOCK_KEY) {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
+/// A new team named `name_id` of Navy (race 0).
 pub fn new_team(name_id: &str) -> Value {
-    serde_json::json!({ TEAM_NAME_KEY: name_id })
+    new_team_of(name_id, 0)
+}
+
+/// A new team named `name_id` with fleet type `race`. PROVISIONAL: no `lock` is written until the form turns it on.
+pub fn new_team_of(name_id: &str, race: u64) -> Value {
+    serde_json::json!({ TEAM_NAME_KEY: name_id, TEAM_RACE_KEY: race })
 }
 
 /// Every player name, in slot order (players without a name are skipped).

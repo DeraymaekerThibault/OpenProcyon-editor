@@ -209,6 +209,22 @@ pub fn checklist(map: &Value) -> Vec<Check> {
             &format!("players {} have no ship in \"ships\": add ships for them, or tick \"Open map\" so the players assemble fleets (PROVISIONAL)", unfunded.join(", ")),
         ));
     }
+    // A hint, not a blocker: the engine reads a missing team race as 4 (open) and the lobby then lets the players choose.
+    // PROVISIONAL: the engine's `--check-mod` is gaining an error for it; this stays an editor-side hint until the pin moves.
+    if !doc::teams(map).is_empty() {
+        let no_race: Vec<String> = doc::teams(map)
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| doc::team_race(t).is_none())
+            .map(|(i, t)| doc::team_name_id(t).filter(|n| !n.is_empty()).map_or_else(|| format!("team {i}"), str::to_string))
+            .collect();
+        out.push(check(
+            no_race.is_empty(),
+            false,
+            "every team has a race (its fleet type in the lobby)",
+            &format!("{} have no race: pick one in \"Players and teams\" (PROVISIONAL: the engine reads a missing race as 4, open)", no_race.join(", ")),
+        ));
+    }
     out.push(check(doc::name(map).is_some_and(|n| !n.trim().is_empty()), false, "the map has a name (the lobby row shows it)", "set the name in Map settings"));
     out
 }
