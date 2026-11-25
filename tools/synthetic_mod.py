@@ -64,6 +64,22 @@ put("assets/data/weapons/guns.json", json.dumps({"Gun_Test": {"MuzzleSpeed": 100
     "MaximumRange_AccuracyDeviation": 0.03, "BulletAffectedByGravity": False, "BulletTypeName_Primary": "Bullet_Test", "Mount Type": "Medium Mount"}}, indent=2))
 put("assets/data/weapons/bullets.json", json.dumps({"Bullet_Test": {"lifetime": 3, "damage": {"Wood": [5, 8, 0, 0, 0]}}}, indent=2))
 # Invented scenery, a ship, mines and two starts for the Maps tab's picture; every id is unique and the entries are all keyed.
+# Invented scenery models for the Maps tab's 3D view: boxes with a flat colour each (glTF axes), made here, never from the game.
+def scenery_glb(parts, colour):
+    global meshes, views, accessors, bin_
+    meshes, views, accessors, bin_ = [], [], [], b""
+    nodes = [{"name": f"Part_{i}", "mesh": add(*box(*p))} for i, p in enumerate(parts)]
+    doc = {"asset": {"version": "2.0", "generator": "openprocyon-editor synthetic test"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}],
+           "nodes": nodes, "materials": [{"pbrMetallicRoughness": {"baseColorFactor": colour}}],
+           "meshes": [{"primitives": [dict(m["primitives"][0], material=0)]} for m in meshes],
+           "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(bin_)}]}
+    js = json.dumps(doc).encode(); js += b" " * ((4 - len(js) % 4) % 4)
+    return struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(js) + 8 + len(bin_)) + struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(bin_), 0x004E4942) + bin_
+put("assets/models/scenery/Test_Island.glb", scenery_glb([(0, 0, 4, 80, 60, 8), (10, 5, 12, 30, 24, 8)], [0.35, 0.6, 0.3, 1]))
+put("assets/models/scenery/Test_Rock.glb", scenery_glb([(0, 0, 3, 10, 8, 6)], [0.55, 0.5, 0.45, 1]))
+put("assets/models/scenery/Test_Base.glb", scenery_glb([(0, 0, 3, 40, 40, 6), (0, 0, 10, 12, 12, 8)], [0.6, 0.6, 0.7, 1]))
+# the base's first dock point is 2 up: the engine puts the model 2 below its `pos`
+put("assets/data/docks.json", json.dumps({"Test_Base": {"points": [{"pos": [0, 0, 2]}]}}, indent=2))
 put("assets/maps/test_map/map.json", json.dumps({"name": "Test", "world_half": 500,
     "objects": [
         {"type": "Test_Island", "id": 1, "scene": "Test_Island", "pos": [-220, 150, 0], "rot": [1, 0, 0, 0, 1, 0, 0, 0, 1]},

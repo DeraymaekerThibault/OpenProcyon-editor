@@ -210,7 +210,7 @@ fn shown_points(view: &ShipView, drag: &Dragging) -> Vec<Hardpoint> {
     pts
 }
 
-fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+pub(crate) fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;
     let t = if ab.length_squared() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) };
     p.distance(a + ab * t)

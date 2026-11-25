@@ -8,13 +8,16 @@
 //! - [`settings`]: the map settings form (name, description, `world_half`, sky, lighting, backdrop) and the edits it writes.
 //! - [`players`]: players, teams, starts and the formation preview (T7).
 //! - [`nebula`], [`mines`] (T8): nebula polygons and the three-record writer; mine types and placing.
+//! - [`glb`], [`view3d`] (T9): a plain GLB reader for scenery; the 3D view of the map: placement, picking, the height handle.
 //! - [`view2d`]: what the Maps tab's plan view shows and what its drags, turns, placements and deletes write (no drawing).
 
 pub mod catalogue;
 pub mod doc;
+pub mod glb;
 pub mod mines;
 pub mod nebula;
 pub mod players;
 pub mod project;
 pub mod settings;
 pub mod view2d;
+pub mod view3d;

@@ -167,9 +167,9 @@ impl Change {
     }
 }
 
-/// `to` as the number list an entry already has under `key`: two numbers stay two, anything else is three.
+/// `to` as the number list an entry already has under `key`: two numbers stay two while z is 0 (a height, T9, makes it three), anything else is three.
 fn like(entry: &Value, key: &str, to: [f64; 3]) -> Value {
-    let two = entry.get(key).and_then(Value::as_array).is_some_and(|a| a.len() == 2);
+    let two = entry.get(key).and_then(Value::as_array).is_some_and(|a| a.len() == 2) && to[2] == 0.0;
     let num = |x: f64| crate::map_view::short(x as f32);
     if two { Value::Array(vec![num(to[0]), num(to[1])]) } else { Value::Array(to.iter().map(|&x| num(x)).collect()) }
 }

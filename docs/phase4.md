@@ -146,6 +146,14 @@ The models are not triangle-only like a ship's `derive::read` result: the editor
 `derive::read` is for ship models and reads hardpoint nodes). Start with triangle meshes, as the ship view did; textures later.
 Engine needs: 3, public `scenery_transform` (12).
 Before freeze: all of it except the object's key names. The biggest unknown is the load time of large retail GLBs (not measured).
+Built (T9): the Maps tab's "2D plan / 3D view" switch, `src/map/view3d.rs` over `src/map/glb.rs`. Scenery is drawn from `<scene>.glb`
+(found by file name under the overlay's `models/`, read on worker threads, triangles with the material's base colour, no textures) at
+`scenario::scenery_transform` / `game_rotation`, which are public at the pinned engine (`openprocyon::scenario`), so the editor calls them
+(`view3d::placement`; the dock height comes from the overlay's `data/docks.json`). Ships, mines and players' starts are markers (a
+ship's and a start's facing is an arrow). A click picks by ray (shift adds, ctrl toggles, empty space clears) into the plan's own
+selection; the height arrow of the selection is a drag along z, snapped to the grid, written as ONE undo step ("Set height of ...",
+`change_entries`; a two-number `pos` becomes three). The orbit camera draws on render layer 1 under egui's camera. Not here: textures,
+hover highlight of models, the object being placed from the 3D view (use the plan), the T8 tools.
 
 ### P8. Skirmish map: flag, victory, `script.json`, `media.json` (L)
 

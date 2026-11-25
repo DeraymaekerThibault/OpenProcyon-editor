@@ -57,6 +57,8 @@ pub struct State {
     // T8 begin
     t8: crate::map_edit::t8_tools::Tools,
     // T8 end
+    // T9: the 3D view's state; the Bevy systems of `view3d::plugin` read and answer through it
+    pub v3: crate::map::view3d::View3d,
 }
 
 impl Default for State {
@@ -85,6 +87,7 @@ impl Default for State {
             players: players::Panel::default(),
             // end T7
             t8: Default::default(), // T8
+            v3: Default::default(), // T9
         }
     }
 }
@@ -260,6 +263,47 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         st.place = None;
     }
     // end T7
+
+    // T9 begin: the 2D plan or the 3D view. The 3D branch does what the plan's does below (the buttons' actions, the players' action)
+    // against the same selection and returns; everything after this block is the plan.
+    ui.horizontal_wrapped(|ui| {
+        ui.selectable_value(&mut st.v3.on, false, "2D plan");
+        ui.selectable_value(&mut st.v3.on, true, "3D view");
+        if st.v3.on {
+            crate::map::view3d::toolbar(ui, &mut st.v3);
+        }
+    });
+    if st.v3.on {
+        st.v3.feed(&project.root, &id, map, &scene, &st.sel, (st.view.snap.grid, st.view.world_half));
+        let response = crate::map::view3d::canvas(ui, &mut st.v3);
+        if let Some(c) = st.v3.click.take() {
+            st.sel.retain_below(scene.markers.len());
+            st.sel.click(c.hit.filter(|h| *h < scene.markers.len()), crate::map_edit::select::Mode::from_modifiers(c.shift, c.ctrl));
+        }
+        let (typing, delete_key) = (ui.ctx().egui_wants_keyboard_input(), ui.input(|i| i.key_pressed(egui::Key::Delete)));
+        if delete_key && !typing && response.hovered() {
+            act = Some(Act::Delete);
+        }
+        if let Some(dz) = st.v3.height.take() {
+            let changes = crate::map::view3d::height_changes(map, &scene, &st.sel, dz);
+            let label = change_label("Set height of", &scene, &st.sel);
+            done(st, maps::change_entries(project, &id, &label, &changes), "");
+        } else if let Some(a) = t7_action.take() {
+            if let Some(r) = players::apply(&mut st.players, project, &id, a) {
+                st.select_next = vec![r];
+            }
+        } else if let Some(Act::Turn(yaw)) = act {
+            let changes = view2d::turn_changes(map, &scene, &st.sel, yaw);
+            let label = change_label("Turn", &scene, &st.sel);
+            done(st, maps::change_entries(project, &id, &label, &changes), "");
+        } else if act == Some(Act::Delete) {
+            delete_selected(st, project, &id, &scene);
+        } else if act == Some(Act::Duplicate) {
+            duplicate_selected(st, project, &id, &scene);
+        }
+        return save;
+    }
+    // T9 end
 
     if std::mem::take(&mut st.fit) {
         st.view.fit_world(ui.available_rect_before_wrap(), st.view.world_half, 24.0);

@@ -11,7 +11,7 @@ fn game(v: [f64; 3]) -> Vec3 {
 
 /// Möller–Trumbore: the distance along the ray (direction `dir`, not necessarily unit) to the triangle, or `None` (a miss, a ray
 /// parallel to the triangle's plane, or a hit behind the origin). Both sides of the triangle are hit.
-fn triangle_hit(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+pub(crate) fn triangle_hit(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     const EPS: f32 = 1e-7;
     let (e1, e2) = (b - a, c - a);
     let p = dir.cross(e2);
