@@ -47,6 +47,47 @@ pub struct NewForm {
     pub author: String,
 }
 
+impl NewForm {
+    /// A folder is picked and the id is not empty: the mod can be made.
+    pub fn ready(&self) -> bool {
+        self.dir.is_some() && !self.id.trim().is_empty()
+    }
+}
+
+/// The fields of the new-mod form: folder (with a picker), id, author and licence. Shared by this window and the left panel's
+/// "New mod..." so both offer the same choices. `salt` keeps the two licence combo boxes apart.
+pub fn new_form_fields(ui: &mut egui::Ui, f: &mut NewForm, salt: &str) {
+    ui.horizontal(|ui| {
+        ui.label("Folder");
+        ui.label(f.dir.as_ref().map_or("(none picked)".to_string(), |d| d.display().to_string()));
+        if ui.button("Pick...").clicked()
+            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+        {
+            if f.id.is_empty() {
+                f.id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            }
+            f.dir = Some(dir);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Id");
+        ui.text_edit_singleline(&mut f.id);
+    });
+    ui.horizontal(|ui| {
+        ui.label("Author");
+        ui.text_edit_singleline(&mut f.author);
+    });
+    ui.horizontal(|ui| {
+        ui.label("Licence");
+        egui::ComboBox::from_id_salt(salt).selected_text(f.licence.label()).show_ui(ui, |ui| {
+            for l in Licence::ALL {
+                ui.selectable_value(&mut f.licence, l, l.label());
+            }
+        });
+    });
+    ui.weak("LICENSE is a notice, not the full text: replace it before you share the mod (PROVISIONAL).");
+}
+
 /// Holds `pending` and starts the question, unless one is already open (then the new change is dropped: the user answers first).
 pub fn propose(st: &mut State, pending: Pending) {
     if st.ask.pending.is_none() {
@@ -104,37 +145,9 @@ pub fn window(ctx: &egui::Context, st: &mut State, import: Option<&Path>) {
                 });
             }
             Some(f) => {
+                new_form_fields(ui, f, "which-mod-licence");
                 ui.horizontal(|ui| {
-                    ui.label("Folder");
-                    ui.label(f.dir.as_ref().map_or("(none picked)".to_string(), |d| d.display().to_string()));
-                    if ui.button("Pick...").clicked()
-                        && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                    {
-                        if f.id.is_empty() {
-                            f.id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        }
-                        f.dir = Some(dir);
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Id");
-                    ui.text_edit_singleline(&mut f.id);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Author");
-                    ui.text_edit_singleline(&mut f.author);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Licence");
-                    egui::ComboBox::from_id_salt("which-mod-licence").selected_text(f.licence.label()).show_ui(ui, |ui| {
-                        for l in Licence::ALL {
-                            ui.selectable_value(&mut f.licence, l, l.label());
-                        }
-                    });
-                });
-                ui.weak("LICENSE is a notice, not the full text: replace it before you share the mod (PROVISIONAL).");
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(f.dir.is_some() && !f.id.trim().is_empty(), egui::Button::new("Make mod")).clicked()
+                    if ui.add_enabled(f.ready(), egui::Button::new("Make mod")).clicked()
                         && let Some(dir) = f.dir.clone()
                     {
                         answer = Some(Choice::New { dir, id: f.id.clone(), licence: f.licence, author: f.author.clone() });

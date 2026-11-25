@@ -22,13 +22,12 @@ Labels below are copied from the editor. Anything marked PROVISIONAL is a guess:
 
 ## 1. Make a new mod
 
-1. In the left panel, under "Mod", click "New mod..." and pick an empty folder outside your import and outside this repository.
+1. In the left panel, under "Mod", click "New mod...", pick an empty folder outside your import and outside this repository, set the
+   Id, Author and Licence (CC-BY-4.0 by default; CC-BY-SA-4.0, CC0-1.0, GPL-3.0-or-later, All rights reserved), then "Make mod".
 2. The status line says "Made <folder> with a new mod.json and LICENSE." The Mod tab shows `mod.json` as a form; the problems
    panel at the bottom starts checking.
-3. Licence: this button always makes the default (CC-BY-4.0). To choose another (CC-BY-SA-4.0, CC0-1.0, GPL-3.0-or-later, All
-   rights reserved) and a holder name, start with no mod open, make your first edit on the Ships or Weapons tab, and use "New mod..."
-   in the dialog "Save this change into which mod?" (fields Folder, Id, Author, Licence; then "Make mod"). Either way the
-   `LICENSE` file is only a notice (PROVISIONAL): replace it with the full text before you share the mod.
+3. The same form appears in the dialog "Save this change into which mod?" (no mod open, first edit on the Ships or Weapons tab,
+   "New mod..."). Either way the `LICENSE` file is only a notice (PROVISIONAL): replace it with the full text before you share the mod.
 
 ## 2. New ship from your GLB
 
@@ -97,8 +96,8 @@ if you hit it, add the point again in the view instead.
 1. Open the "Play-test & export" tab. If it warns that the game binary has another version than the editor, note both.
 2. If it lists other enabled mods: the game loads them too, so the run does not test your mod alone (PROVISIONAL until the engine
    has `--only-mod`). Switch them off in the game's Mods menu first.
-3. Pick a Map and your Ship with the "pick" menus. The ship menu lists the import's ships (PROVISIONAL: it may not list
-   yours): if yours is missing, type its id in the box.
+3. Pick a Map and your Ship with the "pick" menus. The ship menu lists the import's ships and the open mod's own; you can
+   also type an id in the box.
 4. Keep "Save unsaved documents before launching" ticked. Click "Play-test": the game opens on your ship. Fire your gun.
 5. Click "Preview screenshot" (frame 300 by default). A picture appears below. It differs between runs (known engine issue).
 6. Do not post the picture or any game file if it shows retail art (see the end).

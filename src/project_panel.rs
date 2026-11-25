@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::project::layers::LayerKind;
 use crate::project::problems::{self, Checker};
-use crate::project::{Notice, Project};
+use crate::project::{NewMod, Notice, Project};
 
 /// What the user clicked in the problems list: later packages open the file and the field. `path` is the finding's dotted path.
 #[derive(Resource, Default, Clone, Debug, PartialEq, Eq)]
@@ -31,6 +31,8 @@ pub struct State {
     pub ask: crate::which_mod::Asking,
     /// Counts the times the user opened or made a mod folder; the tabs forget their selection when it changes ([`forget_selection`]).
     pub opened: u64,
+    /// The left panel's "New mod..." form while it is open (folder, id, author, licence).
+    pub new_form: Option<crate::which_mod::NewForm>,
 }
 
 impl State {
@@ -45,6 +47,22 @@ impl State {
                 };
                 self.install(p, status);
                 self.opened += 1;
+            }
+            Err(e) => self.status = e,
+        }
+    }
+
+    /// Makes the mod the form describes (id, author and licence as chosen) and opens it, like [`State::open`] with `create`.
+    /// The form stays open when it fails, so another folder can be tried.
+    pub fn make_new(&mut self, form: &crate::which_mod::NewForm, import: Option<PathBuf>) {
+        let Some(dir) = form.dir.as_deref().filter(|_| form.ready()) else { return };
+        let new = NewMod { id: Some(form.id.clone()), licence: form.licence, author: form.author.clone(), folders: Vec::new() };
+        match Project::create_with(dir, import, &new) {
+            Ok((p, created)) => {
+                let status = if created { format!("Made {} with a new mod.json and LICENSE.", dir.display()) } else { format!("Opened {}.", dir.display()) };
+                self.install(p, status);
+                self.opened += 1;
+                self.new_form = None;
             }
             Err(e) => self.status = e,
         }
@@ -161,12 +179,26 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
         {
             st.open(&dir, import.map(Path::to_path_buf), false);
         }
-        if ui.button("New mod...").on_hover_text("Pick a folder; writes mod.json there unless it has one").clicked()
-            && let Some(dir) = rfd::FileDialog::new().pick_folder()
-        {
-            st.open(&dir, import.map(Path::to_path_buf), true);
+        if ui.button("New mod...").on_hover_text("Pick a folder, an id and a licence; writes mod.json and LICENSE there unless it has them").clicked() {
+            st.new_form = Some(crate::which_mod::NewForm::default());
         }
     });
+    if let Some(mut form) = st.new_form.clone() {
+        crate::which_mod::new_form_fields(ui, &mut form, "side-new-mod-licence");
+        let (mut make, mut cancel) = (false, false);
+        ui.horizontal(|ui| {
+            make = ui.add_enabled(form.ready(), egui::Button::new("Make mod")).clicked();
+            cancel = ui.button("Cancel").clicked();
+        });
+        if cancel {
+            st.new_form = None;
+        } else {
+            st.new_form = Some(form.clone());
+            if make {
+                st.make_new(&form, import.map(Path::to_path_buf)); // clears the form when the mod was made
+            }
+        }
+    }
     if !st.status.is_empty() {
         ui.label(&st.status);
     }
@@ -346,6 +378,29 @@ pub fn notes_for(findings: &[Finding], rel: &str) -> Vec<crate::form::FieldNote>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_side_panels_new_mod_form_makes_the_mod_with_the_chosen_licence() {
+        use crate::project::licence::Licence;
+        use crate::which_mod::NewForm;
+        let dir = std::env::temp_dir().join(format!("procyon-editor-sidenew-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut st = State::default();
+        let mut form = NewForm { dir: Some(dir.join("m")), id: "  ".into(), licence: Licence::Cc0, author: "Ada".into() };
+        st.new_form = Some(form.clone());
+        st.make_new(&form, None);
+        assert!(st.project.is_none() && !dir.exists(), "an empty id is not ready");
+        form.id = "gates".into();
+        st.new_form = Some(form.clone());
+        st.make_new(&form, None);
+        assert!(st.project.is_some() && st.new_form.is_none() && st.opened == 1);
+        let licence = std::fs::read_to_string(dir.join("m/LICENSE")).unwrap();
+        assert!(licence.contains("CC0-1.0"), "{licence}");
+        assert!(licence.contains("Ada"), "{licence}");
+        assert!(std::fs::read_to_string(dir.join("m/mod.json")).unwrap().contains("\"gates\""));
+        drop(st);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn opening_another_mod_clears_the_selections_but_choosing_a_mod_for_an_edit_does_not() {

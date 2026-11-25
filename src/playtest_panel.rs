@@ -89,6 +89,16 @@ pub fn ship_ids(import: &Path) -> Vec<String> {
     ids_in(import, "ships", "ship.json")
 }
 
+/// Ship ids offered in the pickers: those of the root (the import, or the merged overlay of a mod over it) and the open mod's own
+/// folder, sorted and without duplicates. The overlay alone can miss a ship the mod gained since it was built.
+pub fn ship_ids_with_mod(root: Option<&Path>, mod_dir: Option<&Path>) -> Vec<String> {
+    let mut ids: Vec<String> = root.map(ship_ids).unwrap_or_default();
+    ids.extend(mod_dir.map(ship_ids).unwrap_or_default());
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn picker(ui: &mut egui::Ui, label: &str, value: &mut String, options: &[String]) {
     ui.horizontal(|ui| {
         ui.label(label);
@@ -284,6 +294,22 @@ mod tests {
         assert_eq!(map_ids(&d), ["a", "b"]);
         assert_eq!(ship_ids(&d), ["s1"]);
         assert!(map_ids(&d.join("nowhere")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_ship_menu_lists_the_mods_own_ships_with_the_imports() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-shipmenu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for rel in ["import/ships/Ship_B", "import/ships/Ship_C", "mod/ships/Ship_A", "mod/ships/Ship_B"] {
+            std::fs::create_dir_all(d.join(rel)).unwrap();
+            std::fs::write(d.join(rel).join("ship.json"), "{}").unwrap();
+        }
+        let (imp, m) = (d.join("import"), d.join("mod"));
+        assert_eq!(ship_ids_with_mod(Some(&imp), Some(&m)), ["Ship_A", "Ship_B", "Ship_C"]);
+        assert_eq!(ship_ids_with_mod(Some(&imp), None), ["Ship_B", "Ship_C"]);
+        assert_eq!(ship_ids_with_mod(None, Some(&m)), ["Ship_A", "Ship_B"]);
+        assert!(ship_ids_with_mod(None, None).is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 
