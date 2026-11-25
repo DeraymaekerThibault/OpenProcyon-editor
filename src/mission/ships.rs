@@ -41,6 +41,33 @@ pub fn ship_types(project: &Project) -> Vec<String> {
     ids
 }
 
+/// The types in the order a picker lists them: ships first (`Ship_...`), then bases (`Base_...`), then everything else (islands,
+/// rocks, asteroids), each part sorted as `types` is. PROVISIONAL: the grouping goes by the prefix of the folder name (the naming
+/// of the retail data, docs/data-format.md); the ships' folders carry no kind of their own.
+pub fn picker_order(types: &[String]) -> Vec<String> {
+    let part = |t: &String| match () {
+        () if t.starts_with("Ship_") => 0,
+        () if t.starts_with("Base_") => 1,
+        () => 2,
+    };
+    let mut out: Vec<String> = types.to_vec();
+    out.sort_by_key(part); // stable: sorted inside each part
+    out
+}
+
+/// What "Add ship" starts with: the owner is the human's player (`player_start.name`) when the mission has it among its players,
+/// else the first player; the type is that owner's latest ship's type, else the first ship of the mod's own `ships/` folders, else
+/// the first ship type of the import ([`picker_order`]: a `Ship_` before an island). `None` with no player or no type.
+pub fn new_ship_defaults(mission: &Value, types: &[String], mod_types: &[String]) -> Option<(String, String)> {
+    let players = mdoc::players(mission);
+    let owner = mdoc::player_start_name(mission).filter(|n| players.contains(n)).or_else(|| players.first().copied())?;
+    let own_latest = mdoc::ships(mission).iter().rev().find(|s| mdoc::ship_group(s) == Some(owner)).and_then(mdoc::ship_type).filter(|t| types.iter().any(|x| x == t));
+    let ordered = picker_order(types);
+    let is_ship = |t: &&String| t.starts_with("Ship_");
+    let ty = own_latest.map(str::to_string).or_else(|| picker_order(mod_types).iter().find(is_ship).cloned()).or_else(|| ordered.first().cloned())?;
+    Some((ty, owner.to_string()))
+}
+
 /// The game's choice of the ship the human flies (docs/missions.md section 4), read from the documents: shown, not checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HumanShip {
@@ -393,6 +420,34 @@ pub fn set_primary(project: &mut Project, id: &str, index: usize, on: bool) -> R
 
 // ---- the form ----
 
+/// The ship type dropdown: a filter box above the list (like the scenery picker; the popup stays open for a click in the box and
+/// closes on a pick or a click outside). Returns the type picked this frame.
+fn type_picker(ui: &mut egui::Ui, id: egui::Id, current: &str, types: &[String]) -> Option<String> {
+    let mut picked = None;
+    let filter_id = id.with("filter");
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(if current.is_empty() { "(no type)" } else { current })
+        .close_behavior(egui::containers::PopupCloseBehavior::CloseOnClickOutside)
+        .show_ui(ui, |ui| {
+            let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
+            let r = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("filter").desired_width(160.0));
+            if r.changed() {
+                ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+            }
+            let needle = filter.trim().to_lowercase();
+            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                // the order of `types` is kept: ships, then bases, then the rest
+                for t in types.iter().filter(|t| needle.is_empty() || t.to_lowercase().contains(&needle)) {
+                    if ui.selectable_label(t == current, t).clicked() {
+                        picked = Some(t.clone());
+                        ui.close();
+                    }
+                }
+            });
+        });
+    picked
+}
+
 /// A text box that keeps what is typed until it loses focus; returns the text then when it changed.
 pub(crate) fn text_edit(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
     let mut buf = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
@@ -442,6 +497,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
     let Some(id) = super::rules_view::current_mission(ui, project) else { return };
     let Ok((m, _)) = open(project, &id) else { return };
     let types = ship_types(project);
+    let picker_types = picker_order(&types);
     let players: Vec<String> = mdoc::players(m).into_iter().map(str::to_string).collect();
     let mut ops: Vec<Op> = vec![];
 
@@ -513,13 +569,9 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
                     ops.push(Op::ShipName(i, new));
                 }
                 let ty = mdoc::ship_type(s).unwrap_or("");
-                egui::ComboBox::from_id_salt("ship_type").selected_text(if ty.is_empty() { "(no type)" } else { ty }).show_ui(ui, |ui| {
-                    for t in &types {
-                        if ui.selectable_label(t == ty, t).clicked() {
-                            ops.push(Op::ShipType(i, t.clone()));
-                        }
-                    }
-                });
+                if let Some(t) = type_picker(ui, egui::Id::new(("ship_type", &id, i)), ty, &picker_types) {
+                    ops.push(Op::ShipType(i, t));
+                }
                 if unknown_type(&types, ty) {
                     ui.colored_label(egui::Color32::from_rgb(220, 150, 60), "unknown type: the game drops this ship")
                         .on_hover_text("PROVISIONAL: the types are the ships/ folders of the overlay");
@@ -552,7 +604,8 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
 
     ui.separator();
     ui.strong("Groups");
-    let first_type = types.first().cloned();
+    let mod_types = list_ship_ids(&project.dir);
+    let new_ship = open(project, &id).ok().and_then(|(m, _)| new_ship_defaults(m, &types, &mod_types));
     for op in ops {
         let r = match op {
             Op::AddPlayer => {
@@ -564,10 +617,10 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
             Op::Allied(a, b, on) => set_allied(project, &id, &a, &b, on),
             Op::StartPlayer(p) => set_start_player(project, &id, &p),
             Op::StartVec(fwd, v) => set_start_vec(project, &id, fwd, v, true),
-            Op::AddShip => match (first_type.clone(), players.first()) {
-                (Some(t), Some(p)) => add_ship(project, &id, &t, p).map(|_| ()),
-                (None, _) => Err("no ship class found in the overlay or the mod: import the game's assets first".to_string()),
-                _ => Err("add a player first".to_string()),
+            Op::AddShip => match &new_ship {
+                Some((t, p)) => add_ship(project, &id, t, p).map(|_| ()),
+                None if types.is_empty() => Err("no ship class found in the overlay or the mod: import the game's assets first".to_string()),
+                None => Err("add a player first".to_string()),
             },
             Op::DeleteShip(i) => delete_ship(project, &id, i),
             Op::ShipType(i, t) => set_ship_type(project, &id, i, &t),

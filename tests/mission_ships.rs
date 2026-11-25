@@ -331,3 +331,22 @@ fn a_retail_mission_is_saved_as_a_diff_and_unkeyed_lists_refuse() {
     assert!(file.get("rules").is_none() && file.get("players").is_none(), "nothing of the retail mission is restated: {file}");
     assert_eq!(read_merged(&p.root, M1).unwrap(), want, "the engine's overlay agrees with the document");
 }
+
+#[test]
+fn the_picker_lists_ships_first_and_a_new_ship_starts_as_a_ship_of_the_humans_side() {
+    let types: Vec<String> = ["Asteroid_Large_Armed", "Base_Navy", "Island_A", "Ship_A", "Ship_B"].map(String::from).to_vec();
+    assert_eq!(ships::picker_order(&types), ["Ship_A", "Ship_B", "Base_Navy", "Asteroid_Large_Armed", "Island_A"]);
+    // the human is Hero; no ships yet: the mod's own ship, else the first Ship_ of the import
+    let m = json!({"players": ["Raiders", "Hero"], "player_start": {"name": "Hero"}, "ships": []});
+    assert_eq!(ships::new_ship_defaults(&m, &types, &[]), Some(("Ship_A".to_string(), "Hero".to_string())));
+    assert_eq!(ships::new_ship_defaults(&m, &types, &["Ship_B".to_string(), "Island_A".to_string()]), Some(("Ship_B".to_string(), "Hero".to_string())));
+    // Hero already has a ship: the next one is of the same class; another player's ship does not count
+    let m = json!({"players": ["Raiders", "Hero"], "player_start": {"name": "Hero"}, "ships": [
+        {"id": 1, "type": "Ship_B", "group": "Hero"}, {"id": 2, "type": "Ship_A", "group": "Raiders"}]});
+    assert_eq!(ships::new_ship_defaults(&m, &types, &[]), Some(("Ship_B".to_string(), "Hero".to_string())));
+    // no start player: the first player
+    let m = json!({"players": ["Raiders"], "ships": []});
+    assert_eq!(ships::new_ship_defaults(&m, &types, &[]).map(|d| d.1), Some("Raiders".to_string()));
+    assert_eq!(ships::new_ship_defaults(&json!({"players": []}), &types, &[]), None);
+    assert_eq!(ships::new_ship_defaults(&m, &[], &[]), None);
+}
