@@ -31,6 +31,24 @@ pub struct FormCtx<'a> {
     pub focus: Option<&'a str>,
     /// JSON pointers of fields not to draw because the caller draws them itself (the weapons tab's bullet pickers).
     pub hidden: &'a [String],
+    /// Fields that take one of a list of names (a gun mount's `gun`): drawn as a drop-down instead of a text box.
+    pub choices: &'a [Choice<'a>],
+}
+
+/// A string field that is picked from `options`: `pattern` is a JSON pointer in which `*` stands for any one key or index
+/// (`/guns/*/gun`).
+#[derive(Clone, Copy, Debug)]
+pub struct Choice<'a> {
+    pub pattern: &'a str,
+    pub options: &'a [String],
+}
+
+impl Choice<'_> {
+    /// Whether `ptr` is a field this choice is for.
+    pub fn matches(&self, ptr: &str) -> bool {
+        let (a, b): (Vec<&str>, Vec<&str>) = (self.pattern.split('/').collect(), ptr.split('/').collect());
+        a.len() == b.len() && a.iter().zip(&b).all(|(p, x)| *p == "*" || p == x)
+    }
 }
 
 const ERROR: Color32 = Color32::from_rgb(230, 90, 90);
@@ -451,6 +469,22 @@ impl<'a> St<'a> {
                     self.out.push(e);
                 }
             }
+            Kind::String if self.ctx.choices.iter().any(|c| c.matches(ptr)) => {
+                let current = v.as_str().unwrap_or_default();
+                let choice = self.ctx.choices.iter().find(|c| c.matches(ptr)).expect("checked above");
+                let text = match (current.is_empty(), choice.options.iter().any(|o| o == current)) {
+                    (true, _) => "(none)".to_string(),
+                    (false, true) => current.to_string(),
+                    (false, false) => format!("{current} (not in the list)"),
+                };
+                egui::ComboBox::from_id_salt(self.id.with(("choice", ptr))).selected_text(text).show_ui(ui, |ui| {
+                    for o in choice.options {
+                        if ui.selectable_label(o == current, o).clicked() && o != current {
+                            self.out.push(Edit::set(ptr, json!(o)));
+                        }
+                    }
+                });
+            }
             Kind::String => {
                 let mut s = v.as_str().unwrap_or_default().to_string();
                 if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0)).changed() {
@@ -606,7 +640,7 @@ mod tests {
     /// One frame at `t` with `events`; `above` draws that many buttons before the form, the way the panel's buttons come and go.
     fn run(egui_ctx: &egui::Context, doc: &Value, base: &Value, above: usize, events: Vec<egui::Event>) -> (Vec<Edit>, Vec<(String, egui::Pos2, egui::Vec2)>) {
         let schema = crate::ships_panel::form_schema(schema("ship.schema.json"));
-        let ctx = FormCtx { base: Some(base), findings: &[], focus: None, hidden: &[] };
+        let ctx = FormCtx { base: Some(base), findings: &[], focus: None, hidden: &[], choices: &[] };
         let mut out = vec![];
         let mut full = egui_ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
             for i in 0..above {
@@ -663,12 +697,12 @@ mod tests {
         ];
         for focus in [None, Some("/guns/Gun_B/arc_deg"), Some("/sections/Hull/destruct/fx"), Some("/sigth")] {
             for inherited in [None, Some(&parent)] {
-                let ctx = FormCtx { base: inherited, findings: &findings, focus, hidden: &[] };
+                let ctx = FormCtx { base: inherited, findings: &findings, focus, hidden: &[], choices: &[] };
                 assert!(frame(&schema("ship.schema.json"), &ship, &ctx).is_empty(), "{focus:?}");
             }
         }
         // an empty document and a document of the wrong shape do not panic either
-        let ctx = FormCtx { base: Some(&parent), findings: &[], focus: None, hidden: &[] };
+        let ctx = FormCtx { base: Some(&parent), findings: &[], focus: None, hidden: &[], choices: &[] };
         for doc in [json!({}), json!(null), json!({"guns": [1], "engines": {"a": 1}, "points": "x", "physics": 5})] {
             assert!(frame(&schema("ship.schema.json"), &doc, &ctx).is_empty());
         }
@@ -676,7 +710,7 @@ mod tests {
 
     #[test]
     fn the_other_schemas_draw_too() {
-        let ctx = FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
+        let ctx = FormCtx { base: None, findings: &[], focus: None, hidden: &[], choices: &[] };
         let guns = json!({"$schema": "guns.schema.json", "Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "BulletsPerBurst": 3, "BulletAffectedByGravity": false, "visual": {"base": "b", "pivot": [0, 0, 0], "muzzles": [[0, 1, 0], [1, 1, 0]]}, "beam": {"charge": 1}, "typo_key": 1}});
         assert!(frame(&schema("guns.schema.json"), &guns, &ctx).is_empty());
         let bullets =
@@ -686,7 +720,7 @@ mod tests {
         assert!(frame(&schema("crew_nodes.schema.json"), &crew, &ctx).is_empty());
         let m = json!({"id": "m", "format": 1, "requires": ["a", "b"], "extra": true});
         let inh = json!({"id": "p", "name": "Parent"});
-        let ctx = FormCtx { base: Some(&inh), findings: &[], focus: Some("/requires/1"), hidden: &[] };
+        let ctx = FormCtx { base: Some(&inh), findings: &[], focus: Some("/requires/1"), hidden: &[], choices: &[] };
         assert!(frame(&schema("mod.schema.json"), &m, &ctx).is_empty());
     }
 
@@ -743,7 +777,7 @@ mod tests {
         let base = json!({"race": "Navy", "points": 10, "extends": "x"});
         // the merged document: race inherited, points overridden, sight added; `extends` is the project's business
         let doc = json!({"race": "Navy", "points": 12, "sight": 300, "extends": "x"});
-        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[] };
+        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[], choices: &[] };
         let t = painted(&ship, &doc, &ctx);
         assert!(has(&t, "inherited") && has(&t, "overridden") && has(&t, "added"), "{t:?}");
         assert_eq!(t.iter().filter(|x| *x == "Reset to parent").count(), 2, "points and sight, not race: {t:?}");
@@ -758,7 +792,7 @@ mod tests {
         let t = painted(&raw, &same, &ctx);
         assert!(!t.iter().any(|x| x == "extends" || x == "set"), "managed keys are skipped when there is a base: {t:?}");
         // without a base the old behaviour stays: Reset on a set key, no badges
-        let alone = FormCtx { base: None, findings: &[], focus: None, hidden: &[] };
+        let alone = FormCtx { base: None, findings: &[], focus: None, hidden: &[], choices: &[] };
         let t = painted(&ship, &same, &alone);
         assert!(has(&t, "Reset") && !has(&t, "inherited"), "{t:?}");
     }
@@ -768,7 +802,7 @@ mod tests {
         let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
         let base = json!({"race": "Navy", "entity": 7, "skipped_guns": ["a"]});
         let doc = json!({"race": "Navy", "entity": 7, "skipped_guns": ["a"], "sigth": 3});
-        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[] };
+        let ctx = FormCtx { base: Some(&base), findings: &[], focus: None, hidden: &[], choices: &[] };
         let t = painted(&ship, &doc, &ctx);
         assert!(has(&t, "`entity`") && has(&t, "`skipped_guns`"), "{t:?}");
         assert!(t.iter().any(|x| x.contains("unknown key `sigth`")), "{t:?}");
@@ -781,12 +815,12 @@ mod tests {
         // what the ship and weapons tabs pass with no project: base == the document
         let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
         let doc = json!({"race": "Navy", "points": 10, "entity": 7, "skipped_guns": ["a"]});
-        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: None, hidden: &[] });
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: None, hidden: &[], choices: &[] });
         assert!(has(&t, "inherited") && has(&t, "`entity`") && has(&t, "`skipped_guns`"), "{t:?}");
         assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("Rename") || x.contains("unknown key")), "{t:?}");
         let guns = json!({"Test Gun": {"Mount Type": "Medium Mount", "MuzzleSpeed": 10, "response": 3}});
         let entry = &guns["Test Gun"];
-        let t = painted(&schema("guns.schema.json"), entry, &FormCtx { base: Some(entry), findings: &[], focus: None, hidden: &[] });
+        let t = painted(&schema("guns.schema.json"), entry, &FormCtx { base: Some(entry), findings: &[], focus: None, hidden: &[], choices: &[] });
         assert!(!t.iter().any(|x| x.contains("Reset") || x.contains("Remove") || x.contains("unknown key")), "{t:?}");
     }
 
@@ -794,11 +828,26 @@ mod tests {
     fn an_inherited_map_entry_has_no_rename_or_remove_but_the_mods_own_entry_has() {
         let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
         let doc = json!({"points": 10, "guns": {"M1": {"gun": "G1", "arc_deg": 90}}});
-        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: Some("/guns/M1"), hidden: &[] });
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&doc), findings: &[], focus: Some("/guns/M1"), hidden: &[], choices: &[] });
         assert!(!t.iter().any(|x| x.contains("Rename") || x == "Remove"), "{t:?}");
         let base = json!({"points": 10, "guns": {}});
-        let t = painted(&ship, &doc, &FormCtx { base: Some(&base), findings: &[], focus: Some("/guns/M1"), hidden: &[] });
+        let t = painted(&ship, &doc, &FormCtx { base: Some(&base), findings: &[], focus: Some("/guns/M1"), hidden: &[], choices: &[] });
         assert!(has(&t, "Rename") && has(&t, "Remove"), "{t:?}");
+    }
+
+    #[test]
+    fn a_choice_field_is_a_drop_down_of_the_options() {
+        let c = Choice { pattern: "/guns/*/gun", options: &[] };
+        assert!(c.matches("/guns/M1/gun") && c.matches("/guns/7/gun"));
+        assert!(!c.matches("/guns/M1/arc_deg") && !c.matches("/guns/gun") && !c.matches("/guns/M1/gun/x"));
+        let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
+        let doc = json!({"points": 10, "guns": {"M1": {"gun": "G9", "arc_deg": 90}}});
+        let options = vec!["G1".to_string(), "G2".to_string()];
+        let choices = [Choice { pattern: "/guns/*/gun", options: &options }];
+        let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: Some("/guns/M1"), hidden: &[], choices: &choices });
+        assert!(has(&t, "G9 (not in the list)"), "{t:?}");
+        let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: Some("/guns/M1"), hidden: &[], choices: &[] });
+        assert!(!has(&t, "G9 (not in the list)"), "without choices it stays a text box");
     }
 
     #[test]
@@ -806,7 +855,7 @@ mod tests {
         let ship = crate::ships_panel::form_schema(schema("ship.schema.json"));
         let doc = json!({"race": "Navy", "points": 10});
         let hidden = ["/race".to_string()];
-        let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: None, hidden: &hidden });
+        let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: None, hidden: &hidden, choices: &[] });
         assert!(!has(&t, "race") && has(&t, "points"), "{t:?}");
     }
 }

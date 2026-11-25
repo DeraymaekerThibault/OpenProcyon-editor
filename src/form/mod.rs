@@ -5,4 +5,4 @@
 pub mod model;
 pub mod widgets;
 
-pub use widgets::{FieldNote, FormCtx, show, show_typed};
+pub use widgets::{Choice, FieldNote, FormCtx, show, show_typed};

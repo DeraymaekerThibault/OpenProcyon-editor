@@ -352,7 +352,7 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State) {
                 ui,
                 &schema,
                 &p.docs[i].edited,
-                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[] },
+                &crate::form::FormCtx { base: None, findings: &notes, focus: None, hidden: &[], choices: &[] },
                 egui::Id::new("mod.json form"),
             );
             if !edits.is_empty()

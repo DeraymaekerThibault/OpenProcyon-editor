@@ -98,6 +98,20 @@ pub struct EntryRow {
     pub added: bool,
 }
 
+impl EntryRow {
+    /// The tag shown after the name, like the ship list's: `[added]` (the import has no such entry), `[changed]` (the mod changes it)
+    /// or `[retail]` (the import's entry as it is).
+    pub fn tag(&self) -> &'static str {
+        if self.added {
+            "[added]"
+        } else if self.changed {
+            "[changed]"
+        } else {
+            "[retail]"
+        }
+    }
+}
+
 /// The entries of the table document `doc`, in file order, filtered by `filter` (case-insensitive part of the name). An entry is
 /// `changed` when its edited value differs from the base's, `added` when the base has none.
 pub fn entry_rows(doc: &Doc, filter: &str) -> Vec<EntryRow> {
@@ -242,113 +256,120 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
             revert = Some(None);
         }
     }
-    ui.horizontal(|ui| {
-        ui.label("Filter");
-        ui.text_edit_singleline(&mut st.filter);
-    });
-    let rows = entry_rows(&project.docs[i], &st.filter);
-    egui::ScrollArea::vertical().id_salt("weapon-list").max_height(crate::ships_panel::list_height(crate::ships_panel::remaining_height(ui), st.selected.is_some())).show(
-        ui,
-        |ui| {
-            for r in &rows {
-                let mark = if r.added {
-                    " [added]"
-                } else if r.changed {
-                    " [changed]"
-                } else {
-                    ""
-                };
-                if ui.selectable_label(st.selected.as_deref() == Some(r.name.as_str()), format!("{}{mark}", r.name)).clicked() {
-                    st.selected = Some(r.name.clone());
-                    st.focus = None;
-                }
-            }
-        },
-    );
+    // The list and the new-entry controls on the left, the entry's form on the right, each in its own scroll area at the height
+    // left in the window.
     let mut edits: Vec<Edit> = vec![];
     let mut label = String::new();
     let mut typing = false;
-    ui.horizontal(|ui| {
-        ui.label(format!("New {}", table.word()));
-        ui.text_edit_singleline(st.new_name());
-        if ui.button(format!("New {} from scratch", table.word())).clicked() {
-            match new_entry_edits(&project.docs[i].edited, &st.new_names[table as usize]) {
-                Ok(e) => {
-                    edits = e;
-                    label = format!("New {} {}", table.word(), st.new_names[table as usize].trim());
-                    st.selected = Some(st.new_names[table as usize].trim().to_string());
+    let height = (crate::ships_panel::remaining_height(ui) - 8.0).max(300.0);
+    let list_width = 300.0f32.min(ui.available_width() * 0.4);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(list_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Filter");
+            ui.text_edit_singleline(&mut st.filter);
+        });
+        let rows = entry_rows(&project.docs[i], &st.filter);
+        egui::ScrollArea::vertical().id_salt("weapon-list").max_height((height - 200.0).max(120.0)).auto_shrink([false, false]).show(
+            ui,
+            |ui| {
+                for r in &rows {
+                    let mark = r.tag();
+                    if ui.selectable_label(st.selected.as_deref() == Some(r.name.as_str()), format!("{}  {mark}", r.name)).clicked() {
+                        st.selected = Some(r.name.clone());
+                        st.focus = None;
+                    }
                 }
-                Err(e) => st.status = e,
-            }
-        }
-        if ui.add_enabled(st.selected.is_some(), egui::Button::new("Duplicate selected under this name")).clicked()
-            && let Some(from) = st.selected.clone()
-        {
-            match duplicate_edits(&project.docs[i].edited, &from, &st.new_names[table as usize]) {
-                Ok(e) => {
-                    edits = e;
-                    label = format!("Duplicate {from} as {}", st.new_names[table as usize].trim());
-                    st.status = duplicate_warning(&project.docs[i], &from).unwrap_or_default();
-                    st.selected = Some(st.new_names[table as usize].trim().to_string());
+            },
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("New {}", table.word()));
+            ui.text_edit_singleline(st.new_name());
+            if ui.button(format!("New {} from scratch", table.word())).clicked() {
+                match new_entry_edits(&project.docs[i].edited, &st.new_names[table as usize]) {
+                    Ok(e) => {
+                        edits = e;
+                        label = format!("New {} {}", table.word(), st.new_names[table as usize].trim());
+                        st.selected = Some(st.new_names[table as usize].trim().to_string());
+                    }
+                    Err(e) => st.status = e,
                 }
-                Err(e) => st.status = e,
             }
-        }
-    });
-    ui.weak(format!(
-        "A new {} from scratch needs every field the game requires before it loads (the problems list names what is missing; PROVISIONAL: the form does not mark required fields).",
-        table.word()
-    ));
-    if !st.status.is_empty() {
-        ui.label(&st.status);
-    }
-    ui.separator();
-    if let Some(name) = st.selected.clone().filter(|n| project.docs[i].edited.get(n).is_some()) {
-        let doc = &project.docs[i];
-        ui.strong(&name);
-        let entry = &doc.edited[&name];
-        let pointer_of_entry = format!("/{}", escape(&name));
-        // The entry's own button stays where it is (disabled when there is nothing to take back); the file's is above the list.
-        if doc.base.get(&name).is_some() {
-            let changed = doc.base.get(&name).is_some_and(|b| b != entry);
-            if ui
-                .add_enabled(changed, egui::Button::new(format!("Revert {name} to retail")))
-                .on_hover_text("Put this entry back to the game's values (one undo step); the mod then holds no change of it")
-                .clicked()
+            if ui.add_enabled(st.selected.is_some(), egui::Button::new("Duplicate selected under this name")).clicked()
+                && let Some(from) = st.selected.clone()
             {
-                revert = Some(Some(pointer_of_entry.clone()));
+                match duplicate_edits(&project.docs[i].edited, &from, &st.new_names[table as usize]) {
+                    Ok(e) => {
+                        edits = e;
+                        label = format!("Duplicate {from} as {}", st.new_names[table as usize].trim());
+                        st.status = duplicate_warning(&project.docs[i], &from).unwrap_or_default();
+                        st.selected = Some(st.new_names[table as usize].trim().to_string());
+                    }
+                    Err(e) => st.status = e,
+                }
             }
+        });
+        ui.weak(format!(
+            "A new {} from scratch needs every field the game requires before it loads (the problems list names what is missing; PROVISIONAL: the form does not mark required fields).",
+            table.word()
+        ));
+        if !st.status.is_empty() {
+            ui.label(&st.status);
         }
-        if table == Table::Guns {
-            for key in bullet_fields(entry) {
-                let current = entry.get(&key).and_then(Value::as_str).unwrap_or("");
-                ui.horizontal(|ui| {
-                    ui.label(&key);
-                    egui::ComboBox::from_id_salt(("bullet-pick", &name, &key)).selected_text(if current.is_empty() { "(none)" } else { current }).show_ui(ui, |ui| {
-                        for b in &bullets {
-                            if ui.selectable_label(b == current, b).clicked() && b != current {
-                                edits = vec![bullet_pick_edit(&name, &key, b)];
-                                label = format!("Edit {name}");
-                            }
+        });
+        ui.separator();
+        let width = ui.available_width();
+        ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            egui::ScrollArea::vertical().id_salt("weapon-detail").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
+                if let Some(name) = st.selected.clone().filter(|n| project.docs[i].edited.get(n).is_some()) {
+                    let doc = &project.docs[i];
+                    ui.strong(&name);
+                    let entry = &doc.edited[&name];
+                    let pointer_of_entry = format!("/{}", escape(&name));
+                    // The entry's own button stays where it is (disabled when there is nothing to take back); the file's is above the list.
+                    if doc.base.get(&name).is_some() {
+                        let changed = doc.base.get(&name).is_some_and(|b| b != entry);
+                        if ui
+                            .add_enabled(changed, egui::Button::new(format!("Revert {name} to retail")))
+                            .on_hover_text("Put this entry back to the game's values (one undo step); the mod then holds no change of it")
+                            .clicked()
+                        {
+                            revert = Some(Some(pointer_of_entry.clone()));
                         }
-                    });
-                });
-            }
-        }
-        let pointer = st.focus.take();
-        let inherited = doc.base.get(&name);
-        let hidden = hidden_fields(table, entry);
-        let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref(), hidden: &hidden };
-        let schema = &schemas[table as usize];
-        let (shown, shown_typing) = crate::form::show_typed(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
-        if !shown.is_empty() {
-            typing = shown_typing;
-            edits = prefix_edits(&name, shown);
-            label = format!("Edit {name}");
-        }
-    } else {
-        ui.label(format!("Select a {}.", table.word()));
-    }
+                    }
+                    if table == Table::Guns {
+                        for key in bullet_fields(entry) {
+                            let current = entry.get(&key).and_then(Value::as_str).unwrap_or("");
+                            ui.horizontal(|ui| {
+                                ui.label(&key);
+                                egui::ComboBox::from_id_salt(("bullet-pick", &name, &key)).selected_text(if current.is_empty() { "(none)" } else { current }).show_ui(ui, |ui| {
+                                    for b in &bullets {
+                                        if ui.selectable_label(b == current, b).clicked() && b != current {
+                                            edits = vec![bullet_pick_edit(&name, &key, b)];
+                                            label = format!("Edit {name}");
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    let pointer = st.focus.take();
+                    let inherited = doc.base.get(&name);
+                    let hidden = hidden_fields(table, entry);
+                    let ctx = crate::form::FormCtx { base: inherited, findings: &entry_notes(&notes, &name), focus: pointer.as_deref(), hidden: &hidden, choices: &[] };
+                    let schema = &schemas[table as usize];
+                    let (shown, shown_typing) = crate::form::show_typed(ui, schema, entry, &ctx, egui::Id::new(("weapon form", rel, &name)));
+                    if !shown.is_empty() {
+                        typing = shown_typing;
+                        edits = prefix_edits(&name, shown);
+                        label = format!("Edit {name}");
+                    }
+                } else {
+                    ui.label(format!("Select a {}.", table.word()));
+                }
+            });
+        });
+    });
     if let Some(r) = revert {
         let done = match r {
             Some(pointer) => project.revert_at(rel, &pointer),
@@ -382,33 +403,45 @@ fn retail(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, impo
         ui.label(format!("{rel} is not in the import."));
         return;
     };
-    ui.horizontal(|ui| {
-        ui.label("Filter");
-        ui.text_edit_singleline(&mut st.filter);
-    });
-    let filter = st.filter.trim().to_lowercase();
-    egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height(crate::ships_panel::list_height(crate::ships_panel::remaining_height(ui), st.selected.is_some())).show(
-        ui,
-        |ui| {
-            for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
-                if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), k).clicked() {
-                    st.selected = Some(k.clone());
-                    st.focus = None;
+    let mut shown = vec![];
+    let height = (crate::ships_panel::remaining_height(ui) - 8.0).max(300.0);
+    let list_width = 300.0f32.min(ui.available_width() * 0.4);
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(list_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Filter");
+                ui.text_edit_singleline(&mut st.filter);
+            });
+            let filter = st.filter.trim().to_lowercase();
+            egui::ScrollArea::vertical().id_salt("weapon-list-retail").max_height((height - 40.0).max(120.0)).auto_shrink([false, false]).show(ui, |ui| {
+                for k in doc.as_object().into_iter().flat_map(|m| m.keys()).filter(|k| !k.starts_with('$') && (filter.is_empty() || k.to_lowercase().contains(&filter))) {
+                    // every entry of the import is retail
+                    if ui.selectable_label(st.selected.as_deref() == Some(k.as_str()), format!("{k}  [retail]")).clicked() {
+                        st.selected = Some(k.clone());
+                        st.focus = None;
+                    }
                 }
-            }
-        },
-    );
-    ui.separator();
-    let Some(name) = st.selected.clone().filter(|n| doc.get(n).is_some()) else {
-        ui.label(format!("Select a {}.", table.word()));
-        return;
-    };
-    ui.strong(&name);
-    let pointer = st.focus.take();
-    // no mod: the retail entry is both the base and what is edited, so every field reads "inherited"
-    let ctx = crate::form::FormCtx { base: Some(&doc[&name]), findings: &[], focus: pointer.as_deref(), hidden: &[] };
-    let shown = crate::form::show(ui, &schemas[table as usize], &doc[&name], &ctx, egui::Id::new(("weapon form retail", rel, &name)));
-    if !shown.is_empty() {
+            });
+        });
+        ui.separator();
+        let width = ui.available_width();
+        ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            let Some(name) = st.selected.clone().filter(|n| doc.get(n).is_some()) else {
+                ui.label(format!("Select a {}.", table.word()));
+                return;
+            };
+            egui::ScrollArea::vertical().id_salt("weapon-detail-retail").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
+                ui.strong(&name);
+                let pointer = st.focus.take();
+                // no mod: the retail entry is both the base and what is edited, so every field reads "inherited"
+                let ctx = crate::form::FormCtx { base: Some(&doc[&name]), findings: &[], focus: pointer.as_deref(), hidden: &[], choices: &[] };
+                shown = crate::form::show(ui, &schemas[table as usize], &doc[&name], &ctx, egui::Id::new(("weapon form retail", rel, &name)));
+            });
+        });
+    });
+    if !shown.is_empty()
+        && let Some(name) = st.selected.clone()
+    {
         crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.to_string(), label: format!("Edit {name}"), edits: prefix_edits(&name, shown) });
     }
 }
@@ -444,6 +477,12 @@ mod tests {
         write(&assets, "data/weapons/bullets.json", r#"{"B1": {"lifetime": 3}, "B2": {"lifetime": 4}}"#);
         std::fs::create_dir_all(&m).unwrap();
         (root, assets, m)
+    }
+
+    #[test]
+    fn every_entry_row_has_a_tag_like_the_ship_list() {
+        let row = |changed, added| EntryRow { name: "G".into(), changed, added };
+        assert_eq!((row(false, false).tag(), row(true, false).tag(), row(true, true).tag()), ("[retail]", "[changed]", "[added]"));
     }
 
     #[test]

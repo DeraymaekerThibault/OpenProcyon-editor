@@ -73,6 +73,17 @@ pub fn list_ship_ids(root: &Path) -> Vec<String> {
     ids
 }
 
+/// The guns table, relative to the mod folder.
+const GUNS_REL: &str = "data/weapons/guns.json";
+
+/// The pointer shape of a gun mount's `gun` field.
+const GUN_FIELD: &str = "/guns/*/gun";
+
+/// The names in a guns table (its entries; keys that start with `$` are not guns).
+pub fn gun_names(table: &Value) -> Vec<String> {
+    table.as_object().map(|m| m.keys().filter(|k| !k.starts_with('$')).cloned().collect()).unwrap_or_default()
+}
+
 /// The rows of the ship list, sorted by id and filtered by `filter` (case-insensitive part of the id). `listing` is the ids found
 /// in the overlay root (or the import alone), `entry` what the engine says the mod does, `unsaved` the relative paths of documents
 /// with unsaved edits. A ship with only an unsaved document is `New`.
@@ -304,15 +315,35 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         listing.sort();
         listing.dedup();
     }
+    // The list on the left and the form on the right, each with its own scroll area at the height left in the window, so the form
+    // starts at the top and uses the width.
+    let height = (remaining_height(ui) - 8.0).max(300.0);
+    let list_width = 260.0f32.min(ui.available_width() * 0.4);
+    let mut go3d = false;
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(list_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            list_column(ui, st, ps, &listing, entry.as_ref(), &unsaved, height);
+        });
+        ui.separator();
+        let width = ui.available_width();
+        ui.allocate_ui_with_layout(egui::vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            go3d = detail_column(ui, st, ps, &schema, &root, view, link, height);
+        });
+    });
+    go3d
+}
+
+/// The left column of the tab: filter, the ship list, "New ship..." and the status line.
+fn list_column(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, listing: &[String], entry: Option<&ModEntry>, unsaved: &[String], height: f32) {
     if ps.project.is_none() {
-        ui.label("No mod open: your first change asks which mod to save it in (the game's own files are never changed).");
+        ui.weak("No mod open: your first change asks which mod to save it in (the game's own files are never changed).");
     }
     ui.horizontal(|ui| {
         ui.label("Filter");
         ui.text_edit_singleline(&mut st.filter);
     });
-    let rows = ship_rows(&listing, entry.as_ref(), &unsaved, &st.filter);
-    egui::ScrollArea::vertical().id_salt("ship-list").max_height(list_height(remaining_height(ui), st.selected.is_some())).show(ui, |ui| {
+    let rows = ship_rows(listing, entry, unsaved, &st.filter);
+    egui::ScrollArea::vertical().id_salt("ship-list").max_height((height - 120.0).max(120.0)).auto_shrink([false, false]).show(ui, |ui| {
         for r in &rows {
             let text = format!("{}  [{}{}]", r.id, r.status.label(), if r.unsaved { ", unsaved" } else { "" });
             if ui.selectable_label(st.selected.as_deref() == Some(r.id.as_str()), text).clicked() {
@@ -322,27 +353,36 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
     });
     if ps.project.is_some() {
-        new_ship_ui(ui, st, ps, &listing);
+        new_ship_ui(ui, st, ps, listing);
     }
     if !st.status.is_empty() {
         ui.label(&st.status);
     }
-    ui.separator();
+}
+
+/// The right column: the selected ship's form in its own scroll area. Returns `true` when "Show in 3D" was pressed and succeeded.
+#[allow(clippy::too_many_arguments)]
+fn detail_column(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, schema: &Value, root: &Path, view: &mut ShipView, link: &mut Linked, height: f32) -> bool {
     let Some(id) = st.selected.clone() else {
         ui.label("Select a ship.");
         return false;
     };
     let rel = ship_rel(&id);
+    let scroll = |salt: &str| egui::ScrollArea::vertical().id_salt(salt.to_string()).max_height(height).auto_shrink([false, false]);
     let Some(project) = &mut ps.project else {
-        match read_merged(&root, &rel) {
+        match read_merged(root, &rel) {
             Ok(v) => {
-                ui.strong(&id);
-                // no mod: the retail file is both the base and what is edited, so every field reads "inherited"
-                let ctx = crate::form::FormCtx { base: Some(&v), findings: &[], focus: None, hidden: &[] };
-                let edits = crate::form::show(ui, &schema, &v, &ctx, egui::Id::new(("ship form retail", &id)));
-                if !edits.is_empty() {
-                    crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.clone(), label: format!("Edit {id}"), edits });
-                }
+                let guns = gun_names(&read_merged(root, GUNS_REL).unwrap_or(Value::Null));
+                scroll("ship-detail-retail").show(ui, |ui| {
+                    ui.strong(&id);
+                    // no mod: the retail file is both the base and what is edited, so every field reads "inherited"
+                    let choices = [crate::form::Choice { pattern: GUN_FIELD, options: &guns }];
+                    let ctx = crate::form::FormCtx { base: Some(&v), findings: &[], focus: None, hidden: &[], choices: &choices };
+                    let edits = crate::form::show(ui, schema, &v, &ctx, egui::Id::new(("ship form retail", &id)));
+                    if !edits.is_empty() {
+                        crate::which_mod::propose(ps, crate::which_mod::Pending { rel: rel.clone(), label: format!("Edit {id}"), edits });
+                    }
+                });
             }
             Err(e) => {
                 ui.colored_label(egui::Color32::LIGHT_RED, e.to_string());
@@ -359,11 +399,13 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         }
     };
     let mut go3d = false;
-    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    // the guns a mount can name: the mod's guns table as edited (the import's guns and the mod's own)
+    let guns = project.open_doc(GUNS_REL).map(|g| gun_names(&project.docs[g].edited)).unwrap_or_default();
+    let ids: Vec<String> = list_ship_ids(&project.root).into_iter().chain(list_ship_ids(&project.dir)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
     let mut edits = vec![];
     let mut typing = false;
     let mut revert = false;
-    egui::ScrollArea::vertical().id_salt("ship-detail").show(ui, |ui| {
+    scroll("ship-detail").show(ui, |ui| {
         let doc = &project.docs[i];
         ui.strong(format!("{id}{}", if doc.dirty { " (unsaved)" } else { "" }));
         ui.label(doc_note(doc, &id));
@@ -381,8 +423,9 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
         egui::CollapsingHeader::new("Compare").default_open(false).show(ui, |ui| compare_ui(ui, st, project, doc, &id, &ids));
         let pointer = st.focus.take();
         let inherited = (!doc.base.is_null()).then_some(&doc.base);
-        let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref(), hidden: &[] };
-        (edits, typing) = crate::form::show_typed(ui, &schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
+        let choices = [crate::form::Choice { pattern: GUN_FIELD, options: &guns }];
+        let ctx = crate::form::FormCtx { base: inherited, findings: &notes, focus: pointer.as_deref(), hidden: &[], choices: &choices };
+        (edits, typing) = crate::form::show_typed(ui, schema, &doc.edited, &ctx, egui::Id::new(("ship form", &id)));
     });
     if !edits.is_empty()
         && let Err(e) = project.apply_form(&rel, &format!("Edit {id}"), edits, typing)
@@ -523,6 +566,12 @@ mod tests {
         std::fs::write(assets.join("ships/Ship_A/model.glb"), test_glb::synthetic()).unwrap();
         std::fs::create_dir_all(&m).unwrap();
         (root, assets, m)
+    }
+
+    #[test]
+    fn gun_names_skip_the_schema_key() {
+        assert_eq!(gun_names(&json!({"$schema": "x", "G1": {}, "G2": {}})), ["G1", "G2"]);
+        assert!(gun_names(&Value::Null).is_empty());
     }
 
     #[test]
