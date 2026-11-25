@@ -111,6 +111,8 @@ pub struct State {
     rename: Option<(usize, String)>,
     /// The open add menu: which list (true: conditions) and its search.
     menu: Option<(bool, MenuState)>,
+    /// The open template form ([`super::templates`]), under the list.
+    templates: Option<super::templates::Form>,
     cache: Option<Cache>,
     auto_opened: bool,
 }
@@ -181,6 +183,8 @@ enum Act {
     Save,
     Select(usize),
     AddRule,
+    ToggleTemplates,
+    ExpandTemplate(usize, std::collections::BTreeMap<String, String>),
     Duplicate(usize),
     Delete(usize),
     Move(usize, usize),
@@ -326,6 +330,14 @@ pub fn show_with(ui: &mut egui::Ui, project: &mut Project, st: &mut State) {
         })
     });
     list(ui, st, &all, &refusal, using.as_ref(), &mut acts);
+    if let Some(form) = st.templates.as_mut() {
+        let names = st.cache.as_ref().map_or_else(Names::default, |c| Names(c.names.0.clone()));
+        egui::Frame::group(ui.style()).show(ui, |ui| match super::templates::show(ui, form, &names) {
+            super::templates::Outcome::None => {}
+            super::templates::Outcome::Close => acts.push(Act::ToggleTemplates),
+            super::templates::Outcome::Expand(i, params) => acts.push(Act::ExpandTemplate(i, params)),
+        });
+    }
     if let Some(rule) = all.get(st.rule) {
         ui.separator();
         body(ui, st, project, &rel, rule, &mut acts);
@@ -365,6 +377,9 @@ fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<Strin
         ui.strong(format!("Rules ({})", all.len()));
         if action(ui, wid("add-rule"), "+ New rule", refusal) {
             acts.push(Act::AddRule);
+        }
+        if action(ui, wid("add-template"), "+ From template", refusal) {
+            acts.push(Act::ToggleTemplates);
         }
         ui.add(egui::TextEdit::singleline(&mut st.filter).id(wid("filter")).hint_text("filter by name, Type or field text").desired_width(200.0));
         let on = st.only_problems;
@@ -547,6 +562,16 @@ fn apply(st: &mut State, project: &mut Project, id: &str, rel: &str, acts: Vec<A
                 st.rule = i;
                 st.menu = None;
                 Ok(())
+            }
+            Act::ToggleTemplates => {
+                st.templates = if st.templates.is_some() { None } else { Some(super::templates::Form::default()) };
+                Ok(())
+            }
+            Act::ExpandTemplate(i, params) => {
+                super::templates::all().get(i).ok_or_else(|| format!("no template {i}")).and_then(|t| super::templates::expand(project, id, t, &params)).map(|added| {
+                    st.templates = None;
+                    st.rule = rules::rules(project, &t).len().saturating_sub(added.rules);
+                })
             }
             Act::AddRule => add_rule(project, id, rel).map(|at| st.rule = at),
             Act::Duplicate(i) => mproject::check_add_delete(project, id, MissionList::Rules).and_then(|_| rules::duplicate_rule(project, &t, i)).map(|at| st.rule = at),

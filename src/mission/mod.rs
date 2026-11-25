@@ -18,6 +18,7 @@ pub mod rules_view;
 pub mod ships;
 pub mod speech;
 pub mod tasks;
+pub mod templates;
 // T2
 pub mod media;
 pub mod refs;
