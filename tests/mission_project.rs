@@ -287,7 +287,6 @@ fn unkeyed_lists_refuse_add_and_delete_with_the_reason_and_nothing_changes() {
     let (_root, assets, m) = setup("refuse");
     let mut p = Project::open(&m, Some(assets)).unwrap();
     let cases = [
-        (MissionList::Tasks, json!({"Name": "T2"})),
         (MissionList::Nebulae, json!({"name": "N"})),
         (MissionList::Animals, json!({"group": "x"})),
         (MissionList::MapText, json!({"name": "L"})),
@@ -304,6 +303,7 @@ fn unkeyed_lists_refuse_add_and_delete_with_the_reason_and_nothing_changes() {
     assert_eq!(check_add_delete(&mut p, "mission01", MissionList::Ships).unwrap().as_deref(), Some("id"));
     assert_eq!(check_add_delete(&mut p, "mission01", MissionList::Rules).unwrap().as_deref(), Some("name"));
     assert_eq!(check_add_delete(&mut p, "mission01", MissionList::Points).unwrap().as_deref(), Some("Name"));
+    assert_eq!(check_add_delete(&mut p, "mission01", MissionList::Tasks).unwrap().as_deref(), Some("Name"), "tasks are keyed by Name since engine e2f096c");
     assert!(add_entry(&mut p, "mission01", MissionList::Rules, json!({"Type": "X"})).unwrap_err().contains("needs a 'name'"));
     assert!(add_entry(&mut p, "mission01", MissionList::Rules, json!({"name": "Start"})).unwrap_err().contains("already"));
     assert!(add_entry(&mut p, "mission01", MissionList::Ships, json!({"id": 2})).unwrap_err().contains("already"));

@@ -21,7 +21,7 @@ use serde_json::Value;
 use super::catalogue::{Catalogue, MenuState, Role, show_menu};
 use super::doc::{self as mdoc, MissionList};
 use super::project::{self as mproject, Origin};
-use super::refs::{self, FieldIndex};
+use super::refs;
 use super::rules::{self, Target};
 use crate::checks::{self, Finding, Level};
 use crate::edit::Edit;
@@ -59,7 +59,7 @@ struct Cache {
 }
 
 /// The "uses this" filter of the rule list (docs/phase5.md P6): what a click on the plan picked, as the (field kind, name) pairs a rule
-/// field must name (`refs::references_of`). Set by [`super::plan`], cleared by the chip in the list.
+/// field must name (`refs::references`). Set by [`super::plan`], cleared by the chip in the list.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Uses {
     /// What the chip shows ("volume 'Gate Area'").
@@ -77,7 +77,7 @@ fn owner_index(pointer: &str, list: &str) -> Option<usize> {
 pub fn rules_using(mission: &Value, uses: &Uses) -> (Vec<usize>, Vec<usize>) {
     let (mut rules, mut tasks) = (vec![], vec![]);
     for (kind, name) in &uses.keys {
-        for r in refs::references_of(mission, kind, name) {
+        for r in refs::references(mission, kind, name) {
             if let Some(i) = owner_index(&r.pointer, "rules") {
                 rules.push(i);
             } else if let Some(i) = owner_index(&r.pointer, "tasks") {
@@ -650,7 +650,7 @@ fn rename_rule(project: &mut Project, rel: &str, index: usize, name: &str) -> Re
     if mdoc::rules(&doc.base).iter().any(|r| mdoc::rule_name(r) == Some(old.as_str())) {
         return Err(format!("'{old}' is a rule of the mission this one extends: rename a copy instead"));
     }
-    let mut edits = refs::rename_edits(&doc.edited, FieldIndex::engine(), "rule", &old, name)?;
+    let mut edits = refs::rename_edits(&doc.edited, "rule", &old, name)?;
     edits.push(Edit::set(mdoc::rule_pointer(index, Some(mdoc::RULE_NAME)), Value::from(name)));
     project.do_group(&format!("Rename rule {old}"), vec![(rel.to_string(), edits)])
 }

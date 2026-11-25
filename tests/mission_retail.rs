@@ -200,3 +200,53 @@ fn an_action_change_next_to_a_keyed_add_or_delete_is_written_by_key_and_the_engi
     assert_eq!(got, want, "{file}");
     assert_eq!(Rig::names(&got), ["Start", "End", "Late"]);
 }
+
+/// A retail-like mission with three tasks (keyed by `Name` since the engine's `e2f096c`).
+fn with_tasks() -> Value {
+    let mut m = retail();
+    m["tasks"] = json!([
+        {"Name": "Scout", "text": "Find it", "Active": true, "complete_when": [{"Type": "Enter Volume", "Group Name": "g", "Volume Name": "Gate"}], "fail_when": []},
+        {"Name": "Escort", "text": "Guard it", "Active": true, "complete_when": [], "fail_when": []},
+        {"Name": "Leave", "text": "Go", "Active": false, "complete_when": [], "fail_when": []}
+    ]);
+    m
+}
+
+#[test]
+fn tasks_of_an_extending_mission_are_keyed_entries_and_the_engine_agrees() {
+    let mut r = rig("tasks", with_tasks());
+    // edit one task, delete one, add one, all in one save
+    r.p.do_step(&r.rel, "Edit task", vec![Edit::set(mdoc::task_pointer(0, Some(mdoc::TASK_TEXT)), json!("Find the gate"))]).unwrap();
+    delete_entry(&mut r.p, ID, MissionList::Tasks, 1).unwrap();
+    add_entry(&mut r.p, ID, MissionList::Tasks, json!({"Name": "Late", "text": "New", "Active": true, "complete_when": [], "fail_when": []})).unwrap();
+    // an added task needs its key
+    assert!(add_entry(&mut r.p, ID, MissionList::Tasks, json!({"text": "No name"})).is_err());
+    let want = r.shown();
+    assert!(r.p.save().errors.is_empty());
+    let file = read(&r.m, &r.rel);
+    let tasks = file["tasks"].as_array().unwrap_or_else(|| panic!("{file}"));
+    assert!(tasks.contains(&json!({"Name": "Escort", "$remove": true})), "{file}");
+    assert!(tasks.iter().all(|t| t["Name"] != "Leave"), "an untouched task is not restated: {file}");
+    let (got, skipped) = r.engine("tasks");
+    assert!(skipped.is_empty(), "{skipped:?} {file}");
+    assert_eq!(got, want, "{file}");
+    let names: Vec<_> = mdoc::tasks(&got).iter().map(|t| t["Name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["Scout", "Leave", "Late"]);
+    assert_eq!(mdoc::tasks(&got)[0]["text"], "Find the gate");
+    assert_eq!(mdoc::tasks(&got)[0]["complete_when"].as_array().unwrap().len(), 1, "the rest of the task comes from retail");
+}
+
+#[test]
+fn repeated_task_names_in_the_retail_mission_refuse_keyed_task_edits_and_the_notice_says_so() {
+    let mut m = with_tasks();
+    m["tasks"].as_array_mut().unwrap().push(json!({"Name": "Scout", "text": "again"}));
+    let mut r = rig("tasks-dup", m);
+    let e = add_entry(&mut r.p, ID, MissionList::Tasks, json!({"Name": "New"})).unwrap_err();
+    assert!(e.contains("Name") || e.contains("restating"), "{e}");
+    assert!(delete_entry(&mut r.p, ID, MissionList::Tasks, 0).is_err());
+    let why = retail_limits(&r.p, ID);
+    assert!(why.iter().any(|l| l.contains("task list") && l.contains("skip")), "{why:?}");
+    // with unique names the notice has no task line
+    let ok = rig("tasks-ok", with_tasks());
+    assert!(!retail_limits(&ok.p, ID).iter().any(|l| l.contains("task list")));
+}

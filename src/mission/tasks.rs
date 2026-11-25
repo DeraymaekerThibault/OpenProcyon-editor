@@ -5,8 +5,8 @@
 //! The functions below are the edits, one undo step each (typing in one box joins the step before it), named by the mission id; the
 //! document is `maps/<id>/mission.json`. The keys are [`super::doc`]'s. Renaming a task renames the rule and task fields that name it
 //! ([`super::refs::rename_edits`], kind `task`) in the same step. Adding and deleting a task goes through [`super::project`], which
-//! refuses on a mission that extends another (`tasks` is not a keyed list of the engine, so a change restates the whole list). On
-//! such a mission a key that cannot be removed (`victory`, the messages) is written empty instead (PROVISIONAL: the engine reads
+//! refuses on a mission that extends another only when the retail task names are not unique (`tasks` is keyed by `Name` since engine
+//! `e2f096c`, `authoring::keyed_lists`). On such a mission a key that cannot be removed (`victory`, the messages) is written empty instead (PROVISIONAL: the engine reads
 //! `victory` as `"objectives"` or anything else, and a message id that is no entry falls back to the default text).
 
 use std::sync::OnceLock;
@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::doc::{self as mdoc, MissionList};
 use super::project::{self as mproject, mission_rel};
-use super::refs::{FieldIndex, rename_edits};
+use super::refs::rename_edits;
 use crate::edit::Edit;
 use crate::project::Project;
 use crate::schema_form::{self, Names, Schema};
@@ -65,7 +65,7 @@ pub fn rename_task(project: &mut Project, id: &str, index: usize, new: &str) -> 
         return Err(format!("there is a task '{new}' already"));
     }
     let mut edits = vec![Edit::set(mdoc::task_pointer(index, Some(mdoc::TASK_NAME)), Value::String(new.to_string()))];
-    let follow = if old.is_empty() { vec![] } else { rename_edits(mission, FieldIndex::engine(), "task", &old, new)? };
+    let follow = if old.is_empty() { vec![] } else { rename_edits(mission, "task", &old, new)? };
     let n = follow.len();
     edits.extend(follow);
     project.do_group(&format!("Rename task {old}"), vec![(rel, edits)])?;

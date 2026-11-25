@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use super::doc::{self as mdoc, MissionList};
 use super::groups;
 use super::project::{check_add_delete, merged_map, mission_rel};
-use super::refs::{self, FieldIndex};
+use super::refs;
 use crate::edit::Edit;
 use crate::project::Project;
 use crate::ships_panel::list_ship_ids;
@@ -167,7 +167,7 @@ pub fn delete_player(project: &mut Project, id: &str, index: usize) -> Result<()
     if mdoc::player_start_name(m) == Some(name.as_str()) {
         return Err(format!("'{name}' is the human's player: choose another in the start first"));
     }
-    let n = refs::references_of(m, "player", &name).len();
+    let n = refs::references(m, "player", &name).len();
     if n > 0 {
         return Err(format!("{n} rule field(s) still name '{name}': change them first"));
     }
@@ -212,7 +212,7 @@ pub fn rename_player(project: &mut Project, id: &str, index: usize, new: &str) -
     if mdoc::player_start_name(m) == Some(old.as_str()) {
         edits.push(Edit::set(mdoc::player_start_pointer(Some(mdoc::START_NAME)), json!(new)));
     }
-    let followed = refs::rename_edits(m, FieldIndex::engine(), "player", &old, new)?;
+    let followed = refs::rename_edits(m, "player", &old, new)?;
     let n = followed.len();
     edits.extend(followed);
     project.do_step(&rel, &format!("Rename player {old}"), edits)?;
@@ -306,7 +306,7 @@ pub fn delete_ship(project: &mut Project, id: &str, index: usize) -> Result<(), 
     let (m, rel) = open(project, id)?;
     let ship = ship_at(m, index)?;
     if let Some(name) = mdoc::ship_name(ship) {
-        let n = refs::references_of(m, refs::UNIT, name).len();
+        let n = refs::references(m, refs::UNIT, name).len();
         if n > 0 {
             return Err(format!("{n} rule field(s) still name the ship '{name}': change them first"));
         }
@@ -364,7 +364,7 @@ pub fn rename_ship(project: &mut Project, id: &str, index: usize, new: &str) -> 
         return Err(format!("another ship is named '{new}' already"));
     }
     let mut edits = vec![Edit::set(mdoc::ship_pointer(index, Some(mdoc::SHIP_NAME)), json!(new))];
-    let followed = if old.is_empty() { vec![] } else { refs::rename_edits(m, FieldIndex::engine(), refs::UNIT, &old, new)? };
+    let followed = if old.is_empty() { vec![] } else { refs::rename_edits(m, refs::UNIT, &old, new)? };
     let n = followed.len();
     edits.extend(followed);
     project.do_step(&rel, &format!("Rename ship {old}"), edits)?;

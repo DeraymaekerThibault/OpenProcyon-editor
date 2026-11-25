@@ -16,10 +16,11 @@ name = "procyon-editor"
 path = "src/main.rs"
 
 [dependencies]
-# OpenProcyon#641 (`Finding::inherited`, on top of #638 `--rule-report`, `RuleReport`, `sound_duration`, #639 templates and #640) merged on main as ee99ace; pinned to that commit until a
+# OpenProcyon#646 (mission authoring API: `visit_fields`, keyed tasks, mission/script/media schemas), #647 (duplicate-id and nebula checks) and #649 (ship kills, `--lobby` exit, full `--help`),
+# on top of #641, #638-#640, merged on main as e2f096c; pinned to that commit until a
 # release tag includes it.
-openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "ee99ace" }
-# Same version and features as the engine's game/Cargo.toml at ee99ace; keep them equal on every engine upgrade.
+openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "e2f096c" }
+# Same version and features as the engine's game/Cargo.toml at e2f096c; keep them equal on every engine upgrade.
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 # bevy_egui defaults minus `picking` (map dragging uses egui's own drag sense; the engine does not build bevy_picking).
 bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }

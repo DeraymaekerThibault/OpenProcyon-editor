@@ -158,15 +158,15 @@ fn delete_is_refused_while_something_reads_it() {
 fn rename_follows_every_reference_in_one_step() {
     let (_r, mut p) = setup("rename");
     let before = snap(&p);
-    let n = refs::references_of(mis(&p), "volume", "Area").len();
+    let n = refs::references(mis(&p), "volume", "Area").len();
     assert_eq!(n, 2);
     geo::rename(&mut p, ID, Kind::Volume, "Area", "Door").unwrap();
     let m = mis(&p);
-    assert!(refs::references_of(m, "volume", "Area").is_empty());
-    assert_eq!(refs::references_of(m, "volume", "Door").len(), n);
+    assert!(refs::references(m, "volume", "Area").is_empty());
+    assert_eq!(refs::references(m, "volume", "Door").len(), n);
     assert_eq!(mdoc::volume_names(m), ["Door", "Other", "Neb"], "same place in the file");
     assert_eq!(mdoc::mission_volume(m, "Door").unwrap().len(), 3);
-    assert_eq!(refs::references_of(m, "volume", "Other").len(), 1, "others untouched");
+    assert_eq!(refs::references(m, "volume", "Other").len(), 1, "others untouched");
     assert_eq!(p.undo_label(), Some("Rename volume Area to Door"));
     p.undo();
     assert_eq!(snap(&p), before, "ONE undo takes the definition and every reference back");
@@ -181,7 +181,7 @@ fn rename_follows_every_reference_in_one_step() {
 
     // a path follows the rules too, a point and a label by their list entry
     geo::rename(&mut p, ID, Kind::Path, "Run", "Dash").unwrap();
-    assert_eq!(refs::references_of(mis(&p), "path", "Dash").len(), 1);
+    assert_eq!(refs::references(mis(&p), "path", "Dash").len(), 1);
     geo::rename(&mut p, ID, Kind::Point, "Gate", "Door2").unwrap();
     assert_eq!(mdoc::point_name(&mdoc::points(mis(&p))[0]), Some("Door2"));
     geo::rename(&mut p, ID, Kind::MapText, "L", "Label").unwrap();

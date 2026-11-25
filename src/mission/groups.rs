@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use super::doc as mdoc;
 use super::project::{check_remove_key, mission_rel};
-use super::refs::{self, FieldIndex};
+use super::refs;
 use crate::edit::Edit;
 use crate::form::model::{map_remove, rename_key};
 use crate::map::doc as mapdoc;
@@ -147,7 +147,7 @@ pub fn delete_group(project: &mut Project, id: &str, name: &str) -> Result<(), S
         return Err(format!("no group '{name}'"));
     }
     check_remove_key(project, &rel)?;
-    let n = refs::references_of(m, "group", name).len();
+    let n = refs::references(m, "group", name).len();
     if n > 0 {
         return Err(format!("{n} rule field(s) still name the group '{name}': rename or change them first"));
     }
@@ -169,7 +169,7 @@ pub fn rename_group(project: &mut Project, id: &str, old: &str, new: &str) -> Re
     check_name(m, new)?;
     check_remove_key(project, &rel)?;
     let mut edits = rename_key(&mdoc::groups_pointer(), m.get(mdoc::KEY_GROUPS).expect("has groups"), old, new);
-    let followed = refs::rename_edits(m, FieldIndex::engine(), "group", old, new)?;
+    let followed = refs::rename_edits(m, "group", old, new)?;
     let n = followed.len();
     edits.extend(followed);
     project.do_step(&rel, &format!("Rename group {old}"), edits)?;

@@ -122,12 +122,12 @@ fn victory_and_end_messages() {
 }
 
 #[test]
-fn a_retail_mission_saves_the_end_as_a_diff_and_refuses_task_list_changes() {
+fn a_retail_mission_saves_the_end_as_a_diff_and_keeps_the_task_list_out_of_it() {
     let (root, mut p) = setup("retail");
     open_mission(&mut p, "mission01").unwrap();
-    // `tasks` is not a keyed list of the engine: no add or delete on a mission that extends another
-    assert!(tasks::add_task(&mut p, "mission01", "New").is_err());
-    assert!(tasks::delete_task(&mut p, "mission01", 0).is_err());
+    // `tasks` is keyed by `Name` (engine e2f096c): an added or deleted task is a keyed entry; see tests/mission_retail.rs
+    tasks::add_task(&mut p, "mission01", "New").unwrap();
+    tasks::delete_task(&mut p, "mission01", 1).unwrap();
     tasks::set_victory(&mut p, "mission01", true).unwrap();
     tasks::set_end_message(&mut p, "mission01", mdoc::KEY_VICTORY_MESSAGE, Some("WIN")).unwrap();
     let report = p.save();

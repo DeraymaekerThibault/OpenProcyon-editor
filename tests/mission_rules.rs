@@ -4,7 +4,7 @@
 use openprocyon::authoring::rule_schema;
 use openprocyon_editor::mission::doc as mdoc;
 use openprocyon_editor::mission::media;
-use openprocyon_editor::mission::refs::{self, FieldIndex, NAME_KINDS, OTHER_KINDS, Part};
+use openprocyon_editor::mission::refs::{self, NAME_KINDS, OTHER_KINDS, Part};
 use openprocyon_editor::mission::rules::{self, Target};
 use openprocyon_editor::project::Project;
 use serde_json::{Value, json};
@@ -157,7 +157,6 @@ fn every_schema_kind_is_classified() {
 #[test]
 fn the_walk_finds_every_name_field_of_the_schema() {
     let s = schema();
-    let index = FieldIndex::engine();
     let (mut seen, mut want) = (0, 0);
     for t in s["types"].as_array().unwrap() {
         let is_condition = t["role"] == "condition";
@@ -173,10 +172,10 @@ fn the_walk_finds_every_name_field_of_the_schema() {
         let rule = if is_condition { json!({"name": "r", "conditions": [item], "actions": []}) } else { json!({"name": "r", "conditions": [], "actions": [item]}) };
         let mission = json!({"rules": [rule]});
         let mut found = vec![];
-        refs::walk(&mission, index, &mut |v| found.push(v.clone()));
-        assert_eq!(found.len(), named.len(), "{}: walk found {:?}, schema names {:?}", t["name"], found.iter().map(|v| &v.field).collect::<Vec<_>>(), named);
+        refs::walk(&mission, &mut |v| found.push((v.field(), v.pointer.clone(), v.text.to_string())));
+        assert_eq!(found.len(), named.len(), "{}: walk found {:?}, schema names {:?}", t["name"], found.iter().map(|v| v.0).collect::<Vec<_>>(), named);
         for v in &found {
-            assert_eq!(mission.pointer(&v.pointer).and_then(Value::as_str), Some(v.text.as_str()), "pointer {} points at the field", v.pointer);
+            assert_eq!(mission.pointer(&v.1).and_then(Value::as_str), Some(v.2.as_str()), "pointer {} points at the field", v.1);
         }
         seen += found.len();
         want += named.len();
@@ -196,7 +195,7 @@ fn nested_conditions_and_task_lists_are_walked() {
             {"Type": not_type, (not_field.as_str()): inner.clone()}], "actions": []}],
         "tasks": [{"Name": "T", "complete_when": [inner.clone()], "fail_when": [{"Type": any_type, (list_field.as_str()): [inner.clone()]}]}],
     });
-    let hits = refs::references_of(&mission, "volume", "Gate");
+    let hits = refs::references(&mission, "volume", "Gate");
     let mut at: Vec<&str> = hits.iter().map(|r| r.pointer.as_str()).collect();
     at.sort();
     assert_eq!(hits.len(), 4, "{at:?}");
@@ -204,9 +203,9 @@ fn nested_conditions_and_task_lists_are_walked() {
         assert_eq!(mission.pointer(&r.pointer).and_then(Value::as_str), Some("Gate"));
     }
     assert!(at.iter().any(|p| p.starts_with("/tasks/0/fail_when/0/")), "{at:?}");
-    assert!(refs::references_of(&mission, "volume", "Other").is_empty());
-    assert!(refs::references_of(&mission, "path", "Gate").is_empty(), "another kind is another name");
-    assert!(refs::references_of(&mission, "volume", "").is_empty());
+    assert!(refs::references(&mission, "volume", "Other").is_empty());
+    assert!(refs::references(&mission, "path", "Gate").is_empty(), "another kind is another name");
+    assert!(refs::references(&mission, "volume", "").is_empty());
 }
 
 #[test]
@@ -214,25 +213,25 @@ fn group_unit_specs_and_the_shared_namespace() {
     let (ty, field) = type_with("action", "group").expect("an action with a group field");
     let item = |text: &str| json!({"Type": ty, (field.as_str()): text});
     let mission = json!({"rules": [{"name": "r", "conditions": [], "actions": [item("Raiders"), item("Raiders,Boss"), item("Others,Raiders"), item(" Raiders")]}]});
-    let g = refs::references_of(&mission, "group", "Raiders");
+    let g = refs::references(&mission, "group", "Raiders");
     assert_eq!(g.iter().map(|r| (r.pointer.rsplit('/').nth(1).unwrap().to_string(), r.part)).collect::<Vec<_>>(), [("0".into(), Part::Whole), ("1".into(), Part::Group)]);
     // a player is a group's namespace
-    assert_eq!(refs::references_of(&mission, "player", "Raiders").len(), 2);
-    let u = refs::references_of(&mission, "unit", "Boss");
+    assert_eq!(refs::references(&mission, "player", "Raiders").len(), 2);
+    let u = refs::references(&mission, "unit", "Boss");
     assert_eq!(u.len(), 1);
     assert_eq!(u[0].renamed("Chief"), "Raiders,Chief");
     assert_eq!(g[1].renamed("Pirates"), "Pirates,Boss");
-    assert_eq!(refs::references_of(&mission, "unit", "Raiders")[0].renamed("X"), "Others,X");
-    assert!(refs::rename_edits(&mission, FieldIndex::engine(), "group", "Raiders", "A,B").is_err());
-    assert!(refs::rename_edits(&mission, FieldIndex::engine(), "group", "Raiders", "").is_err());
-    assert!(refs::rename_edits(&mission, FieldIndex::engine(), "group", "Raiders", "Raiders").unwrap().is_empty());
+    assert_eq!(refs::references(&mission, "unit", "Raiders")[0].renamed("X"), "Others,X");
+    assert!(refs::rename_edits(&mission, "group", "Raiders", "A,B").is_err());
+    assert!(refs::rename_edits(&mission, "group", "Raiders", "").is_err());
+    assert!(refs::rename_edits(&mission, "group", "Raiders", "Raiders").unwrap().is_empty());
 }
 
 #[test]
 fn rules_are_matched_by_trimmed_name() {
     let (ty, field) = type_with("action", "rule").expect("an action with a rule field (OP Set Rule Active)");
     let mission = json!({"rules": [{"name": "r", "conditions": [], "actions": [{"Type": ty, (field.as_str()): " Boss Fight "}]}]});
-    assert_eq!(refs::references_of(&mission, "rule", "Boss Fight").len(), 1);
+    assert_eq!(refs::references(&mission, "rule", "Boss Fight").len(), 1);
 }
 
 #[test]
@@ -255,8 +254,8 @@ fn rename_is_one_undo_step_across_rules_and_tasks() {
     let d = doc(&p, MISSION);
     assert_eq!(d["rules"][1]["conditions"][0][&vol_field], json!("Elsewhere"));
     assert_eq!(d["tasks"][0]["complete_when"][0][&vol_field], json!("Door"));
-    assert!(refs::references_of(d, "volume", "Gate").is_empty());
-    assert_eq!(refs::references_of(d, "volume", "Door").len(), n);
+    assert!(refs::references(d, "volume", "Gate").is_empty());
+    assert_eq!(refs::references(d, "volume", "Door").len(), n);
     assert_eq!(d["volumes"], start["volumes"], "the definition is the caller's edit");
     assert!(p.undo().is_some());
     assert_eq!(doc(&p, MISSION), &start, "one undo puts every reference back");

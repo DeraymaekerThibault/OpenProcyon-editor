@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use super::doc::{self as mdoc, MediaTable};
 use super::media;
 use super::project::{self as mproject, media_rel, mission_rel};
-use super::refs::{FieldIndex, rename_edits};
+use super::refs::rename_edits;
 use crate::edit::Edit;
 use crate::project::{Project, guard};
 
@@ -130,7 +130,7 @@ pub fn rename_entry(project: &mut Project, id: &str, table: MediaTable, old: &st
     if project.open_doc(&ms).is_ok()
         && let Some(m) = project.doc(&ms).map(|d| &d.edited).filter(|v| !v.is_null())
     {
-        mission_edits = rename_edits(m, FieldIndex::engine(), kind(table), old, new)?;
+        mission_edits = rename_edits(m, kind(table), old, new)?;
         if table == MediaTable::Messages {
             for key in [mdoc::KEY_VICTORY_MESSAGE, mdoc::KEY_DEFEAT_MESSAGE] {
                 if m.get(key).and_then(Value::as_str) == Some(old) {

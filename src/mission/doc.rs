@@ -563,15 +563,12 @@ pub fn list_entries(mission: &Value, list: MissionList) -> &[Value] {
     at.as_array().map_or(&[], Vec::as_slice)
 }
 
-/// The key a keyed list's entries are told apart by (the engine's keyed merge: `ships` by `id`, `rules` by `name`, `points` by
-/// `Name`); `None` for a list the engine does not key.
+/// The key a keyed list's entries are told apart by: the engine's `authoring::keyed_lists` for a mission file (`ships` by `id`, `rules`
+/// by `name`, `points` and `tasks` by `Name`), looked up by the list's pointer; `None` for a list the engine does not key. A diff's
+/// own `merge` object can change this per file ([`crate::project::keyed::effective`]); this is the default.
 pub fn list_key(list: MissionList) -> Option<&'static str> {
-    match list {
-        MissionList::Ships => Some(SHIP_ID),
-        MissionList::Rules => Some(RULE_NAME),
-        MissionList::Points => Some(POINT_NAME),
-        _ => None,
-    }
+    let ptr = list_pointer(list);
+    openprocyon::authoring::keyed_lists("maps/x/mission.json").into_iter().find(|(p, _)| *p == ptr).map(|(_, f)| f)
 }
 
 /// What one entry of a list is called in an undo label.
@@ -1104,7 +1101,7 @@ mod tests {
         assert_eq!((list_entries(&m, MissionList::Rules).len(), list_entries(&m, MissionList::Animals).len(), list_entries(&m, MissionList::Tasks).len()), (1, 2, 0));
         assert_eq!((list_pointer(MissionList::Nebulae), list_pointer(MissionList::MapText)), ("/environment/nebulae".to_string(), "/map_text".to_string()));
         let keyed: Vec<_> = MissionList::ALL.iter().filter_map(|l| list_key(*l)).collect();
-        assert_eq!(keyed, ["id", "Name", "name"]);
+        assert_eq!(keyed, ["id", "Name", "Name", "name"]);
         assert!(MissionList::ALL.iter().all(|l| !list_noun(*l).is_empty()));
     }
 

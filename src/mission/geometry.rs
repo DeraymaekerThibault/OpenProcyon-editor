@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use super::doc::{self as mdoc, GeoTable, MissionList};
 use super::project::{add_entry, check_add_delete, check_remove_key, delete_entry, mission_rel};
-use super::refs::{self, FieldIndex};
+use super::refs;
 use crate::edit::{self, Edit};
 use crate::map::doc as mapdoc;
 use crate::map::nebula::MIN_POINTS;
@@ -148,7 +148,7 @@ pub fn check_name(mission: &Value, kind: Kind, name: &str, old: Option<&str>) ->
 
 /// How many rule and task fields name `name` as `kind`, and for a volume how many nebula records use it as their polygon.
 pub fn uses(mission: &Value, kind: Kind, name: &str) -> usize {
-    let rules = refs::references_of(mission, kind.ref_kind(), name).len();
+    let rules = refs::references(mission, kind.ref_kind(), name).len();
     let nebulae = if kind == Kind::Volume { mdoc::mission_nebulae(mission).iter().filter(|r| mdoc::record_polygon_name(r) == Some(name)).count() } else { 0 };
     rules + nebulae
 }
@@ -485,7 +485,7 @@ pub fn rename(project: &mut Project, id: &str, kind: Kind, old: &str, new: &str)
             vec![Edit::set(key, Value::from(new))]
         }
     };
-    edits.extend(refs::rename_edits(&m, FieldIndex::engine(), kind.ref_kind(), old, new)?);
+    edits.extend(refs::rename_edits(&m, kind.ref_kind(), old, new)?);
     if kind == Kind::Volume {
         for (i, rec) in mdoc::mission_nebulae(&m).iter().enumerate() {
             if mdoc::record_polygon_name(rec) == Some(old) {

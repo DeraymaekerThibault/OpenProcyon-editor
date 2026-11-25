@@ -170,7 +170,7 @@ fn index_after(pointer: &str, list: &str) -> Option<usize> {
 /// `Group,Unit` texts count).
 pub fn rule_things(mission: &Value, rule: usize) -> Things {
     let mut t = Things::default();
-    super::refs::walk(mission, super::refs::FieldIndex::engine(), &mut |v| {
+    super::refs::walk(mission, &mut |v| {
         if index_after(&v.pointer, "rules") != Some(rule) {
             return;
         }

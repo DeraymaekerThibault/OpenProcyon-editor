@@ -275,8 +275,9 @@ pub fn retail_limits(project: &Project, id: &str) -> Vec<String> {
         "Changing one action or condition of a retail rule saves that rule's whole actions list (or conditions list): arrays inside an entry replace.".to_string(),
         "Renaming a retail rule is a removal plus a new rule appended at the end.".to_string(),
     ];
-    for (ptr, field, noun) in [("/rules", "name", "rule"), ("/ships", "id", "ship"), ("/points", "Name", "point")] {
-        if let Some(list) = d.base.pointer(ptr).and_then(Value::as_array)
+    // every list the engine merges by key (`doc::list_key`, the engine's `keyed_lists`: ships, points, tasks, rules)
+    for (ptr, field, noun) in doc::MissionList::ALL.into_iter().filter_map(|l| Some((doc::list_pointer(l), doc::list_key(l)?, doc::list_noun(l)))) {
+        if let Some(list) = d.base.pointer(&ptr).and_then(Value::as_array)
             && let Err(e) = keyed::keys_of(list, field)
         {
             out.push(format!(
@@ -295,8 +296,8 @@ fn whole(project: &Project, rel: &str) -> bool {
 
 /// Whether `list` of mission `id` can take an added or a deleted entry. A mission that is whole in the mod (a new one) always can
 /// (`Ok(None)`). One that extends another can when the list merges by key ([`keyed`]: `ships` by `id`, `rules` by `name`, `points`
-/// by `Name`, PROVISIONAL, held to the engine by `tests/keyed_engine.rs`) and every entry below has a unique key; the key field is
-/// returned and an added entry must carry it. Otherwise the error says why (`tasks`, `environment.nebulae`, `environment.animals`,
+/// and `tasks` by `Name`, PROVISIONAL, held to the engine by `tests/keyed_engine.rs`) and every entry below has a unique key; the key field is
+/// returned and an added entry must carry it. Otherwise the error says why (`environment.nebulae`, `environment.animals`,
 /// `map_text`, `players`, `alliances` are not keyed by the engine: a change restates the whole list, which the form says,
 /// docs/phase5.md requirement 2).
 pub fn check_add_delete(project: &mut Project, id: &str, list: MissionList) -> Result<Option<String>, String> {
