@@ -13,7 +13,7 @@ Phase 3 stays in `docs/phase3.md`, the spike in `docs/spike.md`, the plan in `do
 - **Now merged (at `f91542f`).** A typed `map.json` with `map.schema.json` (the plan was written when the prototype branch
   `claude/map-schema` had no commit; `script.schema.json` is still not in `authoring::schemas()`).
 - **Engine checked.** Everything below about the engine was read from engine main `42083e4` (and its uncommitted `authoring` work).
-  The editor now pins engine main `f91542f` (OpenProcyon#626), which holds the keyed merge, `map.schema.json` and `--only-mod`.
+  The editor now pins engine main `925d8e4` (OpenProcyon#631, on top of #626 `f91542f`), which holds the keyed merge, `map.schema.json` and `--only-mod`.
   The restatements marked "until the pin moves" were switched to the engine (keyed merge read from the overlay, `--only-mod`, map
   schema hover texts); what stays is listed with each item.
 - **Rule while the format moves:** build everything, but keep key names behind one small module per file (`map_doc`), so a format

@@ -4,8 +4,8 @@ What the editor does in Phase 3 (`docs/roadmap.md`), package by package: what wo
 (no game import, no display), and what the engine's `authoring` API is missing, written as requirements for the engine. The Phase 0
 record stays in `docs/spike.md`.
 
-Engine pin: `openprocyon` from git at rev `f91542f` (OpenProcyon#626 on main: #625's authoring work, `--only-mod`, keyed merge, typed
-`map.json`; Phase 3 was first built on `b2c01f5`, OpenProcyon#620), until a release tag includes it. Bevy's version and features are the engine's `game/Cargo.toml` at that rev. (Phase 3 was built on #620's head `0819c4c`; the merge only fixed bugs, and nothing the editor uses changed.)
+Engine pin: `openprocyon` from git at rev `925d8e4` (OpenProcyon#631 on main, on top of #626: #625's authoring work, `--only-mod`, keyed merge, typed
+`map.json`, and the public keyed-merge and scenery-transform helpers; Phase 3 was first built on `b2c01f5`, OpenProcyon#620), until a release tag includes it. Bevy's version and features are the engine's `game/Cargo.toml` at that rev. (Phase 3 was built on #620's head `0819c4c`; the merge only fixed bugs, and nothing the editor uses changed.)
 
 ## P1. Engine pin and API switch
 

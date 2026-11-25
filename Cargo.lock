@@ -4221,7 +4221,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openprocyon"
 version = "0.2.0"
-source = "git+https://github.com/DeraymaekerThibault/OpenProcyon?rev=f91542f#f91542f4b9a8ec9402c4e41f9f961ca993a5dd81"
+source = "git+https://github.com/DeraymaekerThibault/OpenProcyon?rev=925d8e4#925d8e4fccbe1aeb34f27230c2d4aba8d5ce712d"
 dependencies = [
  "ab_glyph",
  "bevy",
