@@ -369,11 +369,13 @@ impl Catalogue {
 /// State of one open add menu: the query and the filters. Keep it between frames while the menu is open.
 pub struct MenuState {
     pub query: Query,
+    /// The menu was just opened: the search box takes the keyboard focus on its first frame.
+    fresh: bool,
 }
 
 impl MenuState {
     pub fn new(role: Role) -> MenuState {
-        MenuState { query: Query::new(role) }
+        MenuState { query: Query::new(role), fresh: true }
     }
 }
 
@@ -382,7 +384,10 @@ impl MenuState {
 pub fn show_menu(ui: &mut egui::Ui, cat: &Catalogue, st: &mut MenuState) -> Option<String> {
     let mut picked = None;
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut st.query.text).hint_text("Search types, areas, fields").desired_width(180.0));
+        let r = ui.add(egui::TextEdit::singleline(&mut st.query.text).hint_text("Search types, areas, fields").desired_width(180.0));
+        if std::mem::take(&mut st.fresh) {
+            r.request_focus();
+        }
         egui::ComboBox::from_id_salt("catalogue-origin")
             .selected_text(match st.query.origin {
                 OriginFilter::Any => "All",
@@ -426,4 +431,27 @@ pub fn show_menu(ui: &mut egui::Ui, cat: &Catalogue, st: &mut MenuState) -> Opti
         }
     });
     picked
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    #[test]
+    fn the_search_box_takes_the_focus_when_the_menu_opens() {
+        let cat = Catalogue::engine();
+        let mut st = MenuState::new(Role::Action);
+        let ctx = egui::Context::default();
+        let mut frame = || {
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0))), ..Default::default() };
+            ctx.run_ui(raw, |ui| {
+                show_menu(ui, &cat, &mut st);
+            })
+            .textures_delta
+            .clear();
+        };
+        frame();
+        frame();
+        assert!(ctx.egui_wants_keyboard_input(), "the search box has the keyboard");
+    }
 }

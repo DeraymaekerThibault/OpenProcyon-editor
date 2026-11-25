@@ -325,8 +325,8 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
 fn add_box(ui: &mut egui::Ui, id: egui::Id, table: MediaTable, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         let mut name: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        ui.add(egui::TextEdit::singleline(&mut name).hint_text("new name").desired_width(160.0));
-        if ui.button("Add").clicked() {
+        let r = ui.add(egui::TextEdit::singleline(&mut name).hint_text("new name").desired_width(160.0));
+        if ui.button("Add").clicked() || crate::layout::entered(ui, &r) {
             actions.push(Action::Add(table, name.clone()));
             name.clear();
         }

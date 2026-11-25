@@ -254,8 +254,8 @@ pub fn picker_with(ui: &mut egui::Ui, project: &mut Project, st: &mut State) {
     });
     ui.horizontal(|ui| {
         ui.label("New mission");
-        ui.add(egui::TextEdit::singleline(&mut st.new_id).id(wid("new-id")).hint_text("id, for example my_mission").desired_width(160.0));
-        if chip(ui, wid("new-mission"), "Make", false, None).clicked() {
+        let r = ui.add(egui::TextEdit::singleline(&mut st.new_id).id(wid("new-id")).hint_text("id, for example my_mission").desired_width(160.0));
+        if chip(ui, wid("new-mission"), "Make", false, None).clicked() || crate::layout::entered(ui, &r) {
             acts.push(Act::NewMission(st.new_id.trim().to_string()));
         }
         let dirty = !project.dirty_rels().is_empty();

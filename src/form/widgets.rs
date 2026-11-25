@@ -304,7 +304,8 @@ impl<'a> St<'a> {
                 ui.data_mut(|d| d.insert_temp(key, name.clone()));
             }
             let free = !name.is_empty() && !value.and_then(Value::as_object).is_some_and(|m| m.contains_key(&name));
-            if ui.add_enabled(free, egui::Button::new("Add")).clicked() {
+            let enter = crate::layout::entered(ui, &r);
+            if ui.add_enabled(free, egui::Button::new("Add")).clicked() || (enter && free) {
                 self.out.extend(model::map_add(ptr, value, &name, model::default_value(vnode)));
                 ui.data_mut(|d| d.remove_temp::<String>(key));
             }

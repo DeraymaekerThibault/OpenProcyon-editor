@@ -35,6 +35,8 @@ pub struct State {
     pub new_form: Option<crate::which_mod::NewForm>,
     /// Where the left panel's Save/Undo row was drawn last (its top y); the layout test reads it.
     save_row_y: f32,
+    /// Ctrl+S was pressed in a text field: the save waits one frame so the field's own commit (on losing focus) is in it.
+    save_after: bool,
 }
 
 impl State {
@@ -153,18 +155,34 @@ pub fn poll_system(time: Res<Time>, mut state: ResMut<State>) {
     state.tick(time.delta_secs());
 }
 
-/// Ctrl+S, Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y. Undo and redo are left to a focused text field.
+/// Ctrl+S, Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y. Undo and redo are left to a focused text field; Ctrl+S is not: it is consumed here
+/// (the field gets no key and no "s"), the field is let go of so that what it holds is taken in, and the save runs on the next frame.
 pub fn shortcuts(ctx: &egui::Context, st: &mut State) {
     use egui::{Key, Modifiers};
+    if std::mem::take(&mut st.save_after) {
+        st.save();
+    }
     let typing = ctx.egui_wants_keyboard_input();
     let (save, redo, undo) = ctx.input_mut(|i| {
         let save = i.consume_key(Modifiers::COMMAND, Key::S);
+        if save {
+            // A text event for the same key press must not type the letter into the focused field.
+            i.events.retain(|e| !matches!(e, egui::Event::Text(t) if t.eq_ignore_ascii_case("s")));
+        }
         let redo = !typing && (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y));
         let undo = !typing && i.consume_key(Modifiers::COMMAND, Key::Z);
         (save, redo, undo)
     });
     if save {
-        st.save();
+        if typing {
+            if let Some(id) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            }
+            st.save_after = true;
+            ctx.request_repaint();
+        } else {
+            st.save();
+        }
     }
     if let Some(p) = &mut st.project {
         if redo {
@@ -454,6 +472,40 @@ mod tests {
         assert!(empty > 0.0);
         assert_eq!(y_with("Opened a mod."), empty);
         assert_eq!(y_with(&"a long message that wraps onto several lines in a narrow panel. ".repeat(6)), empty);
+        drop(st);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ctrl_s_saves_while_a_text_field_has_focus_and_types_nothing() {
+        let dir = std::env::temp_dir().join(format!("procyon-editor-ctrls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut st = State::default();
+        st.open(&dir.join("m"), None, true);
+        st.status.clear();
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let id = egui::Id::new("field");
+        let frame = |st: &mut State, events: Vec<egui::Event>, text: &mut String| {
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))), events, ..Default::default() };
+            ctx.run_ui(raw, |ui| {
+                shortcuts(ui.ctx(), st);
+                ui.add(egui::TextEdit::singleline(text).id(id));
+            })
+            .textures_delta
+            .clear();
+        };
+        frame(&mut st, vec![], &mut text);
+        ctx.memory_mut(|m| m.request_focus(id));
+        frame(&mut st, vec![], &mut text);
+        assert!(ctx.egui_wants_keyboard_input(), "the field has focus");
+        let key = egui::Event::Key { key: egui::Key::S, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        frame(&mut st, vec![egui::Event::Text("s".into()), key], &mut text);
+        assert_eq!(text, "", "no s is typed");
+        assert!(st.save_after, "the save is queued");
+        assert!(!ctx.egui_wants_keyboard_input(), "the field was let go of, so it commits");
+        frame(&mut st, vec![], &mut text);
+        assert!(!st.save_after && st.status == "Nothing to save.", "{:?}", st.status);
         drop(st);
         let _ = std::fs::remove_dir_all(&dir);
     }

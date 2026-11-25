@@ -23,6 +23,11 @@ pub fn fixed_width<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui:
     ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), add).inner
 }
 
+/// Whether Enter was pressed in the text field `r` this frame (the field lost focus to Enter). A "new name" box adds its entry on it.
+pub fn entered(ui: &egui::Ui, r: &egui::Response) -> bool {
+    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+}
+
 /// `title`, then "(unsaved)" when `dirty`. The mark's space is kept when it is not shown, so what follows in the row stays put.
 pub fn title_with_unsaved(ui: &mut egui::Ui, title: impl Into<egui::WidgetText>, dirty: bool) {
     ui.label(title);

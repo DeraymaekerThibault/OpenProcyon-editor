@@ -143,8 +143,8 @@ pub fn toolbar(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str
                 }
             }
             _ => {
-                ui.add(egui::TextEdit::singleline(&mut t.name).hint_text("new nebula name").desired_width(110.0));
-                if ui.button("New nebula").on_hover_text("Click the polygon's points on the plan").clicked() {
+                let r = ui.add(egui::TextEdit::singleline(&mut t.name).hint_text("new nebula name").desired_width(110.0));
+                if ui.button("New nebula").on_hover_text("Click the polygon's points on the plan").clicked() || crate::layout::entered(ui, &r) {
                     t.stop();
                     t.mode = Mode::Draw;
                     if t.name.trim().is_empty() {

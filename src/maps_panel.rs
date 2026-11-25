@@ -182,8 +182,9 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     ui.horizontal_wrapped(|ui| {
         picker(ui, st, project);
         ui.separator();
-        ui.add(egui::TextEdit::singleline(&mut st.new_id).hint_text("new map id").desired_width(110.0));
-        if ui.add_enabled(!st.new_id.trim().is_empty(), egui::Button::new("New map")).clicked() {
+        let r = ui.add(egui::TextEdit::singleline(&mut st.new_id).hint_text("new map id").desired_width(110.0));
+        let enter = crate::layout::entered(ui, &r) && !st.new_id.trim().is_empty();
+        if ui.add_enabled(!st.new_id.trim().is_empty(), egui::Button::new("New map")).clicked() || enter {
             let id = st.new_id.trim().to_string();
             match maps::new_map(project, &id) {
                 Ok(_) => {

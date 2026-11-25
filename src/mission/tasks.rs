@@ -202,8 +202,8 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
     ui.horizontal(|ui| {
         let new_id = root.with("new");
         let mut name: String = ui.data(|d| d.get_temp(new_id)).unwrap_or_default();
-        ui.add(egui::TextEdit::singleline(&mut name).hint_text("new task name").desired_width(160.0));
-        if ui.button("Add task").clicked() {
+        let r = ui.add(egui::TextEdit::singleline(&mut name).hint_text("new task name").desired_width(160.0));
+        if ui.button("Add task").clicked() || crate::layout::entered(ui, &r) {
             actions.push(Action::Add(name.clone()));
             name.clear();
         }
