@@ -247,5 +247,6 @@ fn a_click_on_the_plan_sets_the_filter() {
     let uses: Uses = rv::state(&rig.ctx).lock().unwrap().uses.clone().unwrap();
     assert_eq!(uses.label, "volume 'Unused'");
     rig.settle();
-    assert_eq!(rig.rules_listed(), Vec::<&str>::new(), "no rule reads Unused");
+    // no rule reads Unused; only the selected rule stays listed (the detail pane shows it, so the list may not hide it)
+    assert_eq!(rig.rules_listed(), vec!["1. r1"], "no rule reads Unused");
 }

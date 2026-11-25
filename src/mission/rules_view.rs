@@ -286,8 +286,19 @@ pub fn picker_with(ui: &mut egui::Ui, project: &mut Project, st: &mut State) {
     }
 }
 
+impl State {
+    /// Drops every filter of the rule list (the "uses" chip, the text, "has problems"): what was just added must be seen, and a
+    /// "uses" filter that was made for the rules as they were is stale.
+    pub fn show_all(&mut self) {
+        self.uses = None;
+        self.filter.clear();
+        self.only_problems = false;
+    }
+}
+
 fn open(st: &mut State, project: &mut Project, id: &str) {
     st.status.clear();
+    st.show_all();
     if report(st, mproject::open_mission(project, id)).is_some() {
         st.mission = Some(id.to_string());
         st.rule = 0;
@@ -410,7 +421,9 @@ fn list(ui: &mut egui::Ui, st: &mut State, all: &[Value], refusal: &Option<Strin
     egui::ScrollArea::vertical().id_salt("rules-list").max_height(240.0).show(ui, |ui| {
         for (i, r) in all.iter().enumerate() {
             let n = rule_findings(&found, i);
-            if (st.only_problems && n == 0) || !matches_filter(r, &needle) || using.is_some_and(|(rules, _)| !rules.contains(&i)) {
+            // The selected rule is always listed (the detail below shows it), whatever the filters say.
+            let hidden = (st.only_problems && n == 0) || !matches_filter(r, &needle) || using.as_ref().is_some_and(|(rules, _)| !rules.contains(&i));
+            if hidden && i != st.rule {
                 continue;
             }
             ui.horizontal_wrapped(|ui| {
@@ -571,10 +584,17 @@ fn apply(st: &mut State, project: &mut Project, id: &str, rel: &str, acts: Vec<A
                 super::templates::all().get(i).ok_or_else(|| format!("no template {i}")).and_then(|t| super::templates::expand(project, id, t, &params)).map(|added| {
                     st.templates = None;
                     st.rule = rules::rules(project, &t).len().saturating_sub(added.rules);
+                    st.show_all();
                 })
             }
-            Act::AddRule => add_rule(project, id, rel).map(|at| st.rule = at),
-            Act::Duplicate(i) => mproject::check_add_delete(project, id, MissionList::Rules).and_then(|_| rules::duplicate_rule(project, &t, i)).map(|at| st.rule = at),
+            Act::AddRule => add_rule(project, id, rel).map(|at| {
+                st.rule = at;
+                st.show_all();
+            }),
+            Act::Duplicate(i) => mproject::check_add_delete(project, id, MissionList::Rules).and_then(|_| rules::duplicate_rule(project, &t, i)).map(|at| {
+                st.rule = at;
+                st.show_all();
+            }),
             Act::Delete(i) => mproject::delete_entry(project, id, MissionList::Rules, i).map(|_| ()),
             Act::Move(from, to) => mproject::check_add_delete(project, id, MissionList::Rules).and_then(|_| rules::move_rule(project, &t, from, to)).map(|_| {
                 if st.rule == from {

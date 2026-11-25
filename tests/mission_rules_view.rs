@@ -320,6 +320,7 @@ fn the_list_filters_by_text_and_by_problems() {
     for _ in 0..3 {
         r.click(wid("add-rule"));
     }
+    r.click(wid(("rule", 1))); // the selected rule is always listed, so select the one the filter keeps
     r.type_text(wid("filter"), "Rule 2");
     assert!(r.shown(wid(("rule", 1))));
     // hidden rows are not drawn: their id keeps the last frame's response, so ask the painted text
@@ -327,4 +328,27 @@ fn the_list_filters_by_text_and_by_problems() {
     r.shapes.iter().for_each(|s| collect_text(&s.shape, &mut all));
     assert!(all.iter().any(|(t, _)| t.starts_with("2. Rule 2")));
     assert!(!all.iter().any(|(t, _)| t.starts_with("1. Rule 1") || t.starts_with("3. Rule 3")), "{all:?}");
+}
+
+#[test]
+fn the_uses_filter_never_hides_the_selected_rule_and_goes_when_a_rule_is_added() {
+    let mut r = Rig::new("uses");
+    r.open_mission();
+    for _ in 0..3 {
+        r.click(wid("add-rule"));
+    }
+    let painted = |r: &Rig, text: &str| {
+        let mut all = vec![];
+        r.shapes.iter().for_each(|s| collect_text(&s.shape, &mut all));
+        all.iter().any(|(t, _)| t.starts_with(text))
+    };
+    // no rule names this volume, so the filter lists none: the selected rule (the last added) stays
+    r.st.uses = Some(rv::Uses { label: "volume 'Nowhere'".into(), keys: vec![("volume".into(), "Nowhere".into())] });
+    r.settle();
+    assert!(painted(&r, "3. Rule 3"), "the selected rule is listed");
+    assert!(!painted(&r, "1. Rule 1") && !painted(&r, "2. Rule 2"), "the others are filtered out");
+    // a new rule clears the filter and is listed with the rest
+    r.click(wid("add-rule"));
+    assert!(r.st.uses.is_none(), "the stale filter is gone");
+    assert!(painted(&r, "4. Rule 4") && painted(&r, "1. Rule 1"));
 }
