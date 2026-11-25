@@ -529,6 +529,72 @@ pub fn script_rules(script: &Value) -> &[Value] {
     list(script, KEY_RULES)
 }
 
+// T2
+// ---- rules and media entries (docs/phase5.md T2): the keys `mission::rules`, `mission::media` and `mission::refs` write through ----
+
+/// The two item lists of a rule (`conditions`, `actions`) and its two flags; the rule's other keys come from the rule schema.
+pub const RULE_CONDITIONS: &str = "conditions";
+pub const RULE_ACTIONS: &str = "actions";
+pub const RULE_RUN_ONCE: &str = "Run Once";
+pub const RULE_IS_ACTIVE: &str = "Is Active";
+/// The key that names a condition's or an action's Type.
+pub const ITEM_TYPE: &str = "Type";
+/// The text of a speech entry (the other tables hold plain strings).
+pub const SPEECH_TEXT: &str = "text";
+
+/// The key of a rule's list of conditions or of actions.
+pub fn rule_list_key(is_condition: bool) -> &'static str {
+    if is_condition { RULE_CONDITIONS } else { RULE_ACTIONS }
+}
+
+/// The pointer of the `rules` list itself.
+pub fn rules_pointer() -> String {
+    pointer(&[KEY_RULES])
+}
+
+/// The pointer of rule `index`'s list of conditions or actions.
+pub fn rule_list_pointer(index: usize, is_condition: bool) -> String {
+    rule_pointer(index, Some(rule_list_key(is_condition)))
+}
+
+/// The pointer of condition or action `item` of rule `index`.
+pub fn rule_item_pointer(index: usize, is_condition: bool, item: usize) -> String {
+    pointer(&[KEY_RULES, &index.to_string(), rule_list_key(is_condition), &item.to_string()])
+}
+
+/// The conditions or the actions of a rule (empty when missing).
+pub fn rule_items(rule: &Value, is_condition: bool) -> &[Value] {
+    list(rule, rule_list_key(is_condition))
+}
+
+/// The Type of a condition or an action.
+pub fn item_type(item: &Value) -> Option<&str> {
+    item.get(ITEM_TYPE)?.as_str()
+}
+
+/// A new rule: active, runs once, nothing in it (the engine's loader reads the two flags as JSON booleans).
+pub fn new_rule(name: &str) -> Value {
+    let mut o = Map::new();
+    o.insert(RULE_NAME.into(), name.into());
+    o.insert(RULE_RUN_ONCE.into(), Value::Bool(true));
+    o.insert(RULE_IS_ACTIVE.into(), Value::Bool(true));
+    o.insert(RULE_CONDITIONS.into(), Value::Array(vec![]));
+    o.insert(RULE_ACTIONS.into(), Value::Array(vec![]));
+    Value::Object(o)
+}
+
+/// What a new entry of a `media.json` table starts as: a speech event with empty text, else an empty string.
+pub fn media_new_entry(which: MediaTable) -> Value {
+    match which {
+        MediaTable::Speech => {
+            let mut o = Map::new();
+            o.insert(SPEECH_TEXT.into(), "".into());
+            Value::Object(o)
+        }
+        _ => Value::String(String::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
