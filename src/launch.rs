@@ -25,7 +25,40 @@ pub struct Shot {
     pub pitch: Option<f32>,
 }
 
-/// One game start: a mod, a map, optionally a ship and a screenshot.
+/// A skirmish set up through the lobby (`--lobby "map=<id>;points=P;limit=L;slots=human,N*computer[;seed=S]"`, the engine's
+/// `menu/lobby_scenario.rs`). The map must be a skirmish map (`"skirmish": true`), else the game says "no skirmish map".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lobby {
+    /// Victory points (`points`); the engine takes 1000 upward in its own steps and refuses other values.
+    pub points: u32,
+    /// Fleet size limit (`limit`), as the engine's range allows.
+    pub limit: u32,
+    /// Computer rows after the one human row (`slots=human,N*computer`).
+    pub computers: u32,
+    pub seed: Option<u32>,
+}
+
+impl Default for Lobby {
+    fn default() -> Lobby {
+        Lobby { points: 1000, limit: 10, computers: 1, seed: None }
+    }
+}
+
+impl Lobby {
+    /// The `--lobby` value for `map`. The ranges are the engine's to check; it exits with a message on a bad spec.
+    pub fn spec(&self, map: &str) -> String {
+        let mut s = format!("map={map};points={};limit={};slots=human", self.points, self.limit);
+        if self.computers > 0 {
+            s.push_str(&format!(",{}*computer", self.computers));
+        }
+        if let Some(seed) = self.seed {
+            s.push_str(&format!(";seed={seed}"));
+        }
+        s
+    }
+}
+
+/// One game start: a mod, a map, optionally a ship, a lobby set-up and a screenshot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Launch {
     /// The mod folder, absolute.
@@ -33,18 +66,35 @@ pub struct Launch {
     pub map: String,
     pub ship: Option<String>,
     pub shot: Option<Shot>,
+    /// Play the map through the skirmish lobby (`--lobby`) instead of straight into the battle (`--map`).
+    pub lobby: Option<Lobby>,
+    /// `--only-mod`: the game loads this mod and none of the player's installed mods. PROVISIONAL: the flag exists in the engine's
+    /// `claude/engine-integration` branch (`modding::ONLY_MOD`), not at the tag this editor links; a game binary without it may ignore
+    /// the flag or refuse it, so it is off unless the player asks.
+    pub only_mod: bool,
 }
 
 impl Launch {
     /// A launch of `map` from the mod in `mod_dir`; the folder is made absolute (the game runs in another working directory).
     pub fn new(mod_dir: &Path, map: &str) -> Launch {
-        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None }
+        Launch { mod_dir: absolute(mod_dir), map: map.to_string(), ship: None, shot: None, lobby: None, only_mod: false }
     }
 
-    /// The command line, in the engine's flag order: `--mod <abs> --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]`.
+    /// The command line, in the engine's flag order:
+    /// `--mod <abs> [--only-mod] --map <id> [--ship <id>] [--shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]]`, or, for a
+    /// lobby launch, `--mod <abs> [--only-mod] --lobby <spec>` (no `--map`: with it the game skips the lobby; no `--ship`: the
+    /// lobby's Auto Assign picks the fleet).
     pub fn args(&self) -> Vec<OsString> {
-        let mut a: Vec<OsString> = vec!["--mod".into(), self.mod_dir.clone().into(), "--map".into(), self.map.clone().into()];
-        if let Some(ship) = &self.ship {
+        let mut a: Vec<OsString> = vec!["--mod".into(), self.mod_dir.clone().into()];
+        if self.only_mod {
+            a.push("--only-mod".into());
+        }
+        if let Some(lobby) = &self.lobby {
+            a.extend(["--lobby".into(), lobby.spec(&self.map).into()]);
+        } else {
+            a.extend(["--map".into(), self.map.clone().into()]);
+        }
+        if let (Some(ship), None) = (&self.ship, &self.lobby) {
             a.extend(["--ship".into(), ship.clone().into()]);
         }
         if let Some(s) = &self.shot {
@@ -72,6 +122,62 @@ impl Launch {
         let log = crate::project::guard::create_file(stderr_file, None).map_err(std::io::Error::other)?;
         Command::new(game_bin()).args(self.args()).stdout(Stdio::null()).stderr(log).spawn()
     }
+}
+
+/// One line of `--check-mod --json`: the fields the panel shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModFinding {
+    pub error: bool,
+    pub file: String,
+    pub path: String,
+    pub message: String,
+}
+
+impl ModFinding {
+    /// `file: path: message`, leaving out what is empty.
+    pub fn line(&self) -> String {
+        [self.file.as_str(), self.path.as_str(), self.message.as_str()].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(": ")
+    }
+}
+
+/// The result of `<game bin> --check-mod <mod> --json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModCheck {
+    pub findings: Vec<ModFinding>,
+}
+
+impl ModCheck {
+    pub fn errors(&self) -> usize {
+        self.findings.iter().filter(|f| f.error).count()
+    }
+    pub fn warnings(&self) -> usize {
+        self.findings.len() - self.errors()
+    }
+}
+
+/// The command line of the mod check: `--check-mod <abs mod folder> --json`.
+pub fn check_mod_args(mod_dir: &Path) -> Vec<OsString> {
+    vec!["--check-mod".into(), absolute(mod_dir).into(), "--json".into()]
+}
+
+/// Reads the output of `--check-mod --json` (`{"errors", "warnings", "findings": [{"level", "file", "path", "message", ..}]}`).
+pub fn parse_mod_check(output: &str) -> Result<ModCheck, String> {
+    let v: serde_json::Value = serde_json::from_str(output.trim()).map_err(|e| format!("unexpected output of --check-mod: {e}"))?;
+    let list = v["findings"].as_array().ok_or("unexpected output of --check-mod: no \"findings\" list")?;
+    let text = |f: &serde_json::Value, k: &str| f[k].as_str().unwrap_or_default().to_string();
+    let findings = list.iter().map(|f| ModFinding { error: f["level"] == "error", file: text(f, "file"), path: text(f, "path"), message: text(f, "message") }).collect();
+    Ok(ModCheck { findings })
+}
+
+/// Runs `<game bin> --check-mod <mod> --json` and reads the findings. The game exits 1 when there are errors; that is still a result.
+/// Blocks while the game checks: call it from a thread.
+pub fn check_mod(mod_dir: &Path) -> Result<ModCheck, String> {
+    let bin = game_bin();
+    let out = Command::new(&bin).args(check_mod_args(mod_dir)).output().map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+    parse_mod_check(&String::from_utf8_lossy(&out.stdout)).map_err(|e| {
+        let err = String::from_utf8_lossy(&out.stderr);
+        format!("{e} ({}{})", out.status, err.lines().next().map_or(String::new(), |l| format!(": {l}")))
+    })
 }
 
 /// Starts map `map_id` of the mod in `mod_dir` without a screenshot (kept for the spike panels).

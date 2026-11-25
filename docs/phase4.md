@@ -166,6 +166,22 @@ skirmish map as a diff: pick `red_rover` (or any of the 14) in the map list, edi
 (P1; adds and deletes after requirement 1), play it with the mod over the import. The gate map (below) is built from an empty folder in this package.
 Engine needs: 12 (`--only-mod`: the game loads the player's other enabled mods, so a play-test is not of this mod alone; open since Phase 3).
 
+**T11 as built: the flags the editor passes** (`src/launch.rs`, `tests/launch_args.rs`; the engine owns their meaning).
+
+| Launch | Arguments |
+|---|---|
+| map, straight into the battle | `--mod <abs> --map <id> [--ship <id>]` |
+| map through the lobby | `--mod <abs> --lobby "map=<id>;points=P;limit=L;slots=human,N*computer[;seed=S]"` (no `--map`, which would skip the lobby; no `--ship`, the lobby's Auto Assign picks the fleet). Defaults `points=1000`, `limit=10`, `N=1`; the engine checks the ranges and the map must be `"skirmish": true` |
+| either, this mod alone | `--only-mod` right after `--mod <abs>` |
+| screenshot | `--mod <abs> --map <id> [--ship <id>] --shot <abs> --shot-frame N[,M] [--dist D --yaw Y --pitch P]` |
+| mod check, before every play-test | `--check-mod <abs> --json` (exit 1 means errors; the output is still read) |
+
+The play-test runs the check on a thread, shows its errors and warnings in the panel, starts the game when there are no errors (or the
+check could not run) and otherwise holds the launch back until "Launch anyway". PROVISIONAL: `--only-mod` is in the engine's
+`claude/engine-integration` branch (`modding::ONLY_MOD`), not at the tag `Cargo.toml` pins (`b2c01f5`; `--lobby` and `--check-mod`
+are); the editor cannot tell whether the game binary has it, so it is an unchecked box, off by default, and an older game may ignore or
+refuse it. This closes the editor side of engine requirement 12 once the engine tag moves.
+
 ## Engine requirements for Phase 4
 
 Checked against engine main `42083e4` (see Status). "Missing" means not found in the source or the docs.

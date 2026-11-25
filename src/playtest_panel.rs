@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 
 use crate::export::{self, ExportPlan};
-use crate::launch::{self, Launch};
+use crate::launch::{self, Launch, Lobby, ModCheck};
 use crate::preview::{self, Preview};
 
 /// The panel's state.
@@ -22,7 +22,16 @@ pub struct State {
     pub save_first: bool,
     /// Set when the panel wants the caller to save the open project; the caller clears it after saving.
     pub save_requested: bool,
+    /// Play through the skirmish lobby (`--lobby`) instead of straight into the battle (`--map`).
+    pub lobby: bool,
+    pub lobby_set: Lobby,
+    /// `--only-mod`. PROVISIONAL: needs a game binary newer than the engine tag this editor links.
+    pub only_mod: bool,
     pending: Option<Action>,
+    /// The `--check-mod` run in flight, and the launch it holds back.
+    check_job: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Result<ModCheck, String>>>>,
+    held: Option<Launch>,
+    check: Option<Result<ModCheck, String>>,
     child: Option<Child>,
     status: String,
     version: Option<Result<String, String>>,
@@ -54,7 +63,13 @@ impl Default for State {
             preview: Preview::default(),
             save_first: true,
             save_requested: false,
+            lobby: false,
+            lobby_set: Lobby::default(),
+            only_mod: false,
             pending: None,
+            check_job: None,
+            held: None,
+            check: None,
             child: None,
             status: String::new(),
             version: None,
@@ -115,21 +130,56 @@ impl State {
     fn launch(&self, dir: &Path, with_shot: bool) -> Launch {
         let mut l = Launch::new(dir, self.map.trim());
         l.ship = Some(self.ship.trim().to_string()).filter(|s| !s.is_empty());
+        l.only_mod = self.only_mod;
         if with_shot {
             l.shot = Some(preview::shot(self.map.trim(), l.ship.as_deref(), self.frame.trim().parse().unwrap_or(300)));
+        } else if self.lobby {
+            l.lobby = Some(self.lobby_set.clone());
         }
         l
     }
 
+    fn start(&mut self, l: &Launch) {
+        match l.spawn() {
+            Ok(c) => {
+                self.child = Some(c);
+                self.status = format!("Game started on map {}.", l.map);
+            }
+            Err(e) => self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()),
+        }
+    }
+
+    /// Takes the result of the `--check-mod` run once it is in; launches the held game unless the check found errors.
+    fn poll_check(&mut self) {
+        let Some(job) = &self.check_job else { return };
+        let result = match job.lock().map_or(Err(std::sync::mpsc::TryRecvError::Disconnected), |r| r.try_recv()) {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(e) => Err(format!("the mod check stopped: {e}")),
+        };
+        self.check_job = None;
+        // A check that could not run, or found only warnings, does not hold the launch back; errors do, until the player says go.
+        let blocked = result.as_ref().is_ok_and(|c| c.errors() > 0);
+        self.check = Some(result);
+        if !blocked && let Some(l) = self.held.take() {
+            self.start(&l);
+        }
+    }
+
     fn run(&mut self, dir: &Path, action: Action) {
         match action {
-            Action::Play => match self.launch(dir, false).spawn() {
-                Ok(c) => {
-                    self.child = Some(c);
-                    self.status = format!("Game started on map {}.", self.map.trim());
-                }
-                Err(e) => self.status = format!("cannot start {}: {e} (set PROCYON_GAME_BIN)", launch::game_bin().display()),
-            },
+            Action::Play => {
+                // The mod is checked by the game binary first (`--check-mod`), off the UI thread; the launch follows the result.
+                self.held = Some(self.launch(dir, false));
+                self.check = None;
+                self.status = "Checking the mod...".into();
+                let (tx, rx) = std::sync::mpsc::channel();
+                let dir = dir.to_path_buf();
+                std::thread::spawn(move || {
+                    let _ = tx.send(launch::check_mod(&dir));
+                });
+                self.check_job = Some(std::sync::Mutex::new(rx));
+            }
             Action::Preview => match self.preview.start(&self.launch(dir, true)) {
                 // The status line of a preview is `Preview::phase()`, which follows the job; `status` is for the game run.
                 Ok(()) => self.status.clear(),
@@ -156,7 +206,11 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if st.child.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None))) {
         st.child = None;
     }
-    let playing = st.child.is_some();
+    st.poll_check();
+    if st.check_job.is_some() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    let playing = st.child.is_some() || st.check_job.is_some();
     st.preview.poll();
 
     ui.heading("Play-test");
@@ -200,6 +254,21 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     }
     picker(ui, "Map", &mut st.map, maps);
     picker(ui, "Ship", &mut st.ship, ships);
+    ui.checkbox(&mut st.lobby, "Play through the skirmish lobby (--lobby)")
+        .on_hover_text("The map must be a skirmish map. The ship above is not used: the lobby assigns the fleet.");
+    if st.lobby {
+        ui.horizontal(|ui| {
+            ui.label("Computers");
+            ui.add(egui::DragValue::new(&mut st.lobby_set.computers).range(0..=7));
+            ui.label("Points");
+            ui.add(egui::DragValue::new(&mut st.lobby_set.points).range(0..=100_000).speed(10));
+            ui.label("Fleet limit");
+            ui.add(egui::DragValue::new(&mut st.lobby_set.limit).range(1..=100));
+        });
+        ui.weak("Points and limit follow the lobby's own steps and ranges; the game refuses a value it does not accept.");
+    }
+    ui.checkbox(&mut st.only_mod, "Load only this mod (--only-mod)")
+        .on_hover_text("PROVISIONAL: needs a game binary that has the flag (newer than the engine this editor links); an older one may ignore or refuse it.");
     ui.horizontal(|ui| {
         ui.checkbox(&mut st.save_first, "Save unsaved documents before launching");
         if unsaved > 0 {
@@ -231,6 +300,38 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     }
     if !st.status.is_empty() {
         ui.label(&st.status);
+    }
+    match &st.check {
+        None => {}
+        Some(Err(e)) => {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("Could not check the mod before launching: {e}"));
+        }
+        Some(Ok(c)) if c.findings.is_empty() => {
+            ui.label("Mod check: no errors, no warnings.");
+        }
+        Some(Ok(c)) => {
+            ui.label(format!("Mod check (--check-mod): {} errors, {} warnings.", c.errors(), c.warnings()));
+            egui::ScrollArea::vertical().id_salt("modcheck").max_height(160.0).show(ui, |ui| {
+                for f in &c.findings {
+                    let color = if f.error { ui.visuals().error_fg_color } else { ui.visuals().warn_fg_color };
+                    ui.colored_label(color, f.line());
+                }
+            });
+        }
+    }
+    if st.held.is_some() && st.check_job.is_none() {
+        ui.label("The game was not started because the check found errors.");
+        let mut go = false;
+        ui.horizontal(|ui| {
+            go = ui.button("Launch anyway").clicked();
+            if ui.button("Cancel").clicked() {
+                st.held = None;
+                st.status.clear();
+            }
+        });
+        if go && let Some(l) = st.held.take() {
+            st.start(&l);
+        }
     }
     let line = st.preview.phase().line();
     if !line.is_empty() {
