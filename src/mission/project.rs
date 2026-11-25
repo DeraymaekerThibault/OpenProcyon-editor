@@ -108,7 +108,9 @@ pub fn list_missions(project: &Project) -> Vec<MissionEntry> {
     }
     for d in &project.docs {
         let id = d.rel.strip_prefix("maps/").and_then(|r| r.strip_suffix(&format!("/{}", doc::MISSION_FILE)));
-        if let Some(id) = id.filter(|id| !id.contains('/') && !d.edited.is_null()) {
+        // An open document is the mod's only when the mod has the file, the document has unsaved edits, or nothing lies below it (a new
+        // one): merely opening a retail mission is no change.
+        if let Some(id) = id.filter(|id| !id.contains('/') && !d.edited.is_null() && (!d.own.is_null() || d.dirty || d.base.is_null())) {
             found.entry(id.to_string()).or_default().0 = true;
         }
     }

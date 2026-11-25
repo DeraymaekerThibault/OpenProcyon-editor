@@ -118,6 +118,9 @@ fn a_retail_mission_opens_as_the_import_has_it_and_a_mod_file_opens_merged() {
     assert_eq!(merged_media(&p, "mission01").unwrap()["speech"]["a"]["text"], "x");
     assert_eq!(map_name(merged_map(&p, "mission01").unwrap()), Some("First"));
     assert!(p.dirty_rels().is_empty());
+    let l = list_missions(&p);
+    let row = l.iter().find(|e| e.id == "mission01").unwrap();
+    assert_eq!((row.origin, row.in_mod), (Origin::Retail, false), "opening a retail mission is no change: not '(retail, changed)'");
     assert!(open_mission(&mut p, "nope").is_err());
     assert!(open_mission(&mut p, "skirm").is_err(), "a map with no mission.json is no mission");
     assert!(open_mission(&mut p, "../x").is_err());
@@ -348,4 +351,14 @@ fn a_mod_inside_the_import_is_refused_by_the_guard() {
     let (_root, assets, _m) = setup("guard");
     assert!(Project::open(&assets.join("maps"), Some(assets.clone())).is_err());
     assert!(Project::create(&assets.join("mymod"), Some(assets.clone())).is_err());
+}
+
+#[test]
+fn an_edited_retail_mission_is_listed_as_changed() {
+    let (_root, assets, m) = setup("listedit");
+    let mut p = Project::open(&m, Some(assets)).unwrap();
+    open_mission(&mut p, "mission01").unwrap();
+    add_entry(&mut p, "mission01", MissionList::Ships, json!({"id": 3, "type": "C", "pos": [1.0, 1.0, 0.0]})).unwrap();
+    let row = list_missions(&p).into_iter().find(|e| e.id == "mission01").unwrap();
+    assert_eq!((row.origin, row.in_mod), (Origin::RetailChanged, true), "an edit makes it the mod's");
 }
