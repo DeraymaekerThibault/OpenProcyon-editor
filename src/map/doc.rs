@@ -176,9 +176,13 @@ pub fn sky(map: &Value) -> Option<&str> {
     map.get("sky")?.as_str()
 }
 
-/// `true` when the map turns the star-map picture on (any string in `backdrop`).
+/// `true` when the map turns the star-map picture on (the engine: `true` or a non-empty string in `backdrop`; `false` is off).
 pub fn has_backdrop(map: &Value) -> bool {
-    map.get("backdrop").is_some_and(Value::is_string)
+    match map.get("backdrop") {
+        Some(Value::Bool(on)) => *on,
+        Some(Value::String(s)) => !s.is_empty(),
+        _ => false,
+    }
 }
 
 // ---- one entry of `objects`, `ships` or `mines` ----
@@ -307,6 +311,78 @@ pub fn duplicate_ids(map: &Value) -> Vec<i64> {
         }
     }
     dup.into_iter().collect()
+}
+
+// T6: settings keys (docs/phase4.md T6). PROVISIONAL until the pin has map.schema.json (the engine's `--dump-schemas` writes it).
+// (Placed above the tests module because clippy refuses items after it.)
+
+/// The top-level keys the settings form writes; the first pointer segment of an edit.
+pub const KEY_NAME: &str = "name";
+pub const KEY_DESCRIPTION: &str = "description";
+pub const KEY_WORLD_HALF: &str = "world_half";
+pub const KEY_SKY: &str = "sky";
+pub const KEY_BACKDROP: &str = "backdrop";
+pub const KEY_LIGHTING: &str = "lighting";
+/// The sun's travel direction inside `lighting`.
+pub const KEY_LIGHT_DIRECTION: &str = "roof_direction";
+/// The sky the engine draws when a map names none (docs/missions.md section 2).
+pub const DEFAULT_SKY: &str = "skybox_07";
+
+/// The map's `description`.
+pub fn description(map: &Value) -> Option<&str> {
+    map.get(KEY_DESCRIPTION)?.as_str()
+}
+
+/// The three colours of `lighting` (docs/missions.md: the roof light is the sun, the floor light the ambient).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightColour {
+    Roof,
+    Floor,
+    Ambient,
+}
+
+impl LightColour {
+    pub const ALL: [LightColour; 3] = [LightColour::Roof, LightColour::Floor, LightColour::Ambient];
+
+    /// The key inside `lighting`.
+    pub fn key(self) -> &'static str {
+        match self {
+            LightColour::Roof => "roof",
+            LightColour::Floor => "floor",
+            LightColour::Ambient => "ambient",
+        }
+    }
+}
+
+/// Whether the map has a `lighting` object.
+pub fn has_lighting(map: &Value) -> bool {
+    map.get(KEY_LIGHTING).is_some_and(Value::is_object)
+}
+
+/// One colour of `lighting` as RGBA, 0..1; three numbers are enough (the engine reads them), alpha is then 1.
+pub fn light_colour(map: &Value, which: LightColour) -> Option<[f64; 4]> {
+    let a = map.get(KEY_LIGHTING)?.get(which.key())?.as_array()?;
+    let n = |i: usize| a.get(i).and_then(Value::as_f64);
+    if a.len() < 3 {
+        return None;
+    }
+    Some([n(0)?, n(1)?, n(2)?, n(3).unwrap_or(1.0)])
+}
+
+/// `lighting.roof_direction`: the sun's travel direction (game axes; the engine normalises it).
+pub fn light_direction(map: &Value) -> Option<[f64; 3]> {
+    point(map.get(KEY_LIGHTING)?.get(KEY_LIGHT_DIRECTION)?)
+}
+
+/// A `lighting` object to start from when a map has none: white sun travelling straight down, grey ambient. PROVISIONAL (the engine's
+/// no-`lighting` look is white light from above; these numbers are the editor's choice, not retail values).
+pub fn default_lighting() -> Value {
+    serde_json::json!({"roof": [1.0, 1.0, 1.0, 1.0], "floor": [0.4, 0.4, 0.4, 1.0], "ambient": [0.4, 0.4, 0.4, 1.0], "roof_direction": [0.0, 0.0, -1.0]})
+}
+
+/// The picture the star map shows, inside the mod: `maps/<id>/backdrop.png` (the engine ignores the name `backdrop` holds).
+pub fn backdrop_rel(map_id: &str) -> String {
+    format!("maps/{map_id}/backdrop.png")
 }
 
 #[cfg(test)]

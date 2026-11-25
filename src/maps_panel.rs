@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use crate::map::catalogue::{self, Catalogue};
 use crate::map::doc::{self, Array};
 use crate::map::project::{self as maps, MapEntry};
+use crate::map::settings;
 use crate::map::view2d::{self, Ref, Scene, Shape};
 use crate::map_edit::canvas::plan_canvas;
 use crate::map_edit::plan_view::PlanView;
@@ -39,6 +40,8 @@ pub struct State {
     place: Option<String>,
     cat: Option<(PathBuf, Catalogue)>,
     turn_deg: f32,
+    // T6 hook (map settings): the form's own state.
+    settings: settings::State,
     /// The turn under way with the handle, radians.
     turning: Option<f64>,
     error: Option<String>,
@@ -65,6 +68,7 @@ impl Default for State {
             place: None,
             cat: None,
             turn_deg: 15.0,
+            settings: settings::State::default(),
             turning: None,
             error: None,
             info: String::new(),
@@ -169,6 +173,12 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         message(ui, st);
         return save;
     };
+    // T6 hook: the map's settings, folded away until asked for.
+    {
+        let skies = st.catalogue(project, false).skies.clone();
+        egui::CollapsingHeader::new("Map settings").id_salt(("map-settings", &id)).show(ui, |ui| settings::show(ui, &mut st.settings, project, &id, &skies));
+    }
+    // end T6 hook
     let Some(map) = maps::merged_view(project, &id) else {
         st.map = None;
         return save;
