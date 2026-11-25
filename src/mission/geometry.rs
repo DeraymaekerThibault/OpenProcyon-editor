@@ -154,7 +154,7 @@ pub fn uses(mission: &Value, kind: Kind, name: &str) -> usize {
 }
 
 fn num(x: f64) -> Value {
-    crate::map_view::short(x as f32)
+    crate::map_view::short(orient::snap_unit(x) as f32)
 }
 
 // ---- items on the plan: what a drag or a turn moves ----
@@ -617,6 +617,13 @@ mod tests {
         assert!((f[0] - 1.0).abs() < 1e-5 && f[1].abs() < 1e-5, "{f:?}");
         assert!(e.iter().any(|x| x.pointer == "/ships/0/rot"));
         assert!(turn_edits(&m(), &[Item::Ship(0)], 0.0).is_empty());
+        // a half turn writes exact 0 and -1, not sin(pi) noise
+        let e = turn_edits(&m(), &[Item::Ship(0), Item::Start], std::f64::consts::PI);
+        let rot = e.iter().find(|x| x.pointer == "/ships/0/rot").unwrap().new.clone().unwrap();
+        let rot: Vec<f64> = rot.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        assert!(rot.iter().all(|x| *x == 0.0 || x.abs() == 1.0), "{rot:?}");
+        let fwd = e.iter().find(|x| x.pointer == "/player_start/forward").unwrap().new.clone().unwrap();
+        assert!(fwd.as_array().unwrap().iter().all(|x| x.as_f64().unwrap().abs() == 0.0 || x.as_f64().unwrap().abs() == 1.0), "{fwd}");
     }
 
     #[test]

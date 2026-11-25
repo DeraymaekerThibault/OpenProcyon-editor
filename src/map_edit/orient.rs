@@ -72,6 +72,21 @@ pub fn read_rot(v: &Value) -> Option<Rot> {
     Some(r)
 }
 
+/// `x`, or exactly 0, 1 or -1 when it is within 1e-9 of one of them: a turn by pi would otherwise write `-1.2246469e-16` for 0.
+pub fn snap_unit(x: f64) -> f64 {
+    for t in [0.0, 1.0, -1.0] {
+        if (x - t).abs() < 1e-9 {
+            return t;
+        }
+    }
+    x
+}
+
+/// [`snap_unit`] on each of the nine numbers.
+pub fn snap_rot(rot: &Rot) -> Rot {
+    rot.map(snap_unit)
+}
+
 /// The matrix for yaw, pitch and roll (see the module doc for the convention).
 pub fn rot_from_euler(e: Euler) -> Rot {
     let (sy, cy) = e.yaw.sin_cos();
@@ -170,6 +185,16 @@ mod tests {
         for i in 0..9 {
             assert!((a[i] - b[i]).abs() < eps, "{a:?} vs {b:?}");
         }
+    }
+
+    #[test]
+    fn values_within_1e_9_of_0_1_or_minus_1_snap_and_others_stay() {
+        let turned = rotate_yaw(&IDENTITY, std::f64::consts::PI);
+        assert!(turned.iter().any(|x| x.abs() > 0.0 && x.abs() < 1e-9), "the raw turn by pi has sin(pi) noise: {turned:?}");
+        assert_eq!(snap_rot(&turned), [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(snap_rot(&turned).map(f64::to_bits), [-1.0f64, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0].map(f64::to_bits), "-0.0 would differ");
+        assert_eq!((snap_unit(1.0 + 1e-12), snap_unit(-1.0 - 1e-12), snap_unit(-1.2246469e-16)), (1.0, -1.0, 0.0));
+        assert_eq!((snap_unit(0.5), snap_unit(1e-6), snap_unit(-300.25)), (0.5, 1e-6, -300.25));
     }
 
     #[test]

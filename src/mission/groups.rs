@@ -215,6 +215,18 @@ pub fn drop_member_edits(mission: &Value, member: i64) -> Vec<Edit> {
         .collect()
 }
 
+/// The edits that list `to` instead of `from` in every group that lists `from` (a ship whose id changes, in the same step).
+pub fn renumber_member_edits(mission: &Value, from: i64, to: i64) -> Vec<Edit> {
+    names(mission)
+        .into_iter()
+        .filter(|n| mdoc::group_members(mission, n).contains(&from))
+        .map(|n| {
+            let list: Vec<Value> = mdoc::group_entries(mission, n).iter().map(|v| if v.as_i64() == Some(from) { json!(to) } else { v.clone() }).collect();
+            Edit::set(mdoc::group_pointer(n), Value::Array(list))
+        })
+        .collect()
+}
+
 // ---- the form ----
 
 enum Op {

@@ -110,9 +110,9 @@ pub fn pos_key(which: Array) -> &'static str {
     }
 }
 
-/// A map to start from: a name and the engine's default `world_half` (PROVISIONAL: nothing else is needed to load).
-pub fn new_map(name: &str) -> Value {
-    serde_json::json!({"name": name, "world_half": DEFAULT_WORLD_HALF})
+/// A map to start from: its `id` (the folder name; informational to the engine, docs/missions.md section 2), a name (the id until set) and the engine's default `world_half` (PROVISIONAL: nothing else is needed to load).
+pub fn new_map(id: &str) -> Value {
+    serde_json::json!({"id": id, "name": id, "world_half": DEFAULT_WORLD_HALF})
 }
 
 /// Gives `entry` (an object; anything else is left alone) the `id` `id`.

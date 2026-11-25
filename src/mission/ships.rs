@@ -344,6 +344,24 @@ pub fn rename_ship(project: &mut Project, id: &str, index: usize, new: &str) -> 
     Ok(n)
 }
 
+/// Gives ship `index` the id `new` as one undo step; every group that lists the old id lists the new one. Refused when another ship,
+/// animal, or object, ship or mine of the map has the id already (a group would address both), as [`groups::next_id`] avoids.
+pub fn set_ship_id(project: &mut Project, id: &str, index: usize, new: i64) -> Result<(), String> {
+    let (m, rel) = open(project, id)?;
+    let old = mdoc::ship_id(ship_at(m, index)?);
+    if old == Some(new) {
+        return Ok(());
+    }
+    if groups::used_ids(m, merged_map(project, id)).contains(&new) {
+        return Err(format!("the id {new} is used already (by a ship, an animal, or an object or mine of the map)"));
+    }
+    let mut edits = vec![Edit::set(mdoc::ship_pointer(index, Some(mdoc::SHIP_ID)), json!(new))];
+    if let Some(old) = old {
+        edits.extend(groups::renumber_member_edits(m, old, new));
+    }
+    project.do_step(&rel, "Set ship id", edits)
+}
+
 /// Sets the position of ship `index`, merging with the edits of the same drag when `typing`.
 pub fn set_ship_pos(project: &mut Project, id: &str, index: usize, pos: [f64; 3], typing: bool) -> Result<(), String> {
     let (m, rel) = open(project, id)?;
@@ -411,6 +429,7 @@ enum Op {
     ShipType(usize, String),
     ShipGroup(usize, String),
     ShipName(usize, String),
+    ShipId(usize, i64),
     ShipPos(usize, [f64; 3]),
     Primary(usize, bool),
 }
@@ -483,7 +502,13 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
     for (i, s) in mdoc::ships(m).iter().enumerate() {
         ui.push_id(("ship", i), |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(format!("#{}", mdoc::ship_id(s).map_or("?".to_string(), |v| v.to_string())));
+                let cur = mdoc::ship_id(s).map_or(String::new(), |v| v.to_string());
+                if let Some(new) = text_edit(ui, egui::Id::new(("ship_id", &id, i)), &cur, 40.0) {
+                    match new.trim().parse::<i64>() {
+                        Ok(n) => ops.push(Op::ShipId(i, n)),
+                        Err(_) => error = Some(format!("'{}' is not a whole number: a ship's id is an integer", new.trim())),
+                    }
+                }
                 if let Some(new) = text_edit(ui, egui::Id::new(("ship_name", &id, i)), mdoc::ship_name(s).unwrap_or(""), 120.0) {
                     ops.push(Op::ShipName(i, new));
                 }
@@ -547,6 +572,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
             Op::DeleteShip(i) => delete_ship(project, &id, i),
             Op::ShipType(i, t) => set_ship_type(project, &id, i, &t),
             Op::ShipGroup(i, g) => set_ship_group(project, &id, i, &g),
+            Op::ShipId(i, n) => set_ship_id(project, &id, i, n),
             Op::ShipName(i, n) => rename_ship(project, &id, i, &n).map(|_| ()),
             Op::ShipPos(i, v) => set_ship_pos(project, &id, i, v, true),
             Op::Primary(i, on) => set_primary(project, &id, i, on),

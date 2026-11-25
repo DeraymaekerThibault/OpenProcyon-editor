@@ -179,12 +179,12 @@ pub fn turn_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Ve
             let e = entry(map, r)?;
             let which = r.array();
             let mut ch = Change::new(which, r.index);
-            ch.pos = Some([short_f64(p.pos[0]), short_f64(p.pos[1]), p.pos[2]]);
+            ch.pos = Some([orient::snap_unit(short_f64(p.pos[0])), orient::snap_unit(short_f64(p.pos[1])), orient::snap_unit(p.pos[2])]);
             match which {
-                Array::Objects | Array::Ships => ch.rot = Some(p.rot),
+                Array::Objects | Array::Ships => ch.rot = Some(orient::snap_rot(&p.rot)),
                 Array::Players => {
                     // the same clockwise turn as the positions'
-                    ch.forward = doc::player_forward(e).map(|f| [f[0] * c + f[1] * s, -f[0] * s + f[1] * c, f[2]]);
+                    ch.forward = doc::player_forward(e).map(|f| [orient::snap_unit(f[0] * c + f[1] * s), orient::snap_unit(-f[0] * s + f[1] * c), f[2]]);
                 }
                 _ => {}
             }
@@ -351,6 +351,11 @@ mod tests {
         let f = ch[1].forward.unwrap();
         assert!((f[0] - 1.0).abs() < 1e-9 && f[1].abs() < 1e-9, "forward +y turned clockwise by 90 degrees is +x: {f:?}");
         assert!(turn_changes(&m, &sc, &sel(&[0]), 0.0).is_empty());
+        // a half turn writes exact 0 and -1, not sin(pi) noise
+        let half = turn_changes(&m, &sc, &sel(&[0, 1]), std::f64::consts::PI);
+        assert!(half[0].rot.unwrap().iter().all(|x| *x == 0.0 || x.abs() == 1.0));
+        let start = turn_changes(&m, &sc, &sel(&[4]), std::f64::consts::PI);
+        assert_eq!(start[0].forward.unwrap(), [0.0, -1.0, 0.0]);
         // one entry turns about itself
         let one = turn_changes(&m, &sc, &sel(&[2]), 1.0);
         assert_eq!(one[0].pos, Some([0.0, 100.0, 0.0]));

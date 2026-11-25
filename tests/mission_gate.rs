@@ -5,9 +5,9 @@
 //! left out equal to the rule schema's default, an empty list or object equal to a missing one only for the keys of [`EMPTY_IS_MISSING`];
 //! list order significant. Then `check_mission` must give the same findings and `defined_names` / `accepted_names` must be equal.
 //!
-//! Every step below names the button it stands for. Where the editor's functions cannot write what the example has, the difference is
-//! kept in [`KNOWN_GAPS`] with the step and the reason: the test passes while the gaps are exactly those, and fails (naming the
-//! difference) when a gap is closed or a new one opens, so the list cannot go stale. Synthetic and project-own data only.
+//! Every step below names the button it stands for. There are no known gaps left: the file the editor writes has no difference from
+//! the example beyond the normalisation above (a missing scenery `player` and a missing ship `rot` read as the engine reads them, see
+//! `is_default_of`). Synthetic and project-own data only; the temp folders are removed when the test ends.
 
 use openprocyon::authoring::{accepted_names, check_mission, defined_names, overlay_into, read_merged};
 use openprocyon_editor::edit::Edit;
@@ -16,6 +16,7 @@ use openprocyon_editor::map::doc::Array;
 use openprocyon_editor::map::project as maps;
 use openprocyon_editor::map::settings::{self, Text};
 use openprocyon_editor::map::view2d;
+use openprocyon_editor::map_edit::orient::IDENTITY;
 use openprocyon_editor::mission::doc as mdoc;
 use openprocyon_editor::mission::geometry::{self as geo, Item, Kind};
 use openprocyon_editor::mission::project as mproject;
@@ -32,63 +33,6 @@ const ID: &str = "gate_ambush";
 /// when it is missing (docs/missions.md section 3). The engine lines were not re-checked for this test.
 const EMPTY_IS_MISSING: &[&str] = &["/alliances", "/groups", "/environment/point_sets", "/volumes", "/paths", "/points", "/environment"];
 
-/// Closes the gaps of [`KNOWN_GAPS`] on the editor's side by hand, the way a later editor fix would write them, so that the comparison
-/// can show nothing else differs: the map's `id` and the object's `player`, the ships' ids renumbered to the example's by position (group
-/// members follow), the identity `rot` of an upright ship, and sin(pi) noise rounded away.
-fn close_gaps(want_m: &Value, got_m: &mut Value, got_map: &mut Value) {
-    got_map["id"] = json!(ID);
-    got_map["objects"][0]["player"] = json!(-1);
-    let want_ids: Vec<i64> = mdoc::ships(want_m).iter().filter_map(mdoc::ship_id).collect();
-    let got_ids: Vec<i64> = mdoc::ships(got_m).iter().filter_map(mdoc::ship_id).collect();
-    for (i, ship) in got_m["ships"].as_array_mut().unwrap().iter_mut().enumerate() {
-        ship["id"] = json!(want_ids[i]);
-        match ship.get_mut("rot").and_then(Value::as_array_mut) {
-            Some(rot) => rot.iter_mut().for_each(|x| {
-                if x.as_f64().is_some_and(|f| f.abs() < 1e-9) {
-                    *x = json!(0.0);
-                }
-            }),
-            None => ship["rot"] = json!([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]),
-        }
-    }
-    for members in got_m["groups"].as_object_mut().unwrap().values_mut() {
-        for m in members.as_array_mut().unwrap() {
-            let at = got_ids.iter().position(|g| Some(*g) == m.as_i64()).unwrap();
-            *m = json!(want_ids[at]);
-        }
-    }
-}
-
-/// What the editor's functions cannot write, as the differences the comparison finds: (a substring of the difference, the step, why).
-/// Each entry must match exactly one difference and every difference must match an entry.
-const KNOWN_GAPS: &[(&[&str], &str, &str)] = &[
-    (
-        &["map.json/id:"],
-        "New mission (map.json)",
-        "`new_map` writes `name` and `world_half` only; the example's map.json also has `id` (the folder name). The engine may take the id from the folder: PROVISIONAL, not checked.",
-    ),
-    (
-        &["map.json/objects/0/player:"],
-        "Maps tab: place Island04 (`view2d::scenery_entry`)",
-        "a placed object has no `player`; the example has `\"player\": -1` (no owner). Whether the engine reads a missing one as -1 is not checked.",
-    ),
-    (
-        &["/ships/0/id:", "/ships/1/id:", "/ships/2/id:", "mission.json/groups/RaiderShips/"],
-        "Add ship (`ships::add_ship`, `groups::next_id`)",
-        "a ship's id is the smallest free one (here 2, 3, 4: the map's Island04 has 1); the example's are 10, 11, 12 and the form shows the id read only, so no editor call can choose it. Group members follow the ids. Ids are opaque to the engine, so this is a difference of the file, not of the mission.",
-    ),
-    (
-        &["/ships/0/rot:"],
-        "Add ship Dauntless",
-        "`add_ship` writes no `rot` and a turn by 0 writes nothing; the example's Dauntless has the identity `rot`. An upright ship with no `rot` is probably the same to the engine (not checked), but no editor call writes the identity.",
-    ),
-    (
-        &["/rot/"],
-        "Turn ship (`geometry::turn_items`, Raider One and Two)",
-        "turning by pi writes sin(pi) noise (-1.2246469e-16 where the example has 0.0); the turn does no rounding, so the file differs by 1e-16 from the hand-written one.",
-    ),
-];
-
 fn fixture(rel: &str) -> Value {
     let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source").join(rel);
     serde_json::from_slice(&std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))).unwrap()
@@ -100,8 +44,26 @@ fn put(root: &Path, rel: &str, v: &Value) {
     std::fs::write(p, serde_json::to_string_pretty(v).unwrap()).unwrap();
 }
 
+/// Every folder the test made, removed by [`Cleanup`] when the test ends (also when it panics).
+static MADE: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+struct Cleanup;
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        for d in MADE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..) {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+}
+
+fn made(d: PathBuf) -> PathBuf {
+    MADE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(d.clone());
+    d
+}
+
 fn temp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("ope-gate-{name}-{}", std::process::id()));
+    let d = made(std::env::temp_dir().join(format!("ope-gate-{name}-{}", std::process::id())));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -172,10 +134,12 @@ fn build(dir: &Path) -> Project {
     // 5. Three ships; Dauntless primary; the raiders turned to face the gate.
     let dauntless = step("Add ship Dauntless", ships::add_ship(&mut p, ID, "Ship_Navy_Cutter", "Hero"));
     step("Name Dauntless", ships::rename_ship(&mut p, ID, dauntless, "Dauntless"));
+    step("Id of Dauntless", ships::set_ship_id(&mut p, ID, dauntless, 10));
     step("Primary", ships::set_primary(&mut p, ID, dauntless, true));
-    for (name, pos) in [("Raider One", [400.0, 600.0, 0.0]), ("Raider Two", [440.0, 620.0, 0.0])] {
+    for (name, pos, ship_id) in [("Raider One", [400.0, 600.0, 0.0], 11), ("Raider Two", [440.0, 620.0, 0.0], 12)] {
         let i = step("Add ship", ships::add_ship(&mut p, ID, "Ship_Pirate_Sloop", "Raiders"));
         step("Name ship", ships::rename_ship(&mut p, ID, i, name));
+        step("Id of ship", ships::set_ship_id(&mut p, ID, i, ship_id));
         step("Move ship", ships::set_ship_pos(&mut p, ID, i, pos, false));
         step("Turn ship", geo::turn_items(&mut p, ID, &[Item::Ship(i)], std::f64::consts::PI));
     }
@@ -278,7 +242,7 @@ fn build(dir: &Path) -> Project {
 /// The engine reads the saved mod over no import: (mission, map, media) as `read_merged` gives them.
 fn read_back(mod_dir: &Path, tag: &str) -> (Value, Value, Value) {
     let base = temp(&format!("{tag}-empty-import"));
-    let out = base.parent().unwrap().join(format!("ope-gate-{tag}-overlay-{}", std::process::id()));
+    let out = made(base.parent().unwrap().join(format!("ope-gate-{tag}-overlay-{}", std::process::id())));
     let _ = std::fs::remove_dir_all(&out);
     let report = overlay_into(&base, &[mod_dir.to_path_buf()], &out).unwrap_or_else(|e| panic!("overlay_into: {e}"));
     let skipped: Vec<_> = report.mods.iter().flat_map(|m| m.skipped.clone()).collect();
@@ -301,6 +265,16 @@ fn is_default_of(schema: &Schema, path: &str, obj: &serde_json::Map<String, Valu
     // a rule's flags: true when left out (engine schema.rs:832-850, as docs/phase5.md says)
     if (key == "Run Once" || key == "Is Active") && path.matches('/').count() == 2 && path.starts_with("/rules/") {
         return v == &json!(true);
+    }
+    // a scenery object with no `player` has no owner, as `"player": -1`: the engine reads the owner with `as_u64`, which is `None` for
+    // both (game/src/scenario/spawn.rs:289 and :491 at the pinned engine)
+    if key == "player" && path.starts_with("/objects/") && path.matches('/').count() == 2 {
+        return v == &json!(-1);
+    }
+    // a ship with no `rot` is upright facing north, as the identity: `game_rotation` takes each missing number from the identity
+    // (game/src/scenario/spawn.rs:567-568), and the mission's ships go through it (game/src/campaign.rs:545)
+    if key == "rot" && path.starts_with("/ships/") && path.matches('/').count() == 2 {
+        return v.as_array().is_some_and(|a| a.len() == 9 && a.iter().zip(IDENTITY).all(|(x, i)| x.as_f64() == Some(i)));
     }
     // a Type's field the schema gives a default for
     let Some(ty) = obj.get("Type").and_then(Value::as_str) else { return false };
@@ -375,6 +349,7 @@ fn differences(schema: &Schema, want: &Value, got: &Value) -> Vec<String> {
 
 #[test]
 fn the_phase_5_gate_gate_ambush_is_rebuilt_from_an_empty_folder() {
+    let _cleanup = Cleanup;
     let dir = temp("mod");
     let _project = build(&dir);
     let schema = Schema::engine();
@@ -400,24 +375,7 @@ fn the_phase_5_gate_gate_ambush_is_rebuilt_from_an_empty_folder() {
         found.extend(differences(&schema, &want, &got).into_iter().map(|d| format!("{file}{d}")));
     }
 
-    // The gap list must match the differences exactly.
-    let mut unexplained = found.clone();
-    let mut stale = vec![];
-    for (needles, step, why) in KNOWN_GAPS {
-        let before = unexplained.len();
-        unexplained.retain(|d| !needles.iter().any(|n| d.contains(n)));
-        if unexplained.len() == before {
-            stale.push(format!("{needles:?} ({step}: {why})"));
-        }
-    }
-    assert!(unexplained.is_empty(), "differences from gate-ambush the editor cannot explain:\n{}", unexplained.join("\n"));
-    assert!(stale.is_empty(), "known gaps that no longer show (remove them from KNOWN_GAPS):\n{}", stale.join("\n"));
-
-    // With those gaps closed by hand nothing else differs.
-    let (mut closed_m, mut closed_map) = (got_m.clone(), got_map.clone());
-    close_gaps(&want_m, &mut closed_m, &mut closed_map);
-    let rest: Vec<String> = differences(&schema, &want_m, &closed_m).into_iter().chain(differences(&schema, &want_map, &closed_map)).collect();
-    assert!(rest.is_empty(), "differences beyond the known gaps:\n{}", rest.join("\n"));
+    assert!(found.is_empty(), "differences from gate-ambush:\n{}", found.join("\n"));
 
     // Two engine views must agree: the checker's findings and the names a field accepts.
     // (the file as the editor saved it, not the closed one: findings and names do not depend on the gaps)

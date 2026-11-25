@@ -390,16 +390,16 @@ and `mod.json` of `docs/missions.md` section 1, already in this repository as `t
 `tests/mission_gate.rs` builds `gate-ambush` with the editor's functions (steps 1 to 11 above, in that order, in a temp folder, saving
 at the end), reads it back with `overlay_into` over no import and `read_merged`, and compares it with `tests/fixtures/source/`. It
 passes: the rule schema is the engine's, the three files are complete, `check_mission` gives no finding for either and `defined_names`
-and `accepted_names` are equal. The comparison found these differences, which the test lists in `KNOWN_GAPS` (it fails when one
-disappears or a new one appears) and which the test closes by hand, then showing that nothing else differs:
+and `accepted_names` are equal. The first run found five differences (`KNOWN_GAPS` in the test); all five are closed and the test now
+requires no difference at all (the temp folders are removed when it ends):
 
-| Step | What the editor writes | The example has | Cause |
+| Step | What the editor wrote | The example has | How it is closed |
 | --- | --- | --- | --- |
-| New mission (`map.json`) | no `id` | `"id": "gate_ambush"` | `map::doc::new_map` writes `name` and `world_half` only; the engine may take the id from the folder (not checked) |
-| Maps tab, place scenery | no `player` | `"player": -1` | `view2d::scenery_entry`; whether a missing `player` reads as -1 is not checked |
-| Add ship | ids 2, 3, 4 (the map's `Island04` has 1) | 10, 11, 12; group members follow | the id is the smallest free one and cannot be edited; opaque to the engine |
-| Add ship (Dauntless) | no `rot` | identity `rot` | `add_ship` writes none, a turn by 0 writes nothing |
-| Turn ship (raiders) | `-1.2246469e-16` where the example has `0.0` | `0.0` | `geometry::turn_items` writes `sin(pi)` noise, no rounding |
+| New mission (`map.json`) | no `id` | `"id": "gate_ambush"` | `map::doc::new_map(id)` writes `id` (and `name` = the id until it is set). The folder name is the id for the game and the key is informational (docs/missions.md section 2), so this is for the file's sake |
+| Maps tab, place scenery | no `player` | `"player": -1` | not an editor gap: the engine reads an object's owner with `as_u64` (`game/src/scenario/spawn.rs:289`, `:491`), which is `None` for a missing key and for -1 alike, so the test compares a missing `player` as -1 (`is_default_of`) |
+| Add ship | ids 2, 3, 4 (the map's `Island04` has 1) | 10, 11, 12; group members follow | `ships::set_ship_id` and the id box of the ship row: refused while a ship, animal, or map object, ship or mine has the id, one undo step, every group that lists the old id lists the new one |
+| Add ship (Dauntless) | no `rot` | identity `rot` | not an editor gap: `game_rotation` takes every missing number from the identity (`game/src/scenario/spawn.rs:567-568`), and mission ships go through it (`game/src/campaign.rs:545`), so the test compares a missing ship `rot` as the identity |
+| Turn ship (raiders) | `-1.2246469e-16` where the example has `0.0` | `0.0` | `orient::snap_unit` / `snap_rot` snap values within 1e-9 of 0, 1 or -1 in `geometry::turn_edits` and `view2d::turn_changes` (rot, forward, positions) |
 
 Smaller points, not differences of the files read back: `Project::create_with` adds `format` and `game_version` to `mod.json` (left out of
 the comparison); the Maps tab's sky dropdown offers `skybox_22` where the example has `skybox_22_Layer1` (the test passes the example's

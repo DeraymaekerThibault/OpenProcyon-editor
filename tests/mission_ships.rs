@@ -225,6 +225,23 @@ fn ships_add_with_shared_ids_rename_with_references_and_delete_out_of_groups() {
 }
 
 #[test]
+fn a_ship_id_can_be_chosen_unless_something_has_it_and_the_groups_follow() {
+    let (mut p, _) = opened("ship-id");
+    // ids 1,2,3 ships, 10 object, 11 mine, 20 animal; Fleet [1, 2], Pirates [3, 10]
+    for taken in [1, 2, 10, 11, 20] {
+        assert!(ships::set_ship_id(&mut p, ID, 2, taken).unwrap_err().contains("used already"), "{taken}");
+    }
+    assert!(ships::set_ship_id(&mut p, ID, 9, 99).is_err());
+    ships::set_ship_id(&mut p, ID, 2, 3).unwrap();
+    one_step(&mut p, |p| ships::set_ship_id(p, ID, 2, 30).unwrap());
+    let v = view(&p);
+    assert_eq!(doc::ship_id(&doc::ships(&v)[2]), Some(30));
+    assert_eq!(doc::group_members(&v, "Pirates"), [30, 10], "the group lists the new id, in place");
+    assert_eq!(doc::group_members(&v, "Fleet"), [1, 2]);
+    assert_eq!(groups::next_id(&v, p.doc("maps/gates/map.json").map(|d| &d.edited)), 3, "the freed id is free");
+}
+
+#[test]
 fn primary_is_exclusive_per_owner_in_one_step() {
     let (mut p, _) = opened("primary");
     // Escort becomes primary: Dauntless (same owner) is turned off in the same step; Pirate (another owner) is untouched.
