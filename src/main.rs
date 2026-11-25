@@ -71,6 +71,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin { primary_window: Some(Window { title: "OpenProcyon Editor".into(), ..default() }), ..default() }))
         .add_plugins(EguiPlugin::default())
         .add_plugins(ship_view::scene::plugin)
+        .add_plugins(openprocyon_editor::map::view3d::plugin) // T9
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn((Camera2d, PrimaryEguiContext));
         })
@@ -233,7 +234,15 @@ fn panel(
     ship_view::panel::hidden(&mut ship);
     if *tab == Tab::Map {
         // No scroll area: the plan fills the space left under its toolbars.
-        egui::CentralPanel::default().show(&mut root, |ui| maps_panel::tab(ui, &mut map, &mut project));
+        // T9: with the 3D map view on, the 3D camera draws underneath this panel, so it is transparent; the toolbar rows above the
+        // canvas get their background here (the strip above the canvas of the last frame).
+        let mut central = egui::CentralPanel::default();
+        if map.v3.on && project.project.is_some() {
+            let strip = map.v3.bar_rect(root.available_rect_before_wrap());
+            root.painter().rect_filled(strip, 0.0, ctx.global_style().visuals.panel_fill);
+            central = central.frame(egui::Frame::NONE);
+        }
+        central.show(&mut root, |ui| maps_panel::tab(ui, &mut map, &mut project));
         which_mod::window(ctx, &mut project, assets.dir.as_deref().filter(|d| d.is_dir()));
         return Ok(());
     }
