@@ -241,6 +241,8 @@ fn pick(ui: &mut egui::Ui, id: egui::Id, current: &str, options: &[String], kind
         ui.data_mut(|d| {
             d.insert_temp(open_key, !open);
             d.insert_temp(id.with("fresh"), true);
+            // A filter typed before and never used would hide names the next time the list opens.
+            d.insert_temp(id.with("filter"), String::new());
         });
     }
     if !open {
@@ -272,7 +274,10 @@ fn pick(ui: &mut egui::Ui, id: egui::Id, current: &str, options: &[String], kind
         });
         ui.data_mut(|d| d.insert_temp(fid, needle));
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            ui.data_mut(|d| d.insert_temp(open_key, false));
+            ui.data_mut(|d| {
+                d.insert_temp(open_key, false);
+                d.insert_temp(id.with("filter"), String::new());
+            });
         }
     });
     if out.is_some() {

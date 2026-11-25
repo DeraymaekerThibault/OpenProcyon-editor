@@ -62,10 +62,10 @@ The round-3 editor fixes are covered only by headless tests so far:
 - A retail mission's ship-kill rule; only mission03 has one, and it is awkward to test.
 - Sinking your own ship: no kill is credited, covered by a unit test only.
 - The Phase 5 gate rebuilt by hand from an empty folder, all the way through.
-- The player "Raiders" missing from the template pickers on the tester's gate mission. The engine accepts players listed only in `mission.json`, so the tester's file probably has another shape. Not reproduced.
+- The player "Raiders" missing from the template pickers on the tester's gate mission. Cause found in the editor, not the engine: a name picker kept a filter typed and abandoned, so reopening it showed a filtered list (fixed, `tests/schema_pick.rs`). The engine's list was right: it offers every player of `players` in `mission.json` or `map.json`. Not proved to be what the tester saw: round 4, step 14 re-checks it, and a name that differs in capitals or by a space is not offered by design.
 
 **Next work.**
-1. **Round 4 of the local test:** re-check the round-3 fixes above with real assets, plus the open items.
+1. **Round 4 of the local test:** the step list is `docs/round4.md`. It runs only after OpenProcyon#666 lands and the maintainer moves the editor's engine pin.
 2. **One rules run for missions and skirmish:** the rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
    - **Plan:** load both formats into one rules-run resource, with the campaign-only parts (opening, briefing, campaign id) as an optional extra. Behaviour must not change; prove it with `tools/tracediff.py`, same seed and `--fixed-step`, on one mission and one skirmish map (needs assets).
 3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path, then the editor's panels.
