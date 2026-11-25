@@ -313,7 +313,7 @@ pub fn duplicate_ids(map: &Value) -> Vec<i64> {
     dup.into_iter().collect()
 }
 
-// T6: settings keys (docs/phase4.md T6). PROVISIONAL until the pin has map.schema.json (the engine's `--dump-schemas` writes it).
+// T6: settings keys (docs/phase4.md T6). Held to the engine's `map.schema.json` by `tests/map_schema.rs`.
 // (Placed above the tests module because clippy refuses items after it.)
 
 /// The top-level keys the settings form writes; the first pointer segment of an edit.

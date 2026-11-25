@@ -2,9 +2,10 @@
 //! picture. Every change is an undo step of the map's project document ([`Project::apply_form`]), so on a retail map it is saved as a
 //! diff over it, and the picture is copied into the mod through the project's write guard.
 //!
-//! PROVISIONAL until the pinned engine has `map.schema.json` (it is written by the engine's `--dump-schemas`; the pin predates it): this
-//! is a hand-listed form, not the schema-driven one of Phase 3. When the pin moves, `form::show_typed` on the map schema replaces
-//! [`show`] and the edit helpers below shrink to the backdrop copy. Names no map key: that is [`super::doc`].
+//! The fields are the ones T6 edits with their own widgets (sky picker, lighting toggle and colours, backdrop copy), so [`show`] is
+//! not `form::show_typed` over the whole map schema; what the schema (`map.schema.json`, the engine's `--dump-schemas`) says about
+//! each field, its description, is the hover text ([`hint`]), and `tests/map_schema.rs` holds every key and type the form edits to the
+//! schema. Names no map key: that is [`super::doc`].
 
 use std::path::Path;
 
@@ -16,6 +17,18 @@ use super::project::{map_rel, merged_view, open_map};
 use crate::edit::{Edit, pointer};
 use crate::map_view::short;
 use crate::project::{Project, guard};
+
+/// The engine's description of the map field at `ptr` (`/world_half`, `/lighting/roof`), from `map.schema.json`; empty when the schema
+/// has none.
+pub fn hint(ptr: &str) -> String {
+    use std::sync::OnceLock;
+    static SCHEMA: OnceLock<crate::form::model::Node> = OnceLock::new();
+    let node = SCHEMA.get_or_init(|| {
+        let schema = openprocyon::authoring::schemas().into_iter().find(|(n, _)| *n == "map.schema.json").map(|(_, s)| s).unwrap_or_default();
+        crate::form::model::Node::from_schema(&schema)
+    });
+    node.at(ptr).map(|n| n.description.clone()).unwrap_or_default()
+}
 
 /// A free-text setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,19 +204,18 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
         ui.label("The map is not open.");
         return;
     };
-    ui.label(egui::RichText::new("Hand-listed form, PROVISIONAL until the engine pin has map.schema.json.").weak().small());
 
     let mut name = doc::name(&map).unwrap_or_default().to_string();
     ui.horizontal(|ui| {
         ui.label("Name");
-        if ui.add(egui::TextEdit::singleline(&mut name).desired_width(220.0)).changed() {
+        if ui.add(egui::TextEdit::singleline(&mut name).desired_width(220.0)).on_hover_text(hint("/name")).changed() {
             let r = set_text(project, id, Text::Name, &name, true);
             st.run(r);
         }
     });
     let mut desc = doc::description(&map).unwrap_or_default().to_string();
     ui.label("Description");
-    if ui.add(egui::TextEdit::multiline(&mut desc).desired_rows(3).desired_width(f32::INFINITY)).changed() {
+    if ui.add(egui::TextEdit::multiline(&mut desc).desired_rows(3).desired_width(f32::INFINITY)).on_hover_text(hint("/description")).changed() {
         let r = set_text(project, id, Text::Description, &desc, true);
         st.run(r);
     }
@@ -211,7 +223,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
     let mut half = doc::world_half(&map).unwrap_or(doc::DEFAULT_WORLD_HALF);
     ui.horizontal(|ui| {
         ui.label("world_half");
-        let r = ui.add(egui::DragValue::new(&mut half).speed(10.0).range(10.0..=100_000.0)).on_hover_text("Half the side of the playable square, game units (default 1000)");
+        let r = ui.add(egui::DragValue::new(&mut half).speed(10.0).range(10.0..=100_000.0)).on_hover_text(hint("/world_half"));
         if r.changed() {
             let r = set_world_half(project, id, half, true);
             st.run(r);
@@ -223,7 +235,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
     let shown = now.as_deref().map(|s| super::catalogue::sky_name(s).to_string());
     let mut pick: Option<Option<String>> = None;
     ui.horizontal(|ui| {
-        ui.label("Sky");
+        ui.label("Sky").on_hover_text(hint("/sky"));
         egui::ComboBox::from_id_salt(("map-sky", id)).selected_text(shown.clone().unwrap_or_else(|| "(default)".into())).show_ui(ui, |ui| {
             if ui.selectable_label(shown.is_none(), "(default)").clicked() {
                 pick = Some(None);
@@ -247,7 +259,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
 
     ui.separator();
     let mut on = doc::has_lighting(&map);
-    if ui.checkbox(&mut on, "Own lighting").on_hover_text("Off: the engine's plain white light from above").changed() {
+    if ui.checkbox(&mut on, "Own lighting").on_hover_text(hint("/lighting")).changed() {
         let r = set_lighting_enabled(project, id, on);
         st.run(r);
     }
@@ -259,7 +271,8 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
                     LightColour::Roof => "Sun (roof)",
                     LightColour::Floor => "Ambient (floor)",
                     LightColour::Ambient => "Ambient (unused by the engine, PROVISIONAL)",
-                });
+                })
+                .on_hover_text(hint(&pointer(&[doc::KEY_LIGHTING, which.key()])));
                 if ui.color_edit_button_rgba_unmultiplied(&mut c).changed() {
                     let r = set_light_colour(project, id, which, c, true);
                     st.run(r);
@@ -268,7 +281,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
         }
         let mut d = doc::light_direction(&map).unwrap_or([0.0, 0.0, -1.0]).map(|x| x as f32);
         ui.horizontal(|ui| {
-            ui.label("Sun travels along");
+            ui.label("Sun travels along").on_hover_text(hint(&pointer(&[doc::KEY_LIGHTING, doc::KEY_LIGHT_DIRECTION])));
             let mut changed = false;
             for (axis, v) in ["x", "y", "z"].iter().zip(d.iter_mut()) {
                 changed |= ui.add(egui::DragValue::new(v).speed(0.02).range(-1.0..=1.0).prefix(*axis)).changed();
@@ -281,7 +294,7 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
     }
 
     ui.separator();
-    ui.label(format!("Backdrop picture (star map): {}", if doc::has_backdrop(&map) { "on" } else { "off" }));
+    ui.label(format!("Backdrop picture (star map): {}", if doc::has_backdrop(&map) { "on" } else { "off" })).on_hover_text(hint("/backdrop"));
     ui.horizontal_wrapped(|ui| {
         ui.add(egui::TextEdit::singleline(&mut st.picture).hint_text("path of a .png").desired_width(220.0));
         if ui.button("Browse").clicked()
@@ -332,6 +345,15 @@ mod tests {
             assert!(st.error.is_none());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_hover_texts_are_the_engines_schema_descriptions() {
+        for ptr in ["/name", "/description", "/world_half", "/sky", "/backdrop", "/lighting", "/lighting/roof", "/lighting/floor", "/lighting/roof_direction"] {
+            assert!(!hint(ptr).is_empty(), "{ptr}");
+        }
+        assert!(hint("/world_half").contains("1000"), "the schema's own words: {}", hint("/world_half"));
+        assert!(hint("/no_such_key").is_empty());
     }
 
     #[test]
