@@ -5,8 +5,7 @@
 //! - renaming an entry and every rule field that names it as ONE `do_group` step ([`rename_entry`], kinds `speech_event`, `message`,
 //!   `ship_name` of [`super::refs`]; a message id also follows `victory_message` / `defeat_message`);
 //! - the sound of a speech line: copying the author's `.ogg` to `maps/<id>/speech/` through the guard ([`import_sound`]) and reading
-//!   its length into `duration` ([`read_duration`], by [`super::ogg`], PROVISIONAL pending the maintainer's choice between that
-//!   reader and an engine `sound_duration`);
+//!   its length into `duration` ([`read_duration`], by the engine's `authoring::sound_duration`: the game's own decoder);
 //! - the portrait picker: the `TalkingHead_Character_*` folders under `hud/sprites` of the import and the mod ([`faces`]).
 //!
 //! A speech file is found by the game by its name without extension among every sound of all active content, so the name must be
@@ -159,12 +158,34 @@ pub fn sound_path(project: &Project, id: &str, event: &str) -> std::path::PathBu
     project.dir.join(mdoc::speech_dir(id)).join(mdoc::speech_file_name(event, &entry.unwrap_or(Value::Null)))
 }
 
-/// Reads the length of the event's `.ogg` in the mod ([`super::ogg`], rounded to the hundredth of a second) and writes it as the
+/// The length in seconds of the sound file at `path`, as the game's own decoder reads it (`openprocyon::authoring::sound_duration`).
+/// The engine decodes to the end, so the answer is kept by path, modification time and size: the speech rows ask every frame.
+pub fn sound_seconds(path: &Path) -> Result<f64, String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Entry = (Option<std::time::SystemTime>, u64, Result<f64, String>);
+    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, Entry>>> = OnceLock::new();
+    let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let stamp = (meta.modified().ok(), meta.len());
+    let cache = CACHE.get_or_init(Default::default);
+    if let Ok(c) = cache.lock()
+        && let Some((m, l, r)) = c.get(path)
+        && (*m, *l) == stamp
+    {
+        return r.clone();
+    }
+    let r = openprocyon::authoring::sound_duration(path);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(path.to_path_buf(), (stamp.0, stamp.1, r.clone()));
+    }
+    r
+}
+
+/// Reads the length of the event's `.ogg` in the mod ([`sound_seconds`], rounded to the hundredth of a second) and writes it as the
 /// event's `duration`: one undo step. Returns the seconds. The game adds 0.3 s itself, so the length is written as it is.
 pub fn read_duration(project: &mut Project, id: &str, event: &str) -> Result<f64, String> {
     let path = sound_path(project, id, event);
-    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let seconds = (super::ogg::duration(&bytes).map_err(|e| format!("{}: {e}", path.display()))? * 100.0).round() / 100.0;
+    let seconds = (sound_seconds(&path)? * 100.0).round() / 100.0;
     let rel = media_rel(id)?;
     project.open_doc(&rel)?;
     let at = mdoc::media_entry_pointer(MediaTable::Speech, event);
@@ -347,6 +368,12 @@ fn speech_row(ui: &mut egui::Ui, id: egui::Id, mission: &str, name: &str, entry:
             ui.label(".ogg");
             let there = sound_path(project, mission, name).is_file();
             ui.label(if there { "in the mod" } else { "not in the mod" });
+            if there {
+                match sound_seconds(&sound_path(project, mission, name)) {
+                    Ok(s) => ui.label(format!("plays {s:.2} s")),
+                    Err(e) => ui.colored_label(ui.visuals().warn_fg_color, "cannot be played").on_hover_text(e),
+                };
+            }
         });
         if f != file {
             field(actions, mdoc::SPEECH_FILE, (!f.is_empty()).then(|| json!(f)));
@@ -364,7 +391,7 @@ fn speech_row(ui: &mut egui::Ui, id: egui::Id, mission: &str, name: &str, entry:
                     field(actions, mdoc::SPEECH_DURATION, Some(json!(*s)));
                 }
             }
-            if ui.button("Read from the .ogg").on_hover_text("The length of the file in the mod (PROVISIONAL reader)").clicked() {
+            if ui.button("Read from the .ogg").on_hover_text("The length of the file in the mod, as the game decodes it").clicked() {
                 actions.push(Action::FromFile(name.to_string()));
             }
         });
