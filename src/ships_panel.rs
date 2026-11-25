@@ -234,6 +234,8 @@ pub fn sync_view(project: &mut Project, view: &mut ShipView, link: &Linked) -> O
         && doc.edited != view.ship
     {
         view.ship = doc.edited.clone();
+        // Undo or redo changed the ship under the view: what the status says happened (a move, an add) no longer holds.
+        view.status = "Ship changed by undo or redo".into();
     }
     error
 }
@@ -697,12 +699,16 @@ mod tests {
         view.selected = Some((crate::ship_view::points::Kind::Homing, "homing".into()));
         assert_eq!(sync_view(&mut p, &mut view, &link), None);
         assert!(view.pending.is_empty());
+        view.status = "Moved Homing homing".into();
+        assert_eq!(sync_view(&mut p, &mut view, &link), None);
+        assert_eq!(view.status, "Moved Homing homing", "nothing changed under the view: the status stays");
         assert_eq!(p.doc(&rel).unwrap().edited["homing"], json!([1, 2, 3]));
         assert_eq!(p.undo_label(), Some("Move homing"));
         // Undo: the view follows.
         p.undo();
         assert_eq!(sync_view(&mut p, &mut view, &link), None);
         assert!(view.ship.get("homing").is_none() && !p.doc(&rel).unwrap().dirty);
+        assert!(!view.status.contains("Moved"), "the status no longer claims the undone move: {}", view.status);
         p.redo();
         sync_view(&mut p, &mut view, &link);
         assert_eq!(view.ship["homing"], json!([1, 2, 3]));

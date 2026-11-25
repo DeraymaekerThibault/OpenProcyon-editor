@@ -5,7 +5,10 @@
 use super::points::{CrewKind, Kind};
 use super::scene::source_text;
 use super::{Armed, ShipView, load};
-use super::{place::crew_name, points::section_for_layer};
+use super::{
+    place::{add_refusal, crew_name},
+    points::section_for_layer,
+};
 use bevy::math::Vec2;
 use bevy_egui::egui;
 use std::path::Path;
@@ -20,6 +23,9 @@ const ADDABLE: [(Kind, &str); 7] = [
     (Kind::TowTowee, "tow towee"),
     (Kind::Homing, "homing"),
 ];
+
+/// Height of the status area: room for about four wrapped lines, scrolling beyond that.
+const STATUS_HEIGHT: f32 = 76.0;
 
 /// Called while another tab is shown: the 3D camera switches off.
 pub fn hidden(view: &mut ShipView) {
@@ -69,7 +75,8 @@ pub fn central(ui: &mut egui::Ui, view: &mut ShipView) {
 pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
     ui.heading("3D ship");
     ui.horizontal(|ui| {
-        ui.text_edit_singleline(&mut view.path).on_hover_text("A ship folder (ship.json and model.glb), a ship.json or a .glb");
+        let width = (ui.available_width() - 60.0).max(40.0);
+        ui.add(egui::TextEdit::singleline(&mut view.path).desired_width(width)).on_hover_text("A ship folder (ship.json and model.glb), a ship.json or a .glb");
         if ui.button("Load").clicked() {
             match load(Path::new(view.path.trim())) {
                 Ok(l) => {
@@ -80,16 +87,24 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
             }
         }
     });
-    if !view.status.is_empty() {
-        ui.label(&view.status);
-    }
+    // A fixed-height area: the text may wrap to any number of lines without moving the controls below it.
+    egui::ScrollArea::vertical().id_salt("ship3d_status").max_height(STATUS_HEIGHT).auto_shrink([false, false]).show(ui, |ui| {
+        if let Some(a) = &view.armed {
+            ui.colored_label(egui::Color32::YELLOW, format!("Click on the hull to place {} {} (Esc cancels)", a.kind.title(), a.label));
+        }
+        if !view.status.is_empty() {
+            ui.label(&view.status);
+        }
+    });
     ui.label("Orbit: right or middle drag. Zoom: wheel. Select a point, then drag one of its arrows.");
     ui.separator();
     ui.label(format!("Ship {}", if view.ship_id.is_empty() { "(none)" } else { &view.ship_id }));
     ui.horizontal_wrapped(|ui| {
         for (kind, text) in ADDABLE {
             let armed = view.armed.as_ref().is_some_and(|a| a.kind == kind);
-            if ui.selectable_label(armed, format!("Add {text}")).clicked() {
+            let refusal = add_refusal(&view.ship, view.facts.as_ref(), kind);
+            let clicked = ui.add_enabled(refusal.is_none(), egui::Button::selectable(armed, format!("Add {text}"))).on_disabled_hover_text(refusal.unwrap_or_default()).clicked();
+            if clicked {
                 view.armed = if armed { None } else { Some(Armed { kind, label: view.new_label.clone() }) };
             }
         }
@@ -112,19 +127,14 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
             };
         }
     });
-    ui.horizontal(|ui| {
-        ui.label("Name (gun mount, entry label, or crew suffix)");
-        if ui.text_edit_singleline(&mut view.new_label).changed()
-            && let Some(a) = &mut view.armed
-        {
-            a.label = match a.kind {
-                Kind::Crew(k) => crew_name(k, &view.new_label).unwrap_or_default(),
-                _ => view.new_label.clone(),
-            };
-        }
-    });
-    if let Some(a) = &view.armed {
-        ui.colored_label(egui::Color32::YELLOW, format!("Click on the hull to place {} {} (Esc cancels)", a.kind.title(), a.label));
+    ui.label("Name (gun mount, entry label, or crew suffix)");
+    if ui.add(egui::TextEdit::singleline(&mut view.new_label).desired_width(f32::INFINITY)).changed()
+        && let Some(a) = &mut view.armed
+    {
+        a.label = match a.kind {
+            Kind::Crew(k) => crew_name(k, &view.new_label).unwrap_or_default(),
+            _ => view.new_label.clone(),
+        };
     }
     ui.separator();
     let points = view.points();
@@ -151,7 +161,6 @@ pub fn controls(ui: &mut egui::Ui, view: &mut ShipView) {
     ui.checkbox(&mut view.show_damage, "Show damage variants")
         .on_hover_text("Damaged copies of sections (...Damage_...) are not part of the hull the engine uses; drawn faint, never pickable.");
     ui.separator();
-    ui.label(format!("{} undo step(s) pending", view.pending.len()));
     if let Some(layer) = view.hovered_layer.and_then(|i| view.facts.as_ref()?.layers.get(i)) {
         ui.label(format!("Layer {}", layer.name));
         match section_for_layer(&view.ship, &layer.name) {
