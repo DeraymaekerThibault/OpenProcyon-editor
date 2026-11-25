@@ -608,6 +608,13 @@ mod tests {
         assert_eq!(n.of("point"), ["The Gate"]);
         assert_eq!(n.of("task"), ["Clear the gate", "Reach the gate"]);
         assert!(n.of("group").contains(&"RaiderShips".to_string()) && n.of("group").contains(&"Hero".to_string()));
+        // the engine's own lists: a group field takes a player's name and a player field a group's, so the pickers (the schema form's
+        // and the templates') offer both
+        for kind in ["group", "player"] {
+            for name in ["Hero", "Raiders", "RaiderShips"] {
+                assert!(n.of(kind).contains(&name.to_string()), "{kind} field: {name} in {:?}", n.of(kind));
+            }
+        }
         assert_eq!(n.of("counter"), ["raiders sunk"]);
         assert_eq!(n.of("rule"), ["Arrive at the gate", "Count raiders sunk", "Start"]);
     }
