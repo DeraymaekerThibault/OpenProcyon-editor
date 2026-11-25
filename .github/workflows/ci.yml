@@ -1,5 +1,5 @@
 # The validation gate without game assets, plus screenshots of the editor on synthetic data of our own.
-# Never upload build outputs or game assets as artifacts: the only artifact is the three screenshots below.
+# Never upload build outputs or game assets as artifacts: the only artifact is the screenshots below.
 name: ci
 on:
   push:
@@ -65,8 +65,8 @@ jobs:
         env:
           PROCYON_ASSETS: ${{ runner.temp }}/synth/assets
         run: |
-          for tab in ships 3d playtest; do
-            tools/shot.sh "$RUNNER_TEMP/shots/$tab.png" --mod "$RUNNER_TEMP/synth/mymod" --tab "$tab" --ship Ship_Test
+          for tab in ships 3d playtest map; do
+            tools/shot.sh "$RUNNER_TEMP/shots/$tab.png" --mod "$RUNNER_TEMP/synth/mymod" --tab "$tab" --ship Ship_Test --map test_map
           done
       # These are pictures of our own synthetic box ship, never game content (AGENTS.md hard rule 1).
       - uses: actions/upload-artifact@v4.6.2
