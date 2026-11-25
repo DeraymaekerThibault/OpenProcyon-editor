@@ -419,7 +419,7 @@ fn pick_uses(ctx: &egui::Context, project: &Project, id: &str, items: &[Item]) {
 
 fn toolbar(ui: &mut egui::Ui, st: &mut State, project: &Project, id: &str, dirty: bool) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(format!("{id}{}", if dirty { " (unsaved)" } else { "" }));
+        crate::layout::title_with_unsaved(ui, id, dirty);
         ui.separator();
         step(ui, "Grid", &mut st.view.snap.grid, 10.0);
         step(ui, "Angle", &mut st.view.snap.angle_deg, 15.0);

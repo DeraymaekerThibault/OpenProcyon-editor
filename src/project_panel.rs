@@ -33,6 +33,8 @@ pub struct State {
     pub opened: u64,
     /// The left panel's "New mod..." form while it is open (folder, id, author, licence).
     pub new_form: Option<crate::which_mod::NewForm>,
+    /// Where the left panel's Save/Undo row was drawn last (its top y); the layout test reads it.
+    save_row_y: f32,
 }
 
 impl State {
@@ -203,13 +205,19 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
             }
         }
     }
-    if !st.status.is_empty() {
-        ui.label(&st.status);
+    // The status text is drawn under the Save/Undo row (it wraps to any number of lines, and must not push the row about); with no
+    // mod open there is no row.
+    if st.project.is_none() {
+        if !st.status.is_empty() {
+            ui.label(&st.status);
+        }
+        return;
     }
     let Some(p) = &mut st.project else { return };
     ui.label(format!("{} ({})", p.name(), p.dir.display()));
     let unsaved = p.dirty_rels().len();
     let mut do_save = false;
+    st.save_row_y = ui.cursor().min.y;
     ui.horizontal(|ui| {
         do_save = ui.add_enabled(unsaved > 0, egui::Button::new(format!("Save (Ctrl+S) [{unsaved}]"))).clicked();
         let undo = p.undo_label().map(str::to_string);
@@ -221,6 +229,9 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
             p.redo();
         }
     });
+    if !st.status.is_empty() {
+        ui.label(&st.status);
+    }
     // Files changed on disk while they have unsaved edits.
     let conflicts: Vec<String> = p.docs.iter().filter(|d| d.conflict.is_some()).map(|d| d.rel.clone()).collect();
     let mut resolve: Option<(String, bool)> = None;
@@ -421,6 +432,28 @@ mod tests {
         assert!(licence.contains("CC0-1.0"), "{licence}");
         assert!(licence.contains("Ada"), "{licence}");
         assert!(std::fs::read_to_string(dir.join("m/mod.json")).unwrap().contains("\"gates\""));
+        drop(st);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_save_row_stays_where_it_is_whatever_the_status_says() {
+        let dir = std::env::temp_dir().join(format!("procyon-editor-saverow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut st = State::default();
+        st.open(&dir.join("m"), None, true);
+        assert!(st.project.is_some());
+        let ctx = egui::Context::default();
+        let mut y_with = |status: &str| {
+            st.status = status.to_string();
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 600.0))), ..Default::default() };
+            ctx.run_ui(raw, |ui| side(ui, &mut st, None)).textures_delta.clear();
+            st.save_row_y
+        };
+        let empty = y_with("");
+        assert!(empty > 0.0);
+        assert_eq!(y_with("Opened a mod."), empty);
+        assert_eq!(y_with(&"a long message that wraps onto several lines in a narrow panel. ".repeat(6)), empty);
         drop(st);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -48,6 +48,8 @@ pub struct Tools {
     mine_armed: Option<String>,
     pub error: Option<String>,
     pub info: String,
+    /// The tallest the picked nebula's form has been: its space is kept when it is closed, so the plan does not move.
+    form_h: f32,
 }
 
 impl Tools {
@@ -113,19 +115,21 @@ pub fn toolbar(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str
     }
     ui.horizontal_wrapped(|ui| {
         let shown = t.picked.and_then(|i| list.get(i)).map_or("Nebula...".to_string(), |(_, n)| n.clone());
-        egui::ComboBox::from_id_salt("t8-nebula-picker").selected_text(shown).width(150.0).show_ui(ui, |ui| {
-            for (i, n) in &list {
-                if ui.selectable_label(t.picked == Some(*i), n).clicked() {
-                    t.picked = Some(*i);
-                    t.vertex = None;
-                    t.mode = Mode::Edit;
-                    t.mine_armed = None;
-                    t.rename = n.clone();
+        crate::layout::fixed_width(ui, 150.0, |ui| {
+            egui::ComboBox::from_id_salt("t8-nebula-picker").selected_text(shown).width(150.0).truncate().show_ui(ui, |ui| {
+                for (i, n) in &list {
+                    if ui.selectable_label(t.picked == Some(*i), n).clicked() {
+                        t.picked = Some(*i);
+                        t.vertex = None;
+                        t.mode = Mode::Edit;
+                        t.mine_armed = None;
+                        t.rename = n.clone();
+                    }
                 }
-            }
-            if list.is_empty() {
-                ui.label("No nebulae yet.");
-            }
+                if list.is_empty() {
+                    ui.label("No nebulae yet.");
+                }
+            })
         });
         ui.separator();
         match t.mode {
@@ -152,32 +156,38 @@ pub fn toolbar(ui: &mut egui::Ui, t: &mut Tools, project: &mut Project, id: &str
         ui.separator();
         mine_row(ui, t, project, id);
     });
-    if t.mode == Mode::Edit
-        && let Some(i) = t.picked
-    {
-        form(ui, t, project, id, i);
+    // The form comes and goes with the picked nebula; its space stays (once there is a nebula to pick), and the message line is always
+    // one line, so that the plan below does not move.
+    let open = if t.mode == Mode::Edit { t.picked } else { None };
+    let mut form_h = t.form_h;
+    if !list.is_empty() || open.is_some() {
+        crate::layout::reserved(ui, &mut form_h, open.is_some(), |ui| {
+            if let Some(i) = open {
+                form(ui, t, project, id, i);
+            }
+        });
     }
-    match (&t.error, t.info.is_empty()) {
-        (Some(e), _) => {
-            ui.colored_label(Color32::LIGHT_RED, e);
-        }
-        (None, false) => {
-            ui.label(&t.info);
-        }
-        _ => {}
-    }
+    t.form_h = form_h;
+    let (text, colour) = match (&t.error, t.info.is_empty()) {
+        (Some(e), _) => (e.clone(), Some(Color32::LIGHT_RED)),
+        (None, false) => (t.info.clone(), None),
+        _ => (String::new(), None),
+    };
+    crate::layout::status_line(ui, &text, colour);
 }
 
 fn mine_row(ui: &mut egui::Ui, t: &mut Tools, project: &Project, id: &str) {
     let types = mines::types(project, id);
     let shown = t.mine_armed.as_ref().map_or("Place mine...".to_string(), |m| format!("Placing {m} (Esc stops)"));
     let mut arm = None;
-    egui::ComboBox::from_id_salt("t8-mine-picker").selected_text(shown).width(210.0).show_ui(ui, |ui| {
-        for ty in &types {
-            if ui.selectable_label(false, ty).clicked() {
-                arm = Some(ty.clone());
+    crate::layout::fixed_width(ui, 210.0, |ui| {
+        egui::ComboBox::from_id_salt("t8-mine-picker").selected_text(shown).width(210.0).truncate().show_ui(ui, |ui| {
+            for ty in &types {
+                if ui.selectable_label(false, ty).clicked() {
+                    arm = Some(ty.clone());
+                }
             }
-        }
+        })
     });
     ui.add(egui::TextEdit::singleline(&mut t.mine_type).hint_text("or type a bullet").desired_width(120.0));
     if ui.add_enabled(!t.mine_type.trim().is_empty(), egui::Button::new("Arm")).on_hover_text("PROVISIONAL: a typed type is not checked against the game").clicked() {

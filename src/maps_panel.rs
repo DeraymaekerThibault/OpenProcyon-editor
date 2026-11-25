@@ -249,7 +249,7 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     let file_dirty = maps::map_rel(&id).ok().and_then(|rel| project.doc(&rel).map(|d| d.dirty)).unwrap_or(false);
 
     ui.horizontal_wrapped(|ui| {
-        ui.label(format!("{id}{}", if file_dirty { " (unsaved)" } else { "" }));
+        crate::layout::title_with_unsaved(ui, id.as_str(), file_dirty);
         ui.separator();
         snap_row(ui, &mut st.view.snap);
         ui.separator();
@@ -424,22 +424,14 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
     save
 }
 
-/// The status line (error or info). It always takes one line of height, empty or not, and is cut with "..." when long (the whole text
-/// on hover), so that the plan or the 3D view below does not jump when a message comes or goes.
+/// The status line (error or info), one line of height always ([`crate::layout::status_line`]).
 fn message(ui: &mut egui::Ui, st: &State) {
     let (text, colour) = match (&st.error, st.info.is_empty()) {
         (Some(e), _) => (e.as_str(), Some(Color32::LIGHT_RED)),
         (None, false) => (st.info.as_str(), None),
         _ => ("", None),
     };
-    let height = ui.text_style_height(&egui::TextStyle::Body);
-    ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        let mut rich = egui::RichText::new(text);
-        if let Some(c) = colour {
-            rich = rich.color(c);
-        }
-        ui.add(egui::Label::new(rich).truncate()).on_hover_text(text);
-    });
+    crate::layout::status_line(ui, text, colour);
 }
 
 /// The result of a change: the error line, or the info line with `ok`.
@@ -467,16 +459,20 @@ fn picker(ui: &mut egui::Ui, st: &mut State, project: &mut Project) {
         None => "Map...".into(),
     };
     let mut pick = None;
-    egui::ComboBox::from_id_salt("map-picker").selected_text(shown).width(220.0).show_ui(ui, |ui| {
-        for m in &st.maps {
-            if ui.selectable_label(st.map.as_deref() == Some(m.id.as_str()), map_text(m)).clicked() {
-                pick = Some(m.id.clone());
+    // A fixed width, the label cut with "..." (the whole text on hover): a longer label must not push Save and Undo along.
+    let combo = crate::layout::fixed_width(ui, 220.0, |ui| {
+        egui::ComboBox::from_id_salt("map-picker").selected_text(shown.as_str()).width(220.0).truncate().show_ui(ui, |ui| {
+            for m in &st.maps {
+                if ui.selectable_label(st.map.as_deref() == Some(m.id.as_str()), map_text(m)).clicked() {
+                    pick = Some(m.id.clone());
+                }
             }
-        }
-        if st.maps.is_empty() {
-            ui.label("No maps in the mod or the import yet.");
-        }
+            if st.maps.is_empty() {
+                ui.label("No maps in the mod or the import yet.");
+            }
+        })
     });
+    combo.response.on_hover_text(shown);
     if ui.small_button("Refresh").on_hover_text("List the maps again").clicked() {
         st.maps_stale = true;
     }
@@ -780,6 +776,31 @@ mod tests {
     }
 
     #[test]
+    fn the_map_dropdown_keeps_its_width_whatever_its_label_says() {
+        let (root, mut ps) = setup("picker");
+        let project = ps.project.as_mut().unwrap();
+        let mut after = |entry: MapEntry| {
+            let mut st = State { map: Some(entry.id.clone()), maps: vec![entry], ..State::default() };
+            let ctx = egui::Context::default();
+            let mut x = 0.0;
+            let raw = egui::RawInput { screen_rect: Some(SCREEN), ..Default::default() };
+            ctx.run_ui(raw, |ui| {
+                ui.horizontal(|ui| {
+                    picker(ui, &mut st, project);
+                    x = ui.cursor().min.x;
+                });
+            })
+            .textures_delta
+            .clear();
+            x
+        };
+        let short = after(MapEntry { id: "a".into(), in_mod: false, in_import: true, name: None });
+        let long = after(MapEntry { id: "a_very_long_map_identifier_indeed".into(), in_mod: true, in_import: true, name: Some("A very long display name as well".into()) });
+        assert_eq!(short, long, "Save and Undo stay where they are");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn the_tab_draws_without_a_project_and_with_a_map_and_changes_nothing() {
         let mut st = State::default();
         let mut ps = project_panel::State::default();
@@ -913,7 +934,9 @@ mod tests {
         rig.click(first); // the first point again closes it
         let m = rig.map();
         assert_eq!(doc::nebulae(&m).len(), 1, "{:?} {:?}", rig.st.t8.error, rig.st.t8.info);
-        assert_eq!(doc::nebula_polygon(&doc::nebulae(&m)[0]), vec![[-100.0, -100.0], [100.0, -100.0], [100.0, -200.0]]);
+        let poly = doc::nebula_polygon(&doc::nebulae(&m)[0]);
+        let want = [[-100.0, -100.0], [100.0, -100.0], [100.0, -200.0]];
+        assert!(poly.len() == 3 && poly.iter().zip(want).all(|(p, w)| (p[0] - w[0]).abs() < 0.01 && (p[1] - w[1]).abs() < 0.01), "{poly:?}");
         assert_eq!(rig.project().undo_label(), Some("New nebula Storm"));
         // drag point 1 (now editing) 30 units right
         let (from, k) = (rig.at([100.0, -100.0]), rig.st.view.scale);

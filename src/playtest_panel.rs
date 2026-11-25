@@ -255,27 +255,6 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     if ui.small_button("Check the game version again").clicked() {
         st.version = None;
     }
-    let (others, bundled) = st
-        .others
-        .get_or_insert_with(|| {
-            let bundled = launch::bundled_mods();
-            (other_enabled_mods(&openprocyon::modding::installed(bundled.as_deref()), dir), bundled)
-        })
-        .clone();
-    if !others.is_empty() && !st.only_mod {
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
-            format!("Not this mod alone: the game also loads {} other enabled mods ({}) after the engine's files, so they can change what you see. Tick \"Load only this mod\" to leave them out.", others.len(), others.join(", ")),
-        );
-        ui.weak(format!(
-            "Read from your mods folder and the game's bundled mods ({}). PROVISIONAL: the bundled folder is looked up as the game does it (next to {}, else the source checkout found from this editor's working directory); if the game runs from elsewhere the list can differ.",
-            bundled.as_ref().map_or("none found".to_string(), |b| b.display().to_string()),
-            launch::game_bin().display()
-        ));
-        if ui.small_button("Read the mod list again").clicked() {
-            st.others = None;
-        }
-    }
     picker(ui, "Map", &mut st.map, maps);
     picker(ui, "Ship", &mut st.ship, ships);
     ui.checkbox(&mut st.lobby, "Play through the skirmish lobby (--lobby)")
@@ -332,6 +311,28 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
             st.pending = Some(a);
         } else {
             st.run(dir, a);
+        }
+    }
+    // Below the controls: ticking "Load only this mod" removes it, and nothing above may move when it goes.
+    let (others, bundled) = st
+        .others
+        .get_or_insert_with(|| {
+            let bundled = launch::bundled_mods();
+            (other_enabled_mods(&openprocyon::modding::installed(bundled.as_deref()), dir), bundled)
+        })
+        .clone();
+    if !others.is_empty() && !st.only_mod {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!("Not this mod alone: the game also loads {} other enabled mods ({}) after the engine's files, so they can change what you see. Tick \"Load only this mod\" above to leave them out.", others.len(), others.join(", ")),
+        );
+        ui.weak(format!(
+            "Read from your mods folder and the game's bundled mods ({}). PROVISIONAL: the bundled folder is looked up as the game does it (next to {}, else the source checkout found from this editor's working directory); if the game runs from elsewhere the list can differ.",
+            bundled.as_ref().map_or("none found".to_string(), |b| b.display().to_string()),
+            launch::game_bin().display()
+        ));
+        if ui.small_button("Read the mod list again").clicked() {
+            st.others = None;
         }
     }
     if unsaved > 0 && !st.save_first {

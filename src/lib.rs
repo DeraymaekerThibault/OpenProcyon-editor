@@ -8,6 +8,7 @@ pub mod edit;
 pub mod export;
 pub mod form;
 pub mod launch;
+pub mod layout;
 pub mod map;
 pub mod map_edit;
 pub mod map_view;
