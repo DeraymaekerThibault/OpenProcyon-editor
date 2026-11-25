@@ -183,14 +183,20 @@ pub fn change_entries(project: &mut Project, id: &str, label: &str, changes: &[C
     for c in changes {
         let entry = doc::array_entries(map, c.which).get(c.index).ok_or_else(|| format!("{rel}: no entry {} in {}", c.index, c.which.key()))?;
         let at = |key: &str| pointer(&[c.which.key(), &c.index.to_string(), key]);
+        // A value the entry already has is not written (a step that changes nothing would put a `set` pointer in the file).
+        let mut put = |key: &str, v: Value| {
+            if entry.get(key) != Some(&v) {
+                edits.push(Edit::set(at(key), v));
+            }
+        };
         if let Some(p) = c.pos {
-            edits.push(Edit::set(at(doc::pos_key(c.which)), like(entry, doc::pos_key(c.which), p)));
+            put(doc::pos_key(c.which), like(entry, doc::pos_key(c.which), p));
         }
         if let Some(r) = c.rot {
-            edits.push(Edit::set(at("rot"), Value::Array(r.iter().map(|&x| crate::map_view::short(x as f32)).collect())));
+            put("rot", Value::Array(r.iter().map(|&x| crate::map_view::short(x as f32)).collect()));
         }
         if let Some(f) = c.forward {
-            edits.push(Edit::set(at("forward"), like(entry, "forward", f)));
+            put("forward", like(entry, "forward", f));
         }
     }
     if edits.is_empty() {

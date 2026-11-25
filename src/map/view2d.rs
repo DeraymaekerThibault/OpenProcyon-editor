@@ -162,6 +162,9 @@ fn placements(map: &Value, refs: &[Ref]) -> Vec<(usize, Placement)> {
         .collect()
 }
 
+/// How close (world units) a turned position must stay to the old one to count as not having moved.
+const TURN_SAME: f64 = 1e-3;
+
 /// What turning the selection clockwise by `yaw` radians about its centre writes: new positions, new `rot` for scenery and ships
 /// (the tilt is kept), a rotated `forward` for a start; mines only move round. Empty for a zero turn.
 pub fn turn_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Vec<Change> {
@@ -179,7 +182,12 @@ pub fn turn_changes(map: &Value, scene: &Scene, sel: &Selection, yaw: f64) -> Ve
             let e = entry(map, r)?;
             let which = r.array();
             let mut ch = Change::new(which, r.index);
-            ch.pos = Some([orient::snap_unit(short_f64(p.pos[0])), orient::snap_unit(short_f64(p.pos[1])), orient::snap_unit(p.pos[2])]);
+            // A position the turn leaves where it was (one item turned about its own centre) is not written: the engine reads f32,
+            // and the old value rounded would show as a change of an object that did not move.
+            let was = before.iter().find(|(m, _)| *m == n)?.1.pos;
+            if (p.pos[0] - was[0]).abs() > TURN_SAME || (p.pos[1] - was[1]).abs() > TURN_SAME {
+                ch.pos = Some([orient::snap_unit(short_f64(p.pos[0])), orient::snap_unit(short_f64(p.pos[1])), orient::snap_unit(p.pos[2])]);
+            }
             match which {
                 Array::Objects | Array::Ships => ch.rot = Some(orient::snap_rot(&p.rot)),
                 Array::Players => {
@@ -358,9 +366,20 @@ mod tests {
         assert_eq!(start[0].forward.unwrap(), [0.0, -1.0, 0.0]);
         // one entry turns about itself
         let one = turn_changes(&m, &sc, &sel(&[2]), 1.0);
-        assert_eq!(one[0].pos, Some([0.0, 100.0, 0.0]));
+        assert_eq!(one[0].pos, None, "one entry turned about itself does not move: no position is written");
+        assert!(one[0].rot.is_some());
         assert_eq!(selection_centre(&m, &sc, &sel(&[0, 1])), Some([50.0, 0.0]));
         assert_eq!(selection_centre(&m, &sc, &sel(&[])), None);
+    }
+
+    #[test]
+    fn a_turn_of_one_object_with_an_f32_noisy_position_writes_no_position() {
+        let m = json!({"objects": [{"id": 1, "type": "Isle_A", "pos": [-369.23077392578125, 12.345678901234, 0.0]}]});
+        let sc = build_scene(&m);
+        let ch = turn_changes(&m, &sc, &sel(&[0]), 15f64.to_radians());
+        assert_eq!(ch.len(), 1);
+        assert_eq!(ch[0].pos, None, "the position did not change, so the file does not get it");
+        assert!(ch[0].rot.is_some());
     }
 
     #[test]
