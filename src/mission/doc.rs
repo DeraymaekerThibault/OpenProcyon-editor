@@ -683,6 +683,166 @@ pub fn media_new_entry(which: MediaTable) -> Value {
     }
 }
 
+// T7
+// ---- the plan (docs/phase5.md T7): geometry tables, vertices, map text ----
+
+/// The three object tables of named geometry. `volumes` and `paths` are top-level, `point_sets` is under `environment`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeoTable {
+    Volumes,
+    Paths,
+    PointSets,
+}
+
+impl GeoTable {
+    /// The keys from the document root to the table.
+    pub fn tokens(self) -> Vec<&'static str> {
+        match self {
+            GeoTable::Volumes => vec![KEY_VOLUMES],
+            GeoTable::Paths => vec![KEY_PATHS],
+            GeoTable::PointSets => vec![KEY_ENVIRONMENT, ENV_POINT_SETS],
+        }
+    }
+
+    pub fn pointer(self) -> String {
+        pointer(&self.tokens())
+    }
+
+    /// The pointer of entry `name`.
+    pub fn entry_pointer(self, name: &str) -> String {
+        let mut t: Vec<&str> = self.tokens();
+        t.push(name);
+        pointer(&t)
+    }
+
+    /// The pointer of item `index` of entry `name` (a vertex, a dot).
+    pub fn item_pointer(self, name: &str, index: usize) -> String {
+        let i = index.to_string();
+        let mut t: Vec<&str> = self.tokens();
+        t.push(name);
+        t.push(&i);
+        pointer(&t)
+    }
+
+    /// The table, when the document has it as an object.
+    pub fn get(self, mission: &Value) -> Option<&Map<String, Value>> {
+        let mut at = mission;
+        for k in self.tokens() {
+            at = at.get(k)?;
+        }
+        at.as_object()
+    }
+
+    /// The edit that adds entry `name` = `value`: sets the entry, or the missing table (and `environment`) round it.
+    pub fn insert_edit(self, mission: &Value, name: &str, value: Value) -> crate::edit::Edit {
+        let tokens = self.tokens();
+        let (mut have, mut at) = (0, mission);
+        for k in &tokens {
+            match at.get(*k) {
+                Some(v) if v.is_object() => {
+                    at = v;
+                    have += 1;
+                }
+                _ => break,
+            }
+        }
+        if have == tokens.len() {
+            let mut t = tokens;
+            t.push(name);
+            return crate::edit::Edit::set(pointer(&t), value);
+        }
+        let mut v = Map::new();
+        v.insert(name.to_string(), value);
+        let mut v = Value::Object(v);
+        for k in tokens[have + 1..].iter().rev() {
+            let mut o = Map::new();
+            o.insert((*k).to_string(), v);
+            v = Value::Object(o);
+        }
+        crate::edit::Edit::set(pointer(&tokens[..=have]), v)
+    }
+}
+
+/// The names of the paths, in file order.
+pub fn path_names(mission: &Value) -> Vec<&str> {
+    GeoTable::Paths.get(mission).map_or_else(Vec::new, |o| o.keys().map(String::as_str).collect())
+}
+
+/// The names of the point sets, in file order.
+pub fn point_set_names(mission: &Value) -> Vec<&str> {
+    GeoTable::PointSets.get(mission).map_or_else(Vec::new, |o| o.keys().map(String::as_str).collect())
+}
+
+/// The raw vertices of a table entry (volume, path) or the dots of a point set (objects with `pos`), as the file has them.
+pub fn geo_items<'a>(mission: &'a Value, table: GeoTable, name: &str) -> &'a [Value] {
+    table.get(mission).and_then(|t| t.get(name)).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+/// The pointer of the `pos` of dot `index` of the point set `name`.
+pub fn point_set_dot_pos_pointer(name: &str, index: usize) -> String {
+    let i = index.to_string();
+    pointer(&[KEY_ENVIRONMENT, ENV_POINT_SETS, name, &i, POINT_SET_POS])
+}
+
+/// A new point set dot.
+pub fn new_point_set_dot(pos: [f64; 3]) -> Value {
+    let mut o = Map::new();
+    o.insert(POINT_SET_POS.into(), Value::from(pos.to_vec()));
+    Value::Object(o)
+}
+
+/// The position of a point set dot.
+pub fn point_set_dot_pos(dot: &Value) -> Option<[f64; 3]> {
+    xyz(dot.get(POINT_SET_POS)?)
+}
+
+/// The pointer of key `key` of the `player_start` object.
+pub fn player_start_pointer(key: &str) -> String {
+    pointer(&[KEY_PLAYER_START, key])
+}
+
+/// A ship's nine-number `rot`, when it has one.
+pub fn ship_rot(ship: &Value) -> Option<[f64; 9]> {
+    crate::map_edit::orient::read_rot(ship.get(SHIP_ROT)?)
+}
+
+/// A new objective marker.
+pub fn new_point(name: &str, position: [f64; 3]) -> Value {
+    let mut o = Map::new();
+    o.insert(POINT_NAME.into(), name.into());
+    o.insert(POINT_POSITION.into(), Value::from(position.to_vec()));
+    Value::Object(o)
+}
+
+/// A new star-map label (`pos` is `[x, y]`).
+pub fn new_map_text(name: &str, text: &str, pos: [f64; 2]) -> Value {
+    let mut o = Map::new();
+    o.insert(MAP_TEXT_NAME.into(), name.into());
+    o.insert(MAP_TEXT_TEXT.into(), text.into());
+    o.insert(MAP_TEXT_POS.into(), Value::from(pos.to_vec()));
+    o.insert(MAP_TEXT_VISIBLE.into(), Value::Bool(true));
+    Value::Object(o)
+}
+
+pub fn map_text_text(label: &Value) -> Option<&str> {
+    label.get(MAP_TEXT_TEXT)?.as_str()
+}
+
+/// A label's position as the file has it (`[x, y]`; a third number is tolerated).
+pub fn map_text_pos(label: &Value) -> Option<[f64; 2]> {
+    let a = label.get(MAP_TEXT_POS)?.as_array()?;
+    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?])
+}
+
+/// The pointer of label `index`, or of one of its keys.
+pub fn map_text_pointer(index: usize, key: Option<&str>) -> String {
+    let i = index.to_string();
+    match key {
+        Some(k) => pointer(&[KEY_MAP_TEXT, &i, k]),
+        None => pointer(&[KEY_MAP_TEXT, &i]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
