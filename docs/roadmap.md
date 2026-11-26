@@ -344,6 +344,12 @@ mods over the import in a separate overlay folder; switching the mod off gives p
 - Compare and revert. Each file and each field can show the retail value next to the mod's, and "revert to retail" removes the
   key or the file from the mod. Since the mod holds only the change, reverting is a deletion.
 
+**B7. Materials and decals.** A community request (Nov 17, 2026): custom decal textures, a way to point materials at them, and new
+material types. The engine already has damage decals (`decals/*.png` + `data/decals.json`), texture override by name, and a
+`look.json` `materials` block that takes a mod's own WESL shader; none has an editor, and `decals.json` has no merge or schema.
+Painted markings (insignia, hull numbers) do not exist in the engine. Full spec, packages M1 to M5, engine asks E1 to E5 and the
+gate: `docs/materials.md`. Editor side, after Phase 3; M1, M2, M4 and M5 can start now, M3 (markings) waits for the engine.
+
 ## Risks and mitigations
 
 The biggest risk is building on formats that still move; the answer is that the editor follows formats while they move, the v0.3 freeze gates the release, and engine-side migrations cover later changes.
@@ -370,5 +376,7 @@ Checked items are settled (November 2026); the rest remain open.
 - [ ] Which formats v0.3 freezes: `map.json`, `mission.json`, `media.json`, `script.json`.
 - [ ] Whether the editor ships inside the game download or as its own download.
 - [x] A mod may ship a diff over a retail mission or skirmish map, exactly as over a retail ship (backlog B5).
+- [ ] Materials and decals (B7): which kind of decal the requester wants (scars, painted markings, both), the engine asks E1 to E5 in
+  `docs/materials.md`, and whether shader files are part of the v0.3 freeze.
 - [ ] The engine asks from the backlog: origin and default annotations in the schemas (B1, B2), the HUD-art preview in
   `authoring` (B1), `map.json` and `script.json` schemas in the v0.3 freeze (B4), keyed array merge for maps and missions (B5).
