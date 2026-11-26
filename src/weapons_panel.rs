@@ -171,7 +171,7 @@ pub fn bullet_pick_edit(gun: &str, key: &str, bullet: &str) -> Edit {
 /// the game's data. `None` for an entry the import does not have (the mod's own). PROVISIONAL (the engine has no way to copy an entry
 /// by reference).
 pub fn duplicate_warning(doc: &Doc, from: &str) -> Option<String> {
-    doc.base.get(from).map(|_| format!("{from} is a retail entry: its copy is saved whole, so the mod would carry the game's data. Change what you need and delete what you keep unchanged, or start from scratch (PROVISIONAL)."))
+    doc.base.get(from).map(|_| format!("{from} is a retail entry: its copy is saved whole, so the mod would carry the game's data. Change what you need and delete what you keep unchanged, or start from scratch."))
 }
 
 /// The tab's own state.
@@ -265,14 +265,12 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
     let list_width = 300.0f32.min(ui.available_width() * 0.4);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(egui::vec2(list_width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Filter");
-            ui.text_edit_singleline(&mut st.filter);
-        });
-        let rows = entry_rows(&project.docs[i], &st.filter);
-        egui::ScrollArea::vertical().id_salt("weapon-list").max_height((height - 200.0).max(120.0)).auto_shrink([false, false]).show(
-            ui,
-            |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Filter");
+                ui.text_edit_singleline(&mut st.filter);
+            });
+            let rows = entry_rows(&project.docs[i], &st.filter);
+            egui::ScrollArea::vertical().id_salt("weapon-list").max_height((height - 200.0).max(120.0)).auto_shrink([false, false]).show(ui, |ui| {
                 for r in &rows {
                     let mark = r.tag();
                     if ui.selectable_label(st.selected.as_deref() == Some(r.name.as_str()), format!("{}  {mark}", r.name)).clicked() {
@@ -280,42 +278,42 @@ pub fn tab(ui: &mut egui::Ui, st: &mut State, ps: &mut project_panel::State, foc
                         st.focus = None;
                     }
                 }
-            },
-        );
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!("New {}", table.word()));
-            ui.text_edit_singleline(st.new_name());
-            if ui.button(format!("New {} from scratch", table.word())).clicked() {
-                match new_entry_edits(&project.docs[i].edited, &st.new_names[table as usize]) {
-                    Ok(e) => {
-                        edits = e;
-                        label = format!("New {} {}", table.word(), st.new_names[table as usize].trim());
-                        st.selected = Some(st.new_names[table as usize].trim().to_string());
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("New {}", table.word()));
+                ui.text_edit_singleline(st.new_name());
+                if ui.button(format!("New {} from scratch", table.word())).clicked() {
+                    match new_entry_edits(&project.docs[i].edited, &st.new_names[table as usize]) {
+                        Ok(e) => {
+                            edits = e;
+                            label = format!("New {} {}", table.word(), st.new_names[table as usize].trim());
+                            st.selected = Some(st.new_names[table as usize].trim().to_string());
+                        }
+                        Err(e) => st.status = e,
                     }
-                    Err(e) => st.status = e,
                 }
-            }
-            if ui.add_enabled(st.selected.is_some(), egui::Button::new("Duplicate selected under this name")).clicked()
-                && let Some(from) = st.selected.clone()
-            {
-                match duplicate_edits(&project.docs[i].edited, &from, &st.new_names[table as usize]) {
-                    Ok(e) => {
-                        edits = e;
-                        label = format!("Duplicate {from} as {}", st.new_names[table as usize].trim());
-                        st.status = duplicate_warning(&project.docs[i], &from).unwrap_or_default();
-                        st.selected = Some(st.new_names[table as usize].trim().to_string());
+                if ui.add_enabled(st.selected.is_some(), egui::Button::new("Duplicate selected under this name")).clicked()
+                    && let Some(from) = st.selected.clone()
+                {
+                    match duplicate_edits(&project.docs[i].edited, &from, &st.new_names[table as usize]) {
+                        Ok(e) => {
+                            edits = e;
+                            label = format!("Duplicate {from} as {}", st.new_names[table as usize].trim());
+                            st.status = duplicate_warning(&project.docs[i], &from).unwrap_or_default();
+                            st.selected = Some(st.new_names[table as usize].trim().to_string());
+                        }
+                        Err(e) => st.status = e,
                     }
-                    Err(e) => st.status = e,
                 }
+            });
+            // PROVISIONAL: the form does not mark required fields, so the Problems list is the only pointer.
+            ui.weak(format!(
+                "A new {} from scratch needs every field the game requires before it loads (the Problems list at the bottom names any required fields that are still missing).",
+                table.word()
+            ));
+            if !st.status.is_empty() {
+                ui.label(&st.status);
             }
-        });
-        ui.weak(format!(
-            "A new {} from scratch needs every field the game requires before it loads (the problems list names what is missing; PROVISIONAL: the form does not mark required fields).",
-            table.word()
-        ));
-        if !st.status.is_empty() {
-            ui.label(&st.status);
-        }
         });
         ui.separator();
         let width = ui.available_width();

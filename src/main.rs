@@ -163,11 +163,11 @@ impl Tab {
     const ALL: [(Tab, &'static str); 7] = [
         (Tab::Project, "Mod"),
         (Tab::Ships, "Ships"),
+        (Tab::Ship3d, "3D ship"),
         (Tab::Weapons, "Weapons"),
         (Tab::Map, "Maps"),
-        (Tab::Ship3d, "3D ship"),
-        (Tab::Playtest, "Play-test & export"),
         (Tab::Missions, "Missions"),
+        (Tab::Playtest, "Play-test & export"),
     ];
 }
 

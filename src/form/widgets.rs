@@ -226,11 +226,9 @@ impl<'a> St<'a> {
         }
     }
 
-    fn label(&self, ui: &mut egui::Ui, text: &str, node: &Node) {
-        let r = ui.label(text);
-        if !node.description.is_empty() {
-            r.on_hover_text(&node.description);
-        }
+    fn label(&self, ui: &mut egui::Ui, text: &str, node: &Node, slot: Slot) {
+        let r = ui.label(shown(text, slot));
+        label_hover(r, text, shown(text, slot), node);
     }
 
     /// One property: a collapsible section for a value with parts, else one row.
@@ -314,7 +312,7 @@ impl<'a> St<'a> {
 
     /// A collapsible section: the heading, its set/reset or entry buttons, findings, then the contents.
     fn section(&mut self, ui: &mut egui::Ui, label: &str, node: &Node, ptr: &str, slot: Slot) {
-        let mut header = egui::CollapsingHeader::new(label).id_salt(ptr);
+        let mut header = egui::CollapsingHeader::new(shown(label, slot)).id_salt(ptr);
         if self.fresh && self.focus_on_path(ptr) {
             header = header.open(Some(true));
         }
@@ -323,9 +321,7 @@ impl<'a> St<'a> {
             self.notes(ui, ptr);
             self.body(ui, node, ptr);
         });
-        if !node.description.is_empty() {
-            r.header_response.clone().on_hover_text(&node.description);
-        }
+        label_hover(r.header_response.clone(), label, shown(label, slot), node);
         self.mark(ui, r.header_response.rect, ptr);
     }
 
@@ -413,7 +409,7 @@ impl<'a> St<'a> {
         let value = doc.pointer(ptr);
         let inherited = self.ctx.base.and_then(|i| i.pointer(ptr));
         let r = ui.horizontal(|ui| {
-            self.label(ui, label, node);
+            self.label(ui, label, node, slot);
             match value {
                 Some(v) => {
                     self.editor(ui, node, ptr, v);
@@ -488,7 +484,12 @@ impl<'a> St<'a> {
             }
             Kind::String => {
                 let mut s = v.as_str().unwrap_or_default().to_string();
-                if ui.add(egui::TextEdit::singleline(&mut s).desired_width(180.0)).changed() {
+                let edit = if is_long_text(ptr) {
+                    egui::TextEdit::multiline(&mut s).desired_rows(3).desired_width(ui.available_width().max(180.0))
+                } else {
+                    egui::TextEdit::singleline(&mut s).desired_width(180.0)
+                };
+                if ui.add(edit).changed() {
                     self.typed += 1;
                     self.out.push(Edit::set(ptr, json!(s)));
                 }
@@ -671,7 +672,7 @@ mod tests {
         let (_, texts) = run(&egui_ctx, &doc, &base, 0, vec![]);
         let (_, texts2) = run(&egui_ctx, &doc, &base, 0, vec![]);
         assert_eq!(texts.len(), texts2.len());
-        let (_, pos, size) = texts2.iter().find(|(t, _, _)| t == "points").cloned().expect("a points label");
+        let (_, pos, size) = texts2.iter().find(|(t, _, _)| t == "Points").cloned().expect("a points label");
         let click = egui::pos2(pos.x + size.x + 8.0 + 10.0, pos.y + size.y / 2.0);
         let button = |pressed| egui::Event::PointerButton { pos: click, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
         run(&egui_ctx, &doc, &base, 0, vec![egui::Event::PointerMoved(click), button(true)]);
@@ -858,6 +859,84 @@ mod tests {
         let doc = json!({"race": "Navy", "points": 10});
         let hidden = ["/race".to_string()];
         let t = painted(&ship, &doc, &FormCtx { base: None, findings: &[], focus: None, hidden: &hidden, choices: &[] });
-        assert!(!has(&t, "race") && has(&t, "points"), "{t:?}");
+        assert!(!has(&t, "race") && has(&t, "Points"), "{t:?}");
+    }
+}
+
+/// The label shown for a key: humanised for a named property; map entries and list items keep their own names.
+fn shown(key: &str, slot: Slot) -> String {
+    if matches!(slot, Slot::Field) { humanise(key) } else { key.to_string() }
+}
+
+/// Hover text of a label: the raw key (when the shown label differs) and the schema description.
+fn label_hover(r: egui::Response, key: &str, shown: String, node: &Node) {
+    match (shown != key, node.description.is_empty()) {
+        (false, true) => {}
+        (false, false) => {
+            r.on_hover_text(&node.description);
+        }
+        (true, true) => {
+            r.on_hover_text(format!("Key: {key}"));
+        }
+        (true, false) => {
+            r.on_hover_text(format!("{}\n\nKey: {key}", node.description));
+        }
+    }
+}
+
+/// A readable label for a JSON key: split on `_`, first word capitalised, known acronyms upper-case. Presentation only.
+/// A key that is not a plain snake_case word list (digits-only, spaces, slashes: map keys, ids) is shown as it is.
+pub fn humanise(key: &str) -> String {
+    const ACRONYMS: [&str; 8] = ["hp", "fx", "id", "snd", "ai", "ui", "xp", "hud"];
+    let plain = !key.is_empty() && key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') && key.chars().any(|c| c.is_ascii_lowercase());
+    if !plain {
+        return key.to_string();
+    }
+    let words: Vec<&str> = key.split('_').filter(|w| !w.is_empty()).collect();
+    words
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            if ACRONYMS.contains(w) {
+                w.to_uppercase()
+            } else if i == 0 {
+                let mut c = w.chars();
+                c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
+            } else {
+                (*w).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a string field holds prose and gets a multi-line box, judged by the last segment of its pointer.
+/// PROVISIONAL until the engine schema carries a hint for long text.
+pub fn is_long_text(ptr: &str) -> bool {
+    const LONG: [&str; 6] = ["description", "text", "briefing", "summary", "notes", "intro"];
+    ptr.rsplit('/').next().is_some_and(|k| LONG.contains(&k))
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn humanises_keys() {
+        assert_eq!(humanise("core_hp"), "Core HP");
+        assert_eq!(humanise("explosion_fx"), "Explosion FX");
+        assert_eq!(humanise("crew_posts"), "Crew posts");
+        assert_eq!(humanise("game_version"), "Game version");
+        assert_eq!(humanise("snd_id"), "SND ID");
+        assert_eq!(humanise("Cutter-1"), "Cutter-1");
+        assert_eq!(humanise("12"), "12");
+    }
+
+    #[test]
+    fn long_text_by_key_name() {
+        assert!(is_long_text("/description"));
+        assert!(is_long_text("/missions/m1/briefing"));
+        assert!(!is_long_text("/name"));
+        assert!(!is_long_text("/descriptions/a"));
     }
 }

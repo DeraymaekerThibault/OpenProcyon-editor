@@ -23,6 +23,13 @@ fn sections(ui: &mut egui::Ui, project: &mut Project) {
     rules_view::picker(ui, project);
     retail_notice(ui, project);
     ui.separator();
+    // Campaign works without a mission; the other sections need one.
+    if rules_view::selected_mission(ui.ctx()).is_none() {
+        ui.label("Pick a mission above or make a new one.");
+        ui.separator();
+        section(ui, "Campaign", |ui| campaign::show(ui, project));
+        return;
+    }
     section(ui, "Players, ships and groups", |ui| ships::show(ui, project));
     section(ui, "Tasks and the end", |ui| tasks::show(ui, project));
     section(ui, "Rules and plan", |ui| rules_and_plan(ui, project));

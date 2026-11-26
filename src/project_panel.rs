@@ -382,7 +382,11 @@ pub fn suggestion_line(f: &Finding) -> Option<String> {
 pub fn tab(ui: &mut egui::Ui, st: &mut State) {
     ui.heading("Mod");
     let Some(p) = &mut st.project else {
-        ui.label("Open or make a mod folder in the left panel.");
+        ui.label("Getting started:");
+        ui.label("1. Click \"New mod...\" in the left panel (or \"Open mod...\" for one you have).");
+        ui.label("2. Add or change ships and weapons.");
+        ui.label("3. Build a map or a mission.");
+        ui.label("4. Test it on the \"Play-test & export\" tab.");
         return;
     };
     match p.open_doc("mod.json") {

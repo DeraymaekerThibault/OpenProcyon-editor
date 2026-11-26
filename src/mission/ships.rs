@@ -581,7 +581,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
             }
         });
     }
-    ui.weak("The game reads start and forward only when the human's player owns no ship (then it places a stand-in cutter there); a player with a ship ignores them. PROVISIONAL: restated from docs/missions.md section 4.");
+    ui.weak("The game reads start and forward only when the human's player owns no ship (then it places a stand-in cutter there); a player with a ship ignores them.");
 
     ui.separator();
     ui.strong("Ships");
@@ -604,7 +604,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
                 }
                 if unknown_type(&types, ty) {
                     ui.colored_label(egui::Color32::from_rgb(220, 150, 60), "unknown type: the game drops this ship")
-                        .on_hover_text("PROVISIONAL: the types are the ships/ folders of the overlay");
+                        .on_hover_text("The types are the ships/ folders of the overlay");
                 }
                 let group = mdoc::ship_group(s).unwrap_or("");
                 egui::ComboBox::from_id_salt("ship_owner").selected_text(if group.is_empty() { "(no owner)" } else { group }).show_ui(ui, |ui| {
