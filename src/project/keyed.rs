@@ -78,7 +78,7 @@ pub fn keys_of(list: &[Value], field: &str) -> Result<Vec<String>, String> {
 /// Whether entries can be added to and deleted from the list at `ptr` of the file `rel` that extends a parent whose list is `base`
 /// (`None`: the parent has none): the list merges by key, and the parent's entries all have a unique key.
 pub fn can_add_delete(rule: &dyn KeyedRule, rel: &str, own_merge: Option<&Value>, ptr: &str, base: Option<&Value>) -> Result<(), String> {
-    let Some((_, field)) = effective(rule, rel, own_merge).into_iter().find(|(p, _)| p == ptr) else {
+    let Some(field) = key_field(rule, rel, own_merge, ptr) else {
         return Err(format!("{ptr} of {rel} is not merged by key, so a file that extends its parent cannot add or delete one entry without restating the whole list"));
     };
     let list = base.and_then(Value::as_array).map_or(&[][..], Vec::as_slice);

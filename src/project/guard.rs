@@ -69,50 +69,51 @@ pub fn check_project_dir(dir: &Path, import: Option<&Path>) -> Result<(), String
     }
 }
 
-fn io(path: &Path, e: std::io::Error) -> String {
-    format!("{}: {e}", path.display())
+/// Checks `path`, then runs the one file system call `op` on it, its failure named with the path.
+fn guarded<T>(path: &Path, import: Option<&Path>, op: impl FnOnce() -> std::io::Result<T>) -> Result<T, String> {
+    check_writable(path, import)?;
+    op().map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// `std::fs::write` through the guard.
+/// Makes the folders above `path` (a file about to be written); the guard has checked `path` itself, and a folder above a path
+/// outside the import cannot be inside it.
+fn make_parents(path: &Path) -> std::io::Result<()> {
+    path.parent().map_or(Ok(()), std::fs::create_dir_all)
+}
+
+/// `std::fs::write` through the guard, making the folders above the file.
 pub fn write(path: &Path, contents: impl AsRef<[u8]>, import: Option<&Path>) -> Result<(), String> {
-    check_writable(path, import)?;
-    std::fs::write(path, contents).map_err(|e| io(path, e))
+    guarded(path, import, || make_parents(path).and_then(|()| std::fs::write(path, contents)))
 }
 
 /// `std::fs::create_dir_all` through the guard.
 pub fn create_dir_all(path: &Path, import: Option<&Path>) -> Result<(), String> {
-    check_writable(path, import)?;
-    std::fs::create_dir_all(path).map_err(|e| io(path, e))
+    guarded(path, import, || std::fs::create_dir_all(path))
 }
 
 /// `std::fs::remove_file` through the guard.
 pub fn remove_file(path: &Path, import: Option<&Path>) -> Result<(), String> {
-    check_writable(path, import)?;
-    std::fs::remove_file(path).map_err(|e| io(path, e))
+    guarded(path, import, || std::fs::remove_file(path))
 }
 
 /// `std::fs::remove_dir_all` through the guard.
 pub fn remove_dir_all(path: &Path, import: Option<&Path>) -> Result<(), String> {
-    check_writable(path, import)?;
-    std::fs::remove_dir_all(path).map_err(|e| io(path, e))
+    guarded(path, import, || std::fs::remove_dir_all(path))
 }
 
 /// `std::fs::remove_dir` (an empty folder only) through the guard.
 pub fn remove_empty_dir(path: &Path, import: Option<&Path>) -> Result<(), String> {
-    check_writable(path, import)?;
-    std::fs::remove_dir(path).map_err(|e| io(path, e))
+    guarded(path, import, || std::fs::remove_dir(path))
 }
 
-/// `std::fs::copy` through the guard (checks the destination only; the source is read).
+/// `std::fs::copy` through the guard (checks the destination only; the source is read), making the folders above it.
 pub fn copy(from: &Path, to: &Path, import: Option<&Path>) -> Result<u64, String> {
-    check_writable(to, import)?;
-    std::fs::copy(from, to).map_err(|e| io(to, e))
+    guarded(to, import, || make_parents(to).and_then(|()| std::fs::copy(from, to)))
 }
 
-/// `std::fs::File::create` through the guard.
+/// `std::fs::File::create` through the guard (the folder above must exist).
 pub fn create_file(path: &Path, import: Option<&Path>) -> Result<File, String> {
-    check_writable(path, import)?;
-    File::create(path).map_err(|e| io(path, e))
+    guarded(path, import, || File::create(path))
 }
 
 #[cfg(test)]
@@ -227,5 +228,18 @@ mod tests {
         assert!(!imp.join("mod.json").exists() && !root.join("mod.json").exists() && !imp.join("data/mod.json").exists());
         assert!(Project::open(&root.join("sibling"), Some(imp.clone())).is_ok());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn write_and_copy_make_the_folders_above_the_file_and_still_refuse_the_import() {
+        let d = tmp("parents");
+        let import = d.join("import");
+        std::fs::create_dir_all(&import).unwrap();
+        write(&d.join("mod/a/b/x.json"), "{}", Some(&import)).unwrap();
+        copy(&d.join("mod/a/b/x.json"), &d.join("mod/c/d/y.json"), Some(&import)).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("mod/c/d/y.json")).unwrap(), "{}");
+        assert!(write(&import.join("deep/x.json"), "{}", Some(&import)).is_err() && !import.join("deep").exists(), "nothing is made inside the import");
+        assert!(copy(&d.join("mod/a/b/x.json"), &import.join("deep/y.json"), Some(&import)).is_err() && !import.join("deep").exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

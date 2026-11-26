@@ -122,11 +122,6 @@ pub fn outcome_text(o: RuleReportOutcome) -> &'static str {
     }
 }
 
-/// The names of the rules that never ran, in script order.
-pub fn never_fired(r: &RuleReport) -> Vec<&str> {
-    r.rules.iter().filter(|e| !e.fired).map(|e| e.name.as_str()).collect()
-}
-
 /// The one-line summary: outcome, play time, how many rules fired.
 pub fn summary(r: &RuleReport) -> String {
     let fired = r.rules.iter().filter(|e| e.fired).count();

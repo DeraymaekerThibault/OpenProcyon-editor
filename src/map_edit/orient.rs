@@ -133,11 +133,6 @@ pub fn rotate_yaw(rot: &Rot, delta: f64) -> Rot {
     pack(rotate_z(r, delta), rotate_z(f, delta), rotate_z(u, delta))
 }
 
-/// The same tilt with the heading set to `yaw`.
-pub fn with_yaw(rot: &Rot, yaw: f64) -> Rot {
-    rotate_yaw(rot, yaw - yaw_of(rot))
-}
-
 /// Largest deviation from an orthonormal, right-handed frame: unit lengths, right angles between the axes, and `right x forward`
 /// equal to up (so a mirrored matrix counts as bad).
 pub fn orthonormal_error(rot: &Rot) -> f64 {
@@ -246,13 +241,6 @@ mod tests {
         assert!(is_orthonormal(&r, 1e-12));
         close(&rotate_yaw(&rotate_yaw(&r, 0.9), -0.9), &r, 1e-12);
         close(&rotate_yaw(&r, 0.0), &r, 1e-12);
-    }
-
-    #[test]
-    fn with_yaw_sets_the_heading_only() {
-        let r = rot_from_euler(Euler { yaw: -2.0, pitch: 0.2, roll: 0.1 });
-        let back = euler_from_rot(&with_yaw(&r, 0.5));
-        assert!((back.yaw - 0.5).abs() < 1e-9 && (back.pitch - 0.2).abs() < 1e-9 && (back.roll - 0.1).abs() < 1e-9);
     }
 
     #[test]
