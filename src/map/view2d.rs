@@ -273,8 +273,9 @@ pub fn deletable_in_order(refs: &[Ref]) -> Vec<Ref> {
     v
 }
 
-/// One line about the selection for the tab: what it is, where it is and which way it faces.
-pub fn describe(map: &Value, scene: &Scene, sel: &Selection) -> String {
+/// One line about the selection for the tab: what it is, where it is and which way it faces. `dz` is the height change a drag in the
+/// 3D view shows now and has not written yet (0 otherwise): the line's z follows the drag.
+pub fn describe(map: &Value, scene: &Scene, sel: &Selection, dz: f64) -> String {
     let refs = selected_refs(scene, sel);
     match refs.as_slice() {
         [] => "Nothing selected.".into(),
@@ -282,7 +283,7 @@ pub fn describe(map: &Value, scene: &Scene, sel: &Selection) -> String {
             let (Some(e), which) = (entry(map, *r), r.array()) else { return "Nothing selected.".into() };
             let p = position(e, which).unwrap_or([0.0; 3]);
             let name = label(e, which);
-            format!("{} {}: x {:.1}, y {:.1}, z {:.1}, heading {:.0} deg", which.key(), name, p[0], p[1], p[2], heading(e, which).to_degrees())
+            format!("{} {}: x {:.1}, y {:.1}, z {:.1}, heading {:.0} deg", which.key(), name, p[0], p[1], p[2] + dz, heading(e, which).to_degrees())
         }
         many => format!("{} entries selected", many.len()),
     }
@@ -476,8 +477,18 @@ mod tests {
         let m = map();
         let sc = build_scene(&m);
         assert_eq!(markers_of(&sc, &[Ref::new(Array::Mines, 0), Ref::new(Array::Objects, 2)]), vec![3]);
-        assert_eq!(describe(&m, &sc, &sel(&[])), "Nothing selected.");
-        assert_eq!(describe(&m, &sc, &sel(&[0, 1])), "2 entries selected");
-        assert!(describe(&m, &sc, &sel(&[1])).starts_with("objects Rock #2: x 100.0, y 0.0"));
+        assert_eq!(describe(&m, &sc, &sel(&[]), 0.0), "Nothing selected.");
+        assert_eq!(describe(&m, &sc, &sel(&[0, 1]), 0.0), "2 entries selected");
+        assert!(describe(&m, &sc, &sel(&[1]), 0.0).starts_with("objects Rock #2: x 100.0, y 0.0"));
+    }
+
+    #[test]
+    fn the_selection_line_follows_a_height_drag_before_it_is_written() {
+        let m = map();
+        let sc = build_scene(&m);
+        assert!(describe(&m, &sc, &sel(&[0]), 0.0).contains("z 4.0"));
+        assert!(describe(&m, &sc, &sel(&[0]), 2.5).contains("z 6.5"), "the drag's preview is added to the entry's z");
+        assert!(describe(&m, &sc, &sel(&[0]), -6.0).contains("z -2.0"));
+        assert_eq!(describe(&m, &sc, &sel(&[0, 1]), 2.5), "2 entries selected");
     }
 }

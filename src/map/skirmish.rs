@@ -597,6 +597,8 @@ pub struct Panel {
     new_key: String,
     lobby: Lobby,
     child: Option<launch::Game>,
+    /// How the last play-test ended, from its rule report ([`Panel::ended`]); shown at the top of the section.
+    last_play: String,
     info: String,
     error: Option<String>,
     cache: Option<(Value, Value, Value, Vec<Finding>)>,
@@ -613,6 +615,7 @@ impl Default for Panel {
             new_key: String::new(),
             lobby: Lobby::default(),
             child: None,
+            last_play: String::new(),
             info: String::new(),
             error: None,
             cache: None,
@@ -650,6 +653,21 @@ impl Panel {
         }
     }
 
+    /// A play-test ended: `exit` is the game's own failure message (`None` after a clean exit) and `report` what its rule report held.
+    /// The outcome is kept for the top of the section, where it shows without scrolling.
+    pub fn ended(&mut self, report: &Result<Option<openprocyon::authoring::RuleReport>, String>, exit: Option<String>) {
+        self.last_play = crate::mission::report::end_text(report);
+        match exit {
+            Some(e) => self.error = Some(e),
+            None => self.info = "The game ended.".into(),
+        }
+    }
+
+    /// How the last play-test ended (empty before the first one ended).
+    pub fn last_play(&self) -> &str {
+        &self.last_play
+    }
+
     fn findings(&mut self, script: &Value, map: &Value, media: &Value) -> &[Finding] {
         if self.cache.as_ref().is_none_or(|(s, m, d, _)| s != script || m != map || d != media) {
             self.cache = Some((script.clone(), map.clone(), media.clone(), if script.is_null() { vec![] } else { check_script(script, map, media) }));
@@ -683,6 +701,10 @@ pub fn show(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &str) 
     let script = script_of(project, id).cloned().unwrap_or(Value::Null);
     let media = media_of(project, id).cloned().unwrap_or(Value::Null);
 
+    if !st.last_play.is_empty() {
+        ui.strong(format!("Last play-test: {}", st.last_play));
+        ui.separator();
+    }
     lobby_listing(ui, st, project, id, &map);
     ui.separator();
     victory_section(ui, st, project, id, &map, &script);
@@ -1099,13 +1121,11 @@ fn media_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &
 fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &str, map: &Value) {
     ui.strong("Play");
     if let Some(g) = st.child.as_mut()
-        && let launch::GameState::Ended(report) = g.poll()
+        && let launch::GameState::Ended(exit) = g.poll()
     {
+        let report = g.report();
         st.child = None;
-        match report {
-            Some(r) => st.error = Some(r),
-            None => st.info = "The game ended.".into(),
-        }
+        st.ended(&report, exit);
     }
     let running = st.child.is_some();
     ui.horizontal_wrapped(|ui| {
@@ -1136,6 +1156,7 @@ fn play_section(ui: &mut egui::Ui, st: &mut Panel, project: &mut Project, id: &s
             });
             if let Some(child) = st.run(started) {
                 st.child = Some(child);
+                st.last_play.clear();
                 st.info = format!("Game started through the lobby on {id}. The lobby opens on the map.");
             }
         }

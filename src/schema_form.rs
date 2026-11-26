@@ -200,6 +200,8 @@ pub fn apply_suggestion(kind: &str, current: &str, suggestion: &str, names: &Nam
 
 const RED: egui::Color32 = egui::Color32::LIGHT_RED;
 const MAX_OPTIONS: usize = 200;
+/// The most height a picker's list takes: its rows scroll inside it.
+const LIST_HEIGHT: f32 = 160.0;
 
 /// Id of the widget of field `field` of the item whose id is `item_id`: what a test (or a caller that scrolls to a field) reads
 /// with `ctx.read_response`. The pick button is `.with("btn")`, its filter box `.with("filter")`, an option `.with(("opt", name))`,
@@ -265,13 +267,21 @@ fn pick(ui: &mut egui::Ui, id: egui::Id, current: &str, options: &[String], kind
         } else if found.is_empty() {
             ui.weak("no match");
         }
-        egui::ScrollArea::vertical().id_salt(id.with("scroll")).max_height(160.0).show(ui, |ui| {
-            for name in found {
-                if chip(ui, id.with(("opt", name.as_str())), name, name == current, None).clicked() {
-                    out = Some(name.clone());
+        // Its rows' height up to LIST_HEIGHT, asked for as the minimum too: a picker in a form's row is given little room by the row.
+        let rows = found.len() as f32 * (ui.text_style_height(&egui::TextStyle::Button) + 4.0 + ui.spacing().item_spacing.y);
+        let height = rows.clamp(0.0, LIST_HEIGHT);
+        egui::ScrollArea::vertical()
+            .id_salt(id.with("scroll"))
+            .max_height(height)
+            .min_scrolled_height(height)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .show(ui, |ui| {
+                for name in found {
+                    if chip(ui, id.with(("opt", name.as_str())), name, name == current, None).clicked() {
+                        out = Some(name.clone());
+                    }
                 }
-            }
-        });
+            });
         ui.data_mut(|d| d.insert_temp(fid, needle));
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             ui.data_mut(|d| {

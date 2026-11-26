@@ -48,24 +48,26 @@ A snapshot for whoever picks the work up next. The plan above stays the plan; th
 - dock points on a mod's own scenery, in game;
 - the round-1 and round-2 UI fixes.
 
-The round-3 editor fixes are covered only by headless tests so far:
-- the save path keeps keyed lists keyed, with no index pointers and no rewritten values;
-- the Maps tab scrolls;
-- play-test error lines show the real last line;
-- the backdrop state resets per map;
-- one undo step per typed number;
-- several layout fixes.
+**Round 4** (Nov 26, engine main `9fe9424`, which contains the pin `5e6ad33`; run under Xvfb with software Vulkan and xdotool, never on the desktop). Result per step of `docs/round4.md`:
+- PASS in a real run: 1 keyed saves, 3 number boxes and one undo step, 4 the Maps tab scrolls, 5 the backdrop state per map, 8 the picker filter reset. The round-3 fixes these cover are confirmed.
+- FAIL, fixed in editor PR "round-4 fixes": 2, the sun-direction boxes rewrote `lighting.roof_direction` on focus loss.
+- PARTIAL, fixed in the same PR: 9 (no outcome after a `--lobby` run), 10 (the height number moved only on release), 14 (a picker in the template form showed three rows with no visible scroll bar). Step 14 also settles the "Raiders missing from the template pickers" report: the engine's list offers `Hero`, `Raiders`, `RaiderShips` and `Player0 Group` in every picker, and `Raiders` is the fourth of those, hidden under a list cut to three rows with no visible scroll bar (and a stale filter could hide it too, fixed in the round-3 PR). Not opened: Reach a point, Escort, Cutscene.
+- PARTIAL, not editor code: 6 (no `map.json` the game refuses was found; `--check-mod` flags only an unknown `extends`), 13 (13.11 matches the example up to phase5.md's "Seen running" list plus two defaults the editor leaves out, `player_start.start` and `forward`, and `Entire Group: "FALSE"`; in 13.12 the rules fired but the cutscene and the on-screen task text could not be confirmed and the raiders could not be sunk), 15 (`--check-mod --json` and the problems panel agree; the gate mods and a round-3 baseline were not at hand).
+- PARTIAL, backlog below: 7 (layout jumps).
+- SKIPPED: 11 (mission03's ship-kill rule) and 12 (sinking your own ship): the player's guns only fire at a clicked target and `attack` orders do not move the ship, so no hit could be credited to the player under software rendering. 10's height in game was not checked either: the console's `ships` gives only x and y.
+- Engine findings of the round: OpenProcyon#677 and OpenProcyon#678. The editor does not work around them. (Also seen, step 15: a stray " , " in the engine's outside-`world_half` message.)
+- Driving caveats (PROVISIONAL): `xdotool key ctrl+...` never arrived as Ctrl, but separate keydown and keyup events made Ctrl+S save four files; the note "the Maps tab ignores Ctrl+S" is unconfirmed (it rests on the code and the unsaved count). A click with no hover before it was sometimes dropped.
 
-**Not yet confirmed in a real run.**
-- A `--lobby` win through the Game Summary and the editor showing the run ended. Console `win` makes this testable since #654.
-- A 3D height drag seen in game.
-- A retail mission's ship-kill rule; only mission03 has one, and it is awkward to test.
-- Sinking your own ship: no kill is credited, covered by a unit test only.
-- The Phase 5 gate rebuilt by hand from an empty folder, all the way through.
-- The player "Raiders" missing from the template pickers on the tester's gate mission. Cause found in the editor, not the engine: a name picker kept a filter typed and abandoned, so reopening it showed a filtered list (fixed, `tests/schema_pick.rs`). The engine's list was right: it offers every player of `players` in `mission.json` or `map.json`. Not proved to be what the tester saw: round 4, step 14 re-checks it, and a name that differs in capitals or by a space is not offered by design.
+**Backlog from round 4** (editor, not started):
+- **Step 7, layout jumps.** Things that come and go still push their neighbours: the "Copied to maps/..." line moves the Skirmish header down a line; the volume and point placing hint and the selected-name panel push the mission plan down 18 px or more; the template form pushes the rule editor down about 430 px. At narrow widths the mission plan sits below the selected rule's details, far down the tab. (Nothing is cut off when narrow.)
+- **Points have no x and y boxes** on the mission plan; volume vertices do.
+- **A point under a ship cannot be clicked on the plan** (ships win the tie, by design since the small fixes); the "Names" list works.
+- **The point's chip says "1 of 3 rules"** while the list still shows the selected rule 2. PROVISIONAL: probably intended.
+- **The "Place scenery" filter is not focused** when the list opens.
+- **Defaults the editor leaves out of a new mission file** (`player_start.start` and `forward`, `Entire Group: "FALSE"`): decide whether the editor writes them or the example drops them.
 
 **Next work.**
-1. **Round 4 of the local test:** the step list is `docs/round4.md`; #666 has landed and the pin is at `5e6ad33`, so it can run.
+1. **Round 5 of the local test, after the round-4 fixes:** re-check steps 2, 9, 10 and 14 and the ship id box with the editor built from the fixes' PR; steps 11 and 12 still need a way to credit a hit to the player (engine side; the engine's run tooling is OpenProcyon#675, and automating the rounds is editor issue #5).
 2. **One rules run for missions and skirmish:** (OpenProcyon#666 did part of it: one builder for the rule world and effect environment, and `ActiveScript`, a view that consumers read instead of branching on the two wrappers; the two wrappers still exist.) The rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
    - **Plan:** load both formats into one rules-run resource, with the campaign-only parts (opening, briefing, campaign id) as an optional extra. Behaviour must not change; prove it with `tools/tracediff.py`, same seed and `--fixed-step`, on one mission and one skirmish map (needs assets).
 3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path (first pass done: editor PR #3), then the editor's panels.

@@ -455,9 +455,25 @@ fn type_picker(ui: &mut egui::Ui, id: egui::Id, current: &str, types: &[String])
 }
 
 /// A text box that keeps what is typed until it loses focus; returns the text then when it changed.
-pub(crate) fn text_edit(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
+pub fn text_edit(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
+    edit_text(ui, id, current, width, false)
+}
+
+/// [`text_edit`] for a short value that is replaced rather than edited (a ship's id): a click into the box selects all of its text, so
+/// typing `10` over `2` gives `10`, not `210`.
+pub fn text_edit_selecting(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
+    edit_text(ui, id, current, width, true)
+}
+
+fn edit_text(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32, select_all: bool) -> Option<String> {
     let mut buf = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
-    let r = ui.add(egui::TextEdit::singleline(&mut buf).id(id).desired_width(width));
+    let mut out = egui::TextEdit::singleline(&mut buf).id(id).desired_width(width).show(ui);
+    if select_all && out.response.gained_focus() {
+        let end = egui::text::CCursor::new(buf.chars().count());
+        out.state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), end)));
+        out.state.store(ui.ctx(), id);
+    }
+    let r = out.response;
     if r.lost_focus() {
         ui.data_mut(|d| d.remove::<String>(id));
         return (buf != current).then_some(buf);
@@ -573,7 +589,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project) {
         ui.push_id(("ship", i), |ui| {
             ui.horizontal_wrapped(|ui| {
                 let cur = mdoc::ship_id(s).map_or(String::new(), |v| v.to_string());
-                if let Some(new) = text_edit(ui, egui::Id::new(("ship_id", &id, i)), &cur, 40.0) {
+                if let Some(new) = text_edit_selecting(ui, egui::Id::new(("ship_id", &id, i)), &cur, 40.0) {
                     match new.trim().parse::<i64>() {
                         Ok(n) => ops.push(Op::ShipId(i, n)),
                         Err(_) => error = Some(format!("'{}' is not a whole number: a ship's id is an integer", new.trim())),

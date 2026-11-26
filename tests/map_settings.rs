@@ -192,3 +192,70 @@ fn a_retail_backdrop_is_turned_off_with_false_since_a_mod_cannot_remove_a_key() 
     assert_eq!(read(&m, "maps/red/map.json")["backdrop"], false);
     assert_eq!(&read_merged(&p.root, "maps/red/map.json").unwrap(), merged_view(&p, "red").unwrap());
 }
+
+// ---- the sun direction's boxes (round 4, step 2) ----
+
+use bevy_egui::egui::{self, Pos2, Rect};
+
+/// One `direction_box` driven by real pointer and key events: its value, its rectangle, and whether it ever said "moved".
+struct Box {
+    ctx: egui::Context,
+    value: f64,
+    rect: Rect,
+    moved: bool,
+    t: f64,
+}
+
+impl Box {
+    fn new(value: f64) -> Box {
+        let mut b = Box { ctx: egui::Context::default(), value, rect: Rect::NOTHING, moved: false, t: 0.0 };
+        b.frame(vec![]);
+        b.frame(vec![]);
+        b
+    }
+    fn frame(&mut self, mut events: Vec<egui::Event>) {
+        self.t += 0.05;
+        events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 300.0))), time: Some(self.t), events, ..Default::default() };
+        let (value, rect, moved) = (&mut self.value, &mut self.rect, &mut self.moved);
+        let mut full = self.ctx.run_ui(raw, |ui| {
+            let (r, m) = settings::direction_box(ui, value, "x");
+            *rect = r.rect;
+            *moved |= m;
+        });
+        full.textures_delta.clear();
+    }
+    fn click(&mut self, at: Pos2) {
+        let b = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        self.frame(vec![egui::Event::PointerMoved(at)]);
+        self.frame(vec![b(true)]);
+        self.frame(vec![b(false)]);
+        self.frame(vec![]);
+        self.frame(vec![]);
+    }
+}
+
+#[test]
+fn a_click_into_the_sun_box_and_out_again_writes_nothing() {
+    let mut b = Box::new(0.123456789);
+    let inside = b.rect.center();
+    b.click(inside); // into the box: it becomes a text field
+    assert!(b.ctx.memory(|m| m.focused()).is_some(), "the click put the box in edit mode");
+    b.click(Pos2::new(400.0, 250.0)); // out again, nothing typed
+    assert!(b.ctx.memory(|m| m.focused()).is_none());
+    assert!(!b.moved, "focus loss alone is not a change");
+    assert_eq!(b.value, 0.123456789, "the value is the one the file holds, not the shown text");
+}
+
+#[test]
+fn a_typed_sun_value_is_applied_on_enter() {
+    let mut b = Box::new(0.123456789);
+    let inside = b.rect.center();
+    b.click(inside);
+    b.frame(vec![egui::Event::Text("0.5".into())]);
+    b.frame(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+    b.frame(vec![]);
+    b.frame(vec![]);
+    assert!(b.moved);
+    assert_eq!(b.value, 0.5);
+}

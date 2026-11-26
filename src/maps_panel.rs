@@ -252,7 +252,7 @@ fn body(ui: &mut egui::Ui, st: &mut State, project: &mut Project) -> bool {
         }
     }
     st.view.world_half = doc::world_half(map).unwrap_or(doc::DEFAULT_WORLD_HALF) as f32;
-    let selection_text = view2d::describe(map, &scene, &st.sel);
+    let selection_text = view2d::describe(map, &scene, &st.sel, if st.v3.on { st.v3.preview_dz } else { 0.0 });
     let centre = view2d::selection_centre(map, &scene, &st.sel);
     let file_dirty = maps::map_rel(&id).ok().and_then(|rel| project.doc(&rel).map(|d| d.dirty)).unwrap_or(false);
 

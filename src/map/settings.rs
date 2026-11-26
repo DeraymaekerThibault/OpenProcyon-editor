@@ -195,6 +195,23 @@ fn rgba(c: [f64; 4]) -> [f32; 4] {
     c.map(|x| x as f32)
 }
 
+/// Decimals the sun direction's boxes show.
+const DIRECTION_DECIMALS: usize = 4;
+
+/// One axis of the sun direction: the number box of `world_half` (a drag value that applies on Enter or when it loses focus), shown
+/// with [`DIRECTION_DECIMALS`] decimals. The box parses its own rounded text back when it loses focus, so a click in and out would
+/// rewrite a value the file holds with more decimals: the answer is `true` only when the value moved by at least half of what the
+/// box shows, and `v` is left as it was otherwise.
+pub fn direction_box(ui: &mut egui::Ui, v: &mut f64, axis: &str) -> (egui::Response, bool) {
+    let before = *v;
+    let r = ui.add(egui::DragValue::new(v).update_while_editing(false).speed(0.02).range(-1.0..=1.0).max_decimals(DIRECTION_DECIMALS).prefix(axis.to_string()));
+    let moved = r.changed() && (*v - before).abs() >= 0.5 * 10f64.powi(-(DIRECTION_DECIMALS as i32));
+    if !moved {
+        *v = before;
+    }
+    (r, moved)
+}
+
 /// The settings form of map `id` (open in `project`); `skies` are the catalogue's. Edits are applied as they are made.
 pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, skies: &[String]) {
     let Ok(map) = current(project, id) else {
@@ -276,15 +293,15 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, project: &mut Project, id: &str, 
                 }
             });
         }
-        let mut d = doc::light_direction(&map).unwrap_or([0.0, 0.0, -1.0]).map(|x| x as f32);
+        let mut d = doc::light_direction(&map).unwrap_or([0.0, 0.0, -1.0]);
         ui.horizontal(|ui| {
             ui.label("Sun travels along").on_hover_text(hint(&pointer(&[doc::KEY_LIGHTING, doc::KEY_LIGHT_DIRECTION])));
-            let mut changed = false;
+            let mut moved = false;
             for (axis, v) in ["x", "y", "z"].iter().zip(d.iter_mut()) {
-                changed |= ui.add(egui::DragValue::new(v).update_while_editing(false).speed(0.02).range(-1.0..=1.0).prefix(*axis)).changed();
+                moved |= direction_box(ui, v, axis).1;
             }
-            if changed {
-                let r = set_light_direction(project, id, d, true);
+            if moved {
+                let r = set_light_direction(project, id, d.map(|x| x as f32), true);
                 st.run(r);
             }
         });
