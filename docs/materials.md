@@ -1,7 +1,7 @@
 # Materials and decals: spec (backlog B7)
 
-Nov 26, 2026 · status: proposed, not started. Engine read at OpenProcyon `c8b44de` (the editor still pins `f1bf09f`; nothing here
-needs the newer one). Everything about the engine below is from reading its source and docs; what was not run is marked
+Nov 26, 2026 · status: proposed, not started. Engine read at OpenProcyon `c8b44de` (the editor pins `5e6ad33`, after `c8b44de`; nothing here
+needs a newer one). Everything about the engine below is from reading its source and docs; what was not run is marked
 `PROVISIONAL`.
 
 ## The request

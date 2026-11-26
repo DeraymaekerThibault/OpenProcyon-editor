@@ -36,7 +36,7 @@ A snapshot for whoever picks the work up next. The plan above stays the plan; th
   - #649: ship kills credited, `--lobby` exits, the full `--help`.
   - #651: the developer console in every singleplayer battle.
   - #654: duplicate-id false positives, lobby error text, console `win` and `lose` in any battle.
-- **Editor:** Phase 4 (T0 to T12) and Phase 5 (all tasks, including T11 templates) are on `claude/editor-integration` (PR #1 into `main`), pinned to engine main `f1bf09f`.
+- **Editor:** Phase 4 (T0 to T12) and Phase 5 (all tasks, including T11 templates) are on `claude/editor-integration` (PR #1 into `main`), pinned to engine main `5e6ad33` (with #666, #653, #668; the move needed no editor code change, see `docs/round4.md` step 15).
 - **Copies removed:** the editor's own copies of engine rules are gone for the keyed merge, the damage layer, crew kinds, the scenery transform, formations, the field walk (`visit_fields`) and the Ogg reader. A test checks every mission and media key the editor writes against the engine schemas.
 
 **Verified with real assets.** Three local test rounds (Nov 25) on a maintainer machine with an import:
@@ -65,10 +65,10 @@ The round-3 editor fixes are covered only by headless tests so far:
 - The player "Raiders" missing from the template pickers on the tester's gate mission. Cause found in the editor, not the engine: a name picker kept a filter typed and abandoned, so reopening it showed a filtered list (fixed, `tests/schema_pick.rs`). The engine's list was right: it offers every player of `players` in `mission.json` or `map.json`. Not proved to be what the tester saw: round 4, step 14 re-checks it, and a name that differs in capitals or by a space is not offered by design.
 
 **Next work.**
-1. **Round 4 of the local test:** the step list is `docs/round4.md`. It runs only after OpenProcyon#666 lands and the maintainer moves the editor's engine pin.
-2. **One rules run for missions and skirmish:** the rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
+1. **Round 4 of the local test:** the step list is `docs/round4.md`; #666 has landed and the pin is at `5e6ad33`, so it can run.
+2. **One rules run for missions and skirmish:** (OpenProcyon#666 did part of it: one builder for the rule world and effect environment, and `ActiveScript`, a view that consumers read instead of branching on the two wrappers; the two wrappers still exist.) The rules engine is shared, but `campaign::Mission` and `rules::skirmish::SkirmishScript` are two wrappers that about 70 call sites choose between (8 files handle both). `--start-at`, the console and kill credit each missed the skirmish path once.
    - **Plan:** load both formats into one rules-run resource, with the campaign-only parts (opening, briefing, campaign id) as an optional extra. Behaviour must not change; prove it with `tools/tracediff.py`, same seed and `--fixed-step`, on one mission and one skirmish map (needs assets).
-3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path, then the editor's panels.
+3. **Complexity review passes,** one area at a time at milestone boundaries, each finding its own PR, behaviour proven unchanged (tracediff or visdiff in the engine, tests in the editor). The order: rules and scenario (item 2 first), combat, HUD and views, then the editor's project and save path (first pass done: editor PR #3), then the editor's panels.
 4. **Rules the editor still restates,** to move into the engine:
    - the inverse rotation maths (`map_edit/orient.rs`, `ship_view/coords.rs`);
    - the skirmish lobby checklist (`map/skirmish.rs`);

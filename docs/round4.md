@@ -3,10 +3,11 @@
 For the local agent on the maintainer's machine (real assets, a display, the game binary). Report PASS, FAIL, PARTIAL or SKIPPED per
 step, with what you saw. Labels are the editor's own; a label that differs from the screen is a finding, say so.
 
-> **Do not run this yet.** It waits for OpenProcyon#666 to land and for the maintainer to move the editor to the new engine version
-> (the move is the maintainer's to trigger). Before the first step, confirm that the editor was built at that engine version
-> (the Play-test tab shows the engine version) and that `PROCYON_ASSETS` and `PROCYON_GAME_BIN` are set in `.env`. If the version is
-> the old pin, stop and report that.
+> **Before the first step**, confirm three things, and stop and report if one is wrong. (1) The editor checkout you build has
+> `rev = "5e6ad33"` for `openprocyon` in `Cargo.toml` (OpenProcyon#666 is in it). The engine's version string is `0.2.0` before and
+> after, so the Play-test tab cannot tell them apart. (2) The game binary in `PROCYON_GAME_BIN` is built from OpenProcyon main at
+> `5e6ad33` or newer (`git log -1` in the engine checkout it was built from). (3) `PROCYON_ASSETS` and `PROCYON_GAME_BIN` are set in
+> `.env`.
 
 Rules for the run: never save into the import folder; use a fresh empty mod folder outside this repository; do not upload any
 converted game content (screenshots of the editor with game models are fine to describe, not to attach). Anything you guess is
@@ -56,11 +57,31 @@ PROVISIONAL.
     missing, copy the mission's `players` line and the ships' `group` values into the report, exactly as written (spelling, spaces,
     capitals): a name the mission does not declare, or that differs in capitals or by a space, is not offered by the engine's list.
 
-## C. After the engine move: what #666 changed
+## C. After the engine move: what #666 changed for the editor
 
-15. Whatever #666 changes in the engine's authoring code or file formats: list its changes here when the maintainer moves the pin
-    (this step is to be filled in then, not guessed now). Run `--check-mod <mod> --json` on the Phase 4 and Phase 5 gate mods and
-    compare with the editor's problems panel: both must agree (errors and warnings, same wording).
+What the pin move from `f1bf09f` to `5e6ad33` brings (engine commits #664, #653, #668, #666, #672; read from the engine's diff, not
+run here): the `authoring` API the editor calls is unchanged and the editor built with no code change; the mission, script, media
+and map file formats are unchanged; the short `--lobby` spec the editor writes is unchanged (a spec starting with `{` is a new whole
+JSON setup, which the editor does not use). What can show in a run:
+
+- **A fix that touches step 9.** A battle start now forgets the last battle's summary counts, lobby roster, skirmish end rules and
+  nebula state. Before, after a restart the Game Summary counted both runs, and a mission started after a skirmish kept the
+  skirmish's alliance roster and victory rule.
+- **One rule world for missions and skirmish** (shared builder, `ActiveScript`, one rule for matching a group name, one hostility
+  answer). The engine's commit says behaviour is unchanged and describes a verification run (not repeated here); steps 9, 11 and 12 go through that code, and
+  `--start-at`, the console and kill credit all read the same script now.
+- **`--check-mod`**: it parses a map's `mission.json` and `map.json` once, and reads only `.json` files for effect and sound names
+  (it used to print an invalid-JSON error for every binary and shader of a mod, findings were not affected). A present but invalid
+  optional JSON file now prints an error line in the game's log where it used to be silent: that line can show in the play-test's error
+  lines.
+- **Multiplayer phase 1 (#653)**: every skirmish order is now a command, and the lobby setup is written in the log. Not used by the
+  editor, but a skirmish play-test (`--lobby`) runs through it.
+- **Remaster (#668)**: the black hole is drawn as a raymarched gas volume; only a map with a black hole shows it.
+
+15. Run `--check-mod <mod> --json` on the Phase 4 and Phase 5 gate mods with the game binary and compare with the editor's problems
+    panel: errors and warnings must agree (same wording, same count). Then play one mission and one skirmish map for a minute
+    each and report anything that differs from round 3 (the rule report, the play-test's error lines, the summary counts after a
+    restart with `R`).
 
 ## Report
 
