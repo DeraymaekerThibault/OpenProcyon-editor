@@ -9,6 +9,8 @@
 //! the example beyond the normalisation above (a missing scenery `player` and a missing ship `rot` read as the engine reads them, see
 //! `is_default_of`). Synthetic and project-own data only; the temp folders are removed when the test ends.
 
+mod common;
+
 use openprocyon::authoring::{accepted_names, check_mission, defined_names, overlay_into, read_merged};
 use openprocyon_editor::edit::Edit;
 use openprocyon_editor::map::catalogue::SceneryType;
@@ -21,8 +23,12 @@ use openprocyon_editor::mission::doc as mdoc;
 use openprocyon_editor::mission::geometry::{self as geo, Item, Kind};
 use openprocyon_editor::mission::project as mproject;
 use openprocyon_editor::mission::rules::{self, Target};
+use openprocyon_editor::mission::rules_view as rv;
+use openprocyon_editor::mission::templates;
 use openprocyon_editor::mission::{groups, ships, tasks};
+use openprocyon_editor::missions_panel;
 use openprocyon_editor::project::{NewMod, Project};
+use openprocyon_editor::project_panel;
 use openprocyon_editor::schema_form::{self as sf, Schema};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -97,7 +103,9 @@ impl Forms {
     }
 }
 
-fn build(dir: &Path) -> Project {
+/// With `through_the_tab`, rule 2, rule 3 and the task "Clear the gate" are not made by hand: the "Ambush on arrival" template of the
+/// Missions tab writes them (docs/phase5.md gate step 9), clicked and filled in on the tab drawn in the shared rig.
+fn build(dir: &Path, through_the_tab: bool) -> Project {
     let forms = Forms { schema: Schema::engine() };
     // 1. "New mod..." in an empty folder.
     let (mut p, created) = step("New mod", Project::create_with(dir, None, &NewMod { id: Some("gates".into()), ..Default::default() }));
@@ -169,14 +177,16 @@ fn build(dir: &Path) -> Project {
     step("Task required", tasks::set_required(&mut p, ID, reach, true));
     let cond = forms.item(true, "Is Group In Volume", &[("Group Name", json!("Hero")), ("Volume Name", json!("Gate Area")), ("Entire Group", json!(false))]);
     step("Task condition", tasks::add_condition(&mut p, ID, reach, mdoc::TASK_COMPLETE_WHEN, cond));
-    let clear = step("Add task", tasks::add_task(&mut p, ID, "Clear the gate"));
-    step("Task text", tasks::set_text(&mut p, ID, clear, "Sink both raiders."));
-    step("Task inactive", tasks::set_active(&mut p, ID, clear, false));
-    step("Task required", tasks::set_required(&mut p, ID, clear, true));
-    let cond = forms.item(true, "OP Counter Condition", &[("Counter Name", json!("raiders sunk")), ("Equivalence", json!("Greater Than")), ("Value", json!(1))]);
-    step("Task condition", tasks::add_condition(&mut p, ID, clear, mdoc::TASK_COMPLETE_WHEN, cond));
-    let cond = forms.item(true, "Group Destroyed", &[("Group Name", json!("Hero"))]);
-    step("Task fail condition", tasks::add_condition(&mut p, ID, clear, mdoc::TASK_FAIL_WHEN, cond));
+    if !through_the_tab {
+        let clear = step("Add task", tasks::add_task(&mut p, ID, "Clear the gate"));
+        step("Task text", tasks::set_text(&mut p, ID, clear, "Sink both raiders."));
+        step("Task inactive", tasks::set_active(&mut p, ID, clear, false));
+        step("Task required", tasks::set_required(&mut p, ID, clear, true));
+        let cond = forms.item(true, "OP Counter Condition", &[("Counter Name", json!("raiders sunk")), ("Equivalence", json!("Greater Than")), ("Value", json!(1))]);
+        step("Task condition", tasks::add_condition(&mut p, ID, clear, mdoc::TASK_COMPLETE_WHEN, cond));
+        let cond = forms.item(true, "Group Destroyed", &[("Group Name", json!("Hero"))]);
+        step("Task fail condition", tasks::add_condition(&mut p, ID, clear, mdoc::TASK_FAIL_WHEN, cond));
+    }
     step("Victory: objectives", tasks::set_victory(&mut p, ID, true));
 
     // 9. Rules. (T11's templates are not in this tree: rule 2 is built by hand, see the gap list in the docs.)
@@ -207,34 +217,67 @@ fn build(dir: &Path) -> Project {
             forms.item(false, "OP Set Counter", &[("Counter Name", json!("raiders sunk")), ("Value", json!(0))]),
         ],
     );
-    rule(
-        "Arrive at the gate",
-        true,
-        true,
-        vec![forms.item(true, "Enter Volume", &[("Group Name", json!("Hero")), ("Volume Name", json!("Gate Area"))])],
-        vec![
-            forms.item(false, "NIS Start", &[]),
-            forms.item(false, "NIS Focus camera on Group/Unit", &[("GroupUnit Name", json!("RaiderShips"))]),
-            forms.item(false, "OP Wait", &[("Seconds", json!(4))]),
-            forms.item(false, "NIS End", &[]),
-            forms.item(false, "Set Objective Task Active State", &[("Objective Task", json!("Clear the gate")), ("Active State", json!(true))]),
-            forms.item(false, "GroupA to attack GroupB", &[("Attack Group", json!("RaiderShips")), ("Target Group", json!("Hero"))]),
-            forms.item(false, "OP Set Rule Active", &[("Rule Name", json!("Count raiders sunk")), ("Boolean", json!(true))]),
-        ],
-    );
-    rule(
-        "Count raiders sunk",
-        false,
-        false,
-        vec![forms.item(true, "Player Killed A Object", &[("Player Name", json!("Hero")), ("World Object Type", json!("Ship"))])],
-        vec![forms.item(false, "OP Add To Counter", &[("Counter Name", json!("raiders sunk")), ("Value", json!(1))])],
-    );
+    if !through_the_tab {
+        rule(
+            "Arrive at the gate",
+            true,
+            true,
+            vec![forms.item(true, "Enter Volume", &[("Group Name", json!("Hero")), ("Volume Name", json!("Gate Area"))])],
+            vec![
+                forms.item(false, "NIS Start", &[]),
+                forms.item(false, "NIS Focus camera on Group/Unit", &[("GroupUnit Name", json!("RaiderShips"))]),
+                forms.item(false, "OP Wait", &[("Seconds", json!(4))]),
+                forms.item(false, "NIS End", &[]),
+                forms.item(false, "Set Objective Task Active State", &[("Objective Task", json!("Clear the gate")), ("Active State", json!(true))]),
+                forms.item(false, "GroupA to attack GroupB", &[("Attack Group", json!("RaiderShips")), ("Target Group", json!("Hero"))]),
+                forms.item(false, "OP Set Rule Active", &[("Rule Name", json!("Count raiders sunk")), ("Boolean", json!(true))]),
+            ],
+        );
+        rule(
+            "Count raiders sunk",
+            false,
+            false,
+            vec![forms.item(true, "Player Killed A Object", &[("Player Name", json!("Hero")), ("World Object Type", json!("Ship"))])],
+            vec![forms.item(false, "OP Add To Counter", &[("Counter Name", json!("raiders sunk")), ("Value", json!(1))])],
+        );
+    }
+    if through_the_tab {
+        p = ambush_through_the_tab(p);
+    }
 
     // 10. Speech and messages: the example has none; media.json is the three empty tables "New mission" made.
     // 11. Save (Ctrl+S).
     let report = p.save();
     assert!(report.errors.is_empty(), "GATE STEP FAILED: Save: {:?}", report.errors);
     p
+}
+
+/// Gate step 9 on the Missions tab: "+ From template", "Ambush on arrival", the three names picked from the lists, "Expand". The tab is
+/// drawn in the shared rig, wide enough for the list and the plan to sit side by side; the project goes in and comes out.
+fn ambush_through_the_tab(p: Project) -> Project {
+    let mut ps = project_panel::State::default();
+    ps.install(p, "gate".into());
+    let mut rig = common::Rig::new((1200.0, 3000.0), ps, missions_panel::tab);
+    rv::state(rig.ctx()).lock().unwrap().mission = Some(ID.into());
+    rig.settle();
+    rig.click(rv::wid("add-template"));
+    rig.click_text("Ambush on arrival");
+    // the pickers of the form: a group is a picker with a unit part under it, a volume a plain picker
+    let picker = |param: &str, kind_group: bool| {
+        let id = sf::field_id(templates::wid(("param", param)), param);
+        let id = if kind_group { id.with("group") } else { id };
+        (id.with("btn"), id)
+    };
+    for (param, name, group) in [("group", "Hero", true), ("ambushers", "RaiderShips", true), ("volume", "Gate Area", false)] {
+        let (btn, id) = picker(param, group);
+        rig.click(btn);
+        rig.click(id.with(("opt", name)));
+    }
+    rig.click_text("Expand");
+    let mut ps = rig.state_mut().project.take().expect("the project is still open");
+    let report = ps.save();
+    assert!(report.errors.is_empty(), "GATE STEP FAILED: Save: {:?}", report.errors);
+    ps
 }
 
 // ---- reading back and comparing ----
@@ -347,17 +390,13 @@ fn differences(schema: &Schema, want: &Value, got: &Value) -> Vec<String> {
     out
 }
 
-#[test]
-fn the_phase_5_gate_gate_ambush_is_rebuilt_from_an_empty_folder() {
-    let _cleanup = Cleanup;
-    let dir = temp("mod");
-    let _project = build(&dir);
+/// The mod saved in `dir` against the hand-written gate-ambush files, in meaning (see the header), and the engine's two views of it.
+fn assert_is_the_gate(dir: &Path) {
     let schema = Schema::engine();
 
-    let (got_m, got_map, got_media) = read_back(&dir, "got");
+    let (got_m, got_map, got_media) = read_back(dir, "got");
     let hand = hand_written("want");
     let (want_m, want_map, want_media) = read_back(&hand, "want");
-
     // mod.json is not overlay content: both are read as written. `format` and `game_version` are keys "New mod" adds that the
     // hand-written file of docs/missions.md does not have (the loader treats them as optional): left out of the comparison.
     let mut got_mod: Value = serde_json::from_slice(&std::fs::read(dir.join("mod.json")).unwrap()).unwrap();
@@ -384,4 +423,20 @@ fn the_phase_5_gate_gate_ambush_is_rebuilt_from_an_empty_folder() {
     assert_eq!(findings(&got_m, &got_map, &got_media), findings(&want_m, &want_map, &want_media), "check_mission findings differ");
     assert_eq!(defined_names(&got_m, &got_map, &got_media), defined_names(&want_m, &want_map, &want_media), "defined_names differ");
     assert_eq!(accepted_names(&got_m, &got_map, &got_media), accepted_names(&want_m, &want_map, &want_media), "accepted_names differ");
+}
+
+#[test]
+fn the_phase_5_gate_gate_ambush_is_rebuilt_from_an_empty_folder() {
+    let _cleanup = Cleanup;
+    let dir = temp("mod");
+    let _project = build(&dir, false);
+    assert_is_the_gate(&dir);
+}
+
+#[test]
+fn the_gate_with_its_ambush_made_by_the_template_on_the_missions_tab_is_the_same_file() {
+    let _cleanup = Cleanup;
+    let dir = temp("mod-tab");
+    let _project = build(&dir, true);
+    assert_is_the_gate(&dir);
 }

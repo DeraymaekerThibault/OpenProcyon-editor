@@ -9,13 +9,18 @@ step, with what you saw. Labels are the editor's own; a label that differs from 
 > `5e6ad33` or newer (`git log -1` in the engine checkout it was built from). (3) `PROCYON_ASSETS` and `PROCYON_GAME_BIN` are set in
 > `.env`.
 
-**What a test covers now** (editor issue #5, first part; `tools/check.sh` runs them on every commit, so a round does not need to repeat them):
+**What a test covers now** (editor issue #5; `tools/check.sh` runs them on every commit, so a round does not need to repeat them). The tests draw the real tabs and panels in the shared rig (`tests/common/mod.rs`) over synthetic mods, never game content:
 - 2 and 3, the number boxes: `tests/map_settings.rs` (a click into the `world_half` or sun-direction box and out again writes nothing and saves the same bytes; a typed number applies on Enter or on focus loss; the undo steps).
+- 4, the Skirmish section: `tests/tabs.rs` (30 and then 120 script rules give the same plan-toolbar position, at most half a window below where it was with the section closed: the section scrolls inside its own area).
+- 5, the backdrop state: `tests/tabs.rs` (a picture copied onto one map: another map shows no path, no message and "off"; back on the first, "on" and no message).
+- 7, layout: `tests/tabs.rs` (the Missions tab at 500 and at 1200 wide: no text outside the window, the plan under the rule's details when narrow and in a right-hand column level with the list when wide). The pushing around of neighbours that round 4 saw is not tested; it is backlog (`docs/roadmap.md`).
 - 8 and 14, the pickers: `tests/schema_pick.rs` (the filter resets on a button click and on Escape; every name of a template form's list is reachable, the fourth and, by scrolling, the last).
+- 13, the gate: `tests/mission_gate.rs` builds `gate-ambush` from an empty folder with the calls the buttons make and compares it with the hand-written files; a second test does rule 2, rule 3 and the task "Clear the gate" on the Missions tab (the "Ambush on arrival" template, three names picked from the lists, Expand) and finds the same file. The rest of the 13.x steps are calls, not clicks, and 13.12 (the game) is manual.
+- 15, the problems panel: `tests/tabs.rs` (the panel holds the findings `--check-mod --json` prints, the same counts and the same wording, for a mod with errors and a warning; the command is `check_mod(dir, base_assets())` and its counts, game/src/cli.rs, so the test computes what it prints). Running the game binary itself is manual.
 - 1 keyed saves, in part: the existing save and keyed-merge tests (`tests/map_project.rs`, `tests/mission_retail.rs`, `tests/keyed_engine.rs`) on synthetic retail-like files; a retail map or mission from the player's import is still a manual step.
 - Also pinned by a test since round 4: the ship id box selects its text on a click, the play-test outcome line, the height number while dragging (step 10, the editor's line only).
 
-Still manual: 4, 5 and 7 (the Maps tab as a whole: scrolling, per-map state, layout at narrow and wide sizes), 6, 9, 10 in game, 11, 12, 13 and 15. Of these 6, 9, 10 and 12 need the game binary and are meant to become commands (issue #5, parts 2 and 3).
+Still manual: 1 on real retail files, 6, 9, 10 in game, 11, 12, 13.12 and 15 with the game binary. Of these 6, 9, 10 and 12 need the game binary and are meant to become commands run under Xvfb (issue #5, parts 2 and 3).
 
 Rules for the run: never save into the import folder; use a fresh empty mod folder outside this repository; do not upload any
 converted game content (screenshots of the editor with game models are fine to describe, not to attach). Anything you guess is
