@@ -122,6 +122,16 @@ pub fn outcome_text(o: RuleReportOutcome) -> &'static str {
     }
 }
 
+/// What to tell the author when a play-test ended and its rule report was read: the summary line (outcome included), or why there is
+/// none.
+pub fn end_text(report: &Result<Option<RuleReport>, String>) -> String {
+    match report {
+        Ok(Some(r)) => summary(r),
+        Ok(None) => "The game wrote no rule report: it ended before the rules ran.".into(),
+        Err(e) => format!("The rule report could not be read: {e}"),
+    }
+}
+
 /// The one-line summary: outcome, play time, how many rules fired.
 pub fn summary(r: &RuleReport) -> String {
     let fired = r.rules.iter().filter(|e| e.fired).count();

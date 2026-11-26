@@ -412,3 +412,46 @@ fn the_checklist_flags_a_team_without_race_as_a_hint_and_new_teams_get_one() {
     assert!(item(&map).ok);
     assert!(sk::checklist(&doc::new_map("m")).iter().all(|c| !c.text.contains("every team has a race")), "no teams, no item");
 }
+
+// ---- the outcome of a play-test (round 4, step 9) ----
+
+/// The text shapes of one frame of the section in a window 700 wide and 300 tall: (text, top of it).
+fn drawn_text(p: &mut Project, st: &mut sk::Panel) -> Vec<(String, f32)> {
+    let ctx = egui::Context::default();
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(700.0, 300.0))), ..Default::default() };
+    let mut full = ctx.run_ui(raw, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| sk::show(ui, st, p, "red"));
+    });
+    full.textures_delta.clear();
+    full.shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::epaint::Shape::Text(t) => Some((t.galley.text().to_string(), t.pos.y)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_play_test_that_ended_shows_its_outcome_from_the_rule_report_at_the_top_of_the_section() {
+    let (root, assets, m) = setup("outcome");
+    let mut p = open(&assets, &m);
+    open_map(&mut p, "red").unwrap();
+    let mut st = sk::Panel::default();
+    assert!(st.last_play().is_empty() && !drawn_text(&mut p, &mut st).iter().any(|(t, _)| t.contains("Last play-test")));
+    let report = openprocyon_editor::launch::parse_rule_report(
+        r#"{"mission":"red","outcome":"victory","play_time":75.0,"rules":[{"name":"A","fired":true,"runs":1,"first_run":1.0,"last_run":1.0,"active":true},{"name":"B","fired":false,"runs":0,"active":false}]}"#,
+    );
+    st.ended(&Ok(Some(report.unwrap())), None);
+    assert_eq!(st.last_play(), "red: Victory after 1:15; 1 of 2 rules fired, 1 never");
+    let text = drawn_text(&mut p, &mut st);
+    let at = text.iter().find(|(t, _)| t.starts_with("Last play-test: red: Victory")).map(|(_, y)| *y).expect("the outcome is drawn");
+    let first_section = text.iter().find(|(t, _)| t.contains("Lobby listing")).map(|(_, y)| *y).expect("the section is drawn");
+    assert!(at < first_section && at < 60.0, "the outcome is the first thing of the section: {at} before {first_section}");
+    // no report, a broken one, and a game that failed
+    st.ended(&Ok(None), None);
+    assert!(st.last_play().contains("no rule report"), "{}", st.last_play());
+    st.ended(&Err("cut".into()), Some("The game exited with code 1".into()));
+    assert!(st.last_play().contains("cut") && st.error() == Some("The game exited with code 1"));
+    let _ = std::fs::remove_dir_all(&root);
+}
