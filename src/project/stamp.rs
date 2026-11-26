@@ -3,42 +3,41 @@
 
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::time::SystemTime;
 
-/// Length, modification time and a hash of the content of a file.
+/// Length and a hash of the content of a file: equal stamps are equal content, whatever the modification time (a touched file with
+/// the same bytes is not a change). A file that cannot be read (missing) is `None`, and two missing files are the same.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileStamp {
-    pub len: u64,
-    pub mtime: Option<SystemTime>,
-    pub hash: u64,
+    len: u64,
+    hash: u64,
 }
 
 impl FileStamp {
     /// The stamp of the file at `path`, or `None` when it cannot be read (missing).
     pub fn of(path: &Path) -> Option<FileStamp> {
         let bytes = std::fs::read(path).ok()?;
-        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-        Some(FileStamp::of_bytes(&bytes, mtime))
-    }
-
-    /// The stamp of `bytes` as written at `mtime`.
-    pub fn of_bytes(bytes: &[u8], mtime: Option<SystemTime>) -> FileStamp {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         bytes.hash(&mut h);
-        FileStamp { len: bytes.len() as u64, mtime, hash: h.finish() }
-    }
-
-    /// Same content (a touched file with the same bytes is not a change).
-    pub fn same_content(&self, other: &FileStamp) -> bool {
-        self.len == other.len && self.hash == other.hash
+        Some(FileStamp { len: bytes.len() as u64, hash: h.finish() })
     }
 }
 
-/// [`FileStamp::same_content`] for files that may be missing (two missing files are the same).
-pub fn same(a: &Option<FileStamp>, b: &Option<FileStamp>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a.same_content(b),
-        _ => false,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stamps_follow_content_not_time_and_a_missing_file_is_none() {
+        let d = std::env::temp_dir().join(format!("procyon-editor-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("a.json");
+        assert_eq!(FileStamp::of(&f), None);
+        std::fs::write(&f, "{}").unwrap();
+        let first = FileStamp::of(&f);
+        std::fs::write(&f, "{}").unwrap(); // rewritten with the same bytes: a new modification time
+        assert_eq!(FileStamp::of(&f), first);
+        std::fs::write(&f, "{ }").unwrap();
+        assert_ne!(FileStamp::of(&f), first);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

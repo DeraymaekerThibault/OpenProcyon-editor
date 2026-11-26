@@ -156,9 +156,6 @@ pub fn set_backdrop(project: &mut Project, id: &str, file: &Path) -> Result<(), 
     map_rel(id)?;
     check_picture(file)?;
     let to = project.dir.join(doc::backdrop_rel(id));
-    if let Some(parent) = to.parent() {
-        guard::create_dir_all(parent, project.import.as_deref())?;
-    }
     guard::copy(file, &to, project.import.as_deref())?;
     let edit = Edit::set(pointer(&[doc::KEY_BACKDROP]), Value::from(id));
     apply(project, id, "Set backdrop", vec![edit], false)

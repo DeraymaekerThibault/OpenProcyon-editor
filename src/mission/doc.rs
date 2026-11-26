@@ -760,11 +760,6 @@ impl GeoTable {
     }
 }
 
-/// The names of the paths, in file order.
-pub fn path_names(mission: &Value) -> Vec<&str> {
-    GeoTable::Paths.get(mission).map_or_else(Vec::new, |o| o.keys().map(String::as_str).collect())
-}
-
 /// The names of the point sets, in file order.
 pub fn point_set_names(mission: &Value) -> Vec<&str> {
     GeoTable::PointSets.get(mission).map_or_else(Vec::new, |o| o.keys().map(String::as_str).collect())

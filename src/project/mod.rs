@@ -381,9 +381,6 @@ impl Project {
             let to = out.join(rel);
             match doc.plan().0 {
                 Plan::Write(f) => {
-                    if let Some(parent) = to.parent() {
-                        guard::create_dir_all(parent, import.as_deref())?;
-                    }
                     guard::write(&to, to_json_string(&f), import.as_deref())?;
                 }
                 // saving would delete the file: the check sees it gone
@@ -552,14 +549,21 @@ impl Project {
     /// Takes back the last step (in whichever document it was); returns its label. A step of a group ([`Project::do_group`]) takes
     /// the rest of its group with it.
     pub fn undo(&mut self) -> Option<String> {
-        let first = self.undo_one()?;
-        let label = first.label.clone();
-        let group = first.group;
-        self.redo.push(first);
-        while group != 0 && self.undo.last().is_some_and(|c| c.group == group) {
-            let Some(next) = self.undo_one() else { break };
-            self.redo.push(next);
+        self.shift(true)
+    }
+
+    /// Moves the last step of one stack to the other, and the rest of its group, undoing (`undoing`) or applying it again; returns the
+    /// label of the first.
+    fn shift(&mut self, undoing: bool) -> Option<String> {
+        let one = |p: &mut Project| if undoing { p.undo_one() } else { p.redo_one() };
+        let first = one(self)?;
+        let (label, group) = (first.label.clone(), first.group);
+        let mut moved = vec![first];
+        while group != 0 && (if undoing { &self.undo } else { &self.redo }).last().is_some_and(|c| c.group == group) {
+            let Some(next) = one(self) else { break };
+            moved.push(next);
         }
+        (if undoing { &mut self.redo } else { &mut self.undo }).extend(moved);
         Some(label)
     }
 
@@ -575,15 +579,7 @@ impl Project {
 
     /// Applies the last undone step again (and the rest of its group); returns its label.
     pub fn redo(&mut self) -> Option<String> {
-        let first = self.redo_one()?;
-        let label = first.label.clone();
-        let group = first.group;
-        self.undo.push(first);
-        while group != 0 && self.redo.last().is_some_and(|c| c.group == group) {
-            let Some(next) = self.redo_one() else { break };
-            self.undo.push(next);
-        }
-        Some(label)
+        self.shift(false)
     }
 
     fn redo_one(&mut self) -> Option<Command> {
@@ -656,9 +652,6 @@ impl Project {
         let (plan, warnings) = doc.plan();
         match &plan {
             Plan::Write(file) => {
-                if let Some(parent) = path.parent() {
-                    guard::create_dir_all(parent, import.as_deref())?;
-                }
                 guard::write(&path, to_json_string(file), import.as_deref())?;
                 // The editor's own write is not an outside change.
                 doc.disk = FileStamp::of(&path);
@@ -724,28 +717,23 @@ impl Project {
         // Files added or removed by hand (or by a script): the layer list is the engine's report of the folder, so build it again.
         let now = layers::listing(&self.dir);
         if now != self.files {
-            let names = |a: &std::collections::BTreeSet<String>, b: &std::collections::BTreeSet<String>| {
-                let v: Vec<&str> = a.difference(b).map(String::as_str).take(3).collect();
-                (a.difference(b).count(), v.join(", "))
+            let part = |what: &str, a: &std::collections::BTreeSet<String>, b: &std::collections::BTreeSet<String>| {
+                let names: Vec<&str> = a.difference(b).map(String::as_str).collect();
+                let more = names.len().saturating_sub(3);
+                (!names.is_empty()).then(|| format!("{what} {}{}", names[..names.len() - more].join(", "), if more > 0 { format!(" and {more} more") } else { String::new() }))
             };
-            let (added, removed) = (names(&now, &self.files), names(&self.files, &now));
-            let mut parts = vec![];
-            for (what, (n, list)) in [("added", added), ("removed", removed)] {
-                if n > 0 {
-                    parts.push(format!("{what} {list}{}", if n > 3 { format!(" and {} more", n - 3) } else { String::new() }));
-                }
-            }
+            let parts: Vec<String> = [part("added", &now, &self.files), part("removed", &self.files, &now)].into_iter().flatten().collect();
             out.push(Notice { rel: String::new(), text: format!("mod folder changed: {}", parts.join("; ")), conflict: false });
             touched = true;
         }
         for d in &mut self.docs {
             let now = FileStamp::of(&self.dir.join(&d.rel));
-            if stamp::same(&now, &d.disk) {
+            if now == d.disk {
                 d.disk = now;
                 d.conflict = None;
             } else if !d.dirty {
                 reload.push((d.rel.clone(), now));
-            } else if !d.conflict.as_ref().is_some_and(|seen| stamp::same(seen, &now)) {
+            } else if !d.conflict.as_ref().is_some_and(|seen| *seen == now) {
                 d.conflict = Some(now);
                 touched = true;
                 out.push(Notice { rel: d.rel.clone(), text: format!("{} changed on disk and has unsaved edits here: reload from disk or keep your edits", d.rel), conflict: true });
@@ -1096,6 +1084,35 @@ mod tests {
         assert!(p.save().errors.is_empty());
         assert!(p.poll().is_empty(), "own writes are known");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_folder_change_message_names_three_files_and_counts_the_rest() {
+        let (root, assets, m) = setup("handmsg");
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        for i in 1..=5 {
+            write(&m, &format!("data/render/a{i}.json"), r#"{"a": 1}"#);
+        }
+        let text = |n: Vec<Notice>| n.into_iter().map(|n| n.text).find(|t| t.starts_with("mod folder changed")).unwrap_or_default();
+        assert_eq!(text(p.poll()), "mod folder changed: added data/render/a1.json, data/render/a2.json, data/render/a3.json and 2 more");
+        std::fs::remove_file(m.join("data/render/a1.json")).unwrap();
+        write(&m, "data/render/b.json", r#"{"a": 1}"#);
+        assert_eq!(text(p.poll()), "mod folder changed: added data/render/b.json; removed data/render/a1.json");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_check_folder_gets_an_unsaved_file_that_saves_as_it_is_even_when_its_folder_holds_nothing_else() {
+        let (root, assets, m) = setup("checknothing");
+        write(&m, "ships/Ship_X/ship.json", r#"{"extends": "Ship_X", "speed": 5}"#);
+        let mut p = Project::open(&m, Some(assets)).unwrap();
+        // a key of the retail ship taken away: the file cannot say so, so it saves as it is, and the edit is a warning
+        p.do_step("ships/Ship_X/ship.json", "Remove name", vec![Edit::remove("/name")]).unwrap();
+        assert_eq!(p.doc("ships/Ship_X/ship.json").unwrap().plan().0, Plan::Nothing);
+        let out = p.check_dir().unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("ships/Ship_X/ship.json")).unwrap(), r#"{"extends": "Ship_X", "speed": 5}"#);
+        drop(p);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -222,7 +222,6 @@ pub fn import_sound(project: &mut Project, id: &str, event: &str, source: &Path,
     if dest.exists() {
         return Err(format!("{} exists already: pick another name", dest.display()));
     }
-    guard::create_dir_all(&dir, project.import.as_deref())?;
     guard::copy(source, &dest, project.import.as_deref())?;
     let at = mdoc::media_entry_pointer(MediaTable::Speech, event);
     let current = project.doc(&rel).and_then(|d| d.edited.pointer(&format!("{at}/{}", mdoc::SPEECH_FILE))).and_then(Value::as_str).map(str::to_string);

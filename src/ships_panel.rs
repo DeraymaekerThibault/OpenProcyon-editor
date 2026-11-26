@@ -164,7 +164,6 @@ pub fn new_ship_from_glb(project: &mut Project, id: &str, glb: &Path) -> Result<
         return Err(format!("{id}: a ship of that id exists already"));
     }
     let dest = project.dir.join("ships").join(id).join("model.glb");
-    crate::project::guard::create_dir_all(dest.parent().expect("has a parent"), project.import.as_deref())?;
     crate::project::guard::write(&dest, &bytes, project.import.as_deref())?;
     // the editor's own write: take the file into the layer list now, so the next poll does not announce it as an outside change
     project.rebuild()?;
@@ -318,13 +317,6 @@ impl State {
         self.focus = Some(dotted_to_pointer(&focus.path));
         true
     }
-}
-
-/// The height of a list of ships or weapons, from `remaining`, the height left below its top in the visible area: with nothing
-/// selected it takes what is left minus a margin for the rows under it; with a selection the form needs room, so the list takes half.
-/// Never under 180 points (about nine rows).
-pub fn list_height(remaining: f32, selected: bool) -> f32 {
-    (if selected { remaining * 0.5 } else { remaining - 90.0 }).max(180.0)
 }
 
 /// The height left for a list drawn at the cursor of `ui`.
@@ -610,14 +602,6 @@ mod tests {
     fn gun_names_skip_the_schema_key() {
         assert_eq!(gun_names(&json!({"$schema": "x", "G1": {}, "G2": {}})), ["G1", "G2"]);
         assert!(gun_names(&Value::Null).is_empty());
-    }
-
-    #[test]
-    fn the_list_takes_what_is_left_with_a_floor_and_shares_it_with_the_form() {
-        assert_eq!(list_height(800.0, false), 710.0, "nothing selected: the rest, minus the rows below");
-        assert_eq!(list_height(800.0, true), 400.0, "a selection: half, the form needs room");
-        assert_eq!(list_height(100.0, false), 180.0);
-        assert_eq!(list_height(100.0, true), 180.0);
     }
 
     #[test]

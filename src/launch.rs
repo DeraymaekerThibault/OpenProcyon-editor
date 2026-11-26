@@ -221,13 +221,6 @@ pub fn strip_ansi(text: &str) -> String {
     out
 }
 
-/// The last `n` non-empty lines of `text` (escape sequences stripped), trimmed, joined with newlines.
-pub fn last_lines(text: &str, n: usize) -> String {
-    let text = strip_ansi(text);
-    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
-    lines[lines.len().saturating_sub(n)..].join("\n")
-}
-
 /// Whether a log line is a warning or an error: the level word as the game's logger prints it, or a panic.
 fn is_problem_line(line: &str) -> bool {
     line.split_whitespace().take(4).any(|w| matches!(w.trim_end_matches(':'), "WARN" | "ERROR")) || line.contains("panicked at")
@@ -623,7 +616,6 @@ mod tests {
         assert_eq!(r.matches("lobby scenario").count(), 1, "a line that is both tail and failure is listed once");
         assert!(error_lines("Something Failed: PANICKED here\nb\nc\nd\ne", 8).starts_with("Something Failed"));
         assert_eq!(error_lines("a\nb\nc", 2), "b\nc");
-        assert!(!last_lines(log, 3).contains('\u{1b}'));
         let l = Launch::new(Path::new("/m"), "x");
         assert!(l.envs().contains(&("NO_COLOR", "1".to_string())));
     }
