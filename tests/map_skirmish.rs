@@ -3,6 +3,8 @@
 //! lobby": the engine's skirmish list (`menu::skirmish_maps`, read in a child process that has the mod's overlay as its assets) and its
 //! end-rule reader (`victory::Victory::from_map`), plus `--check-mod` as a library call.
 
+mod common;
+
 use bevy_egui::egui;
 use openprocyon::authoring::{self, Level, rule_schema, schemas};
 use openprocyon_editor::form::model::{Kind, Node};
@@ -367,27 +369,32 @@ fn rules_are_added_renamed_flagged_and_deleted_as_steps() {
 
 // ---- the drawing ----
 
+/// The section of map `red` in a window `h` tall, in the shared rig: its state is the project and the panel.
+fn section(p: Project, h: f32) -> common::Rig<'static, (Project, sk::Panel)> {
+    common::Rig::new((700.0, h), (p, sk::Panel::default()), |ui, (p, st)| {
+        egui::ScrollArea::vertical().show(ui, |ui| sk::show(ui, st, p, "red"));
+    })
+}
+
 #[test]
 fn the_section_draws_for_a_map_with_and_without_script_and_changes_nothing() {
     let (root, assets, m) = setup("draw");
     let mut p = open(&assets, &m);
     open_map(&mut p, "red").unwrap();
-    let ctx = egui::Context::default();
-    let mut st = sk::Panel::default();
-    let frame = |p: &mut Project, st: &mut sk::Panel| {
-        let before = (p.undo_label().map(str::to_string), p.dirty_rels());
-        ctx.run_ui(Default::default(), |ui| sk::show(ui, st, p, "red")).textures_delta.clear();
-        assert_eq!((p.undo_label().map(str::to_string), p.dirty_rels()), before, "drawing is not an edit");
-    };
-    frame(&mut p, &mut st);
-    let rule = sk::add_rule(&mut p, "red").unwrap();
-    sk::add_item(&mut p, "red", rule, false, json!({"Type": "Team X Wins", "Team Name": "T1"})).unwrap();
-    sk::add_media(&mut p, "red", MediaTable::Speech, "HINT").unwrap();
-    sk::set_script_decides(&mut p, "red", true).unwrap();
-    for _ in 0..3 {
-        frame(&mut p, &mut st);
-    }
-    assert!(st.error().is_none(), "{:?}", st.error());
+    let mut rig = section(p, 900.0);
+    let before = |rig: &common::Rig<(Project, sk::Panel)>| (rig.state().0.undo_label().map(str::to_string), rig.state().0.dirty_rels());
+    let start = before(&rig);
+    rig.settle();
+    assert_eq!(before(&rig), start, "drawing is not an edit");
+    let p = &mut rig.state_mut().0;
+    let rule = sk::add_rule(p, "red").unwrap();
+    sk::add_item(p, "red", rule, false, json!({"Type": "Team X Wins", "Team Name": "T1"})).unwrap();
+    sk::add_media(p, "red", MediaTable::Speech, "HINT").unwrap();
+    sk::set_script_decides(p, "red", true).unwrap();
+    let edited = before(&rig);
+    rig.settle();
+    assert_eq!(before(&rig), edited, "drawing is not an edit");
+    assert!(rig.state().1.error().is_none(), "{:?}", rig.state().1.error());
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -415,40 +422,25 @@ fn the_checklist_flags_a_team_without_race_as_a_hint_and_new_teams_get_one() {
 
 // ---- the outcome of a play-test (round 4, step 9) ----
 
-/// The text shapes of one frame of the section in a window 700 wide and 300 tall: (text, top of it).
-fn drawn_text(p: &mut Project, st: &mut sk::Panel) -> Vec<(String, f32)> {
-    let ctx = egui::Context::default();
-    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(700.0, 300.0))), ..Default::default() };
-    let mut full = ctx.run_ui(raw, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| sk::show(ui, st, p, "red"));
-    });
-    full.textures_delta.clear();
-    full.shapes
-        .iter()
-        .filter_map(|s| match &s.shape {
-            egui::epaint::Shape::Text(t) => Some((t.galley.text().to_string(), t.pos.y)),
-            _ => None,
-        })
-        .collect()
-}
-
 #[test]
 fn a_play_test_that_ended_shows_its_outcome_from_the_rule_report_at_the_top_of_the_section() {
     let (root, assets, m) = setup("outcome");
     let mut p = open(&assets, &m);
     open_map(&mut p, "red").unwrap();
-    let mut st = sk::Panel::default();
-    assert!(st.last_play().is_empty() && !drawn_text(&mut p, &mut st).iter().any(|(t, _)| t.contains("Last play-test")));
+    let mut rig = section(p, 300.0);
+    assert!(rig.state().1.last_play().is_empty() && !rig.texts().iter().any(|d| d.text.contains("Last play-test")));
     let report = openprocyon_editor::launch::parse_rule_report(
         r#"{"mission":"red","outcome":"victory","play_time":75.0,"rules":[{"name":"A","fired":true,"runs":1,"first_run":1.0,"last_run":1.0,"active":true},{"name":"B","fired":false,"runs":0,"active":false}]}"#,
     );
-    st.ended(&Ok(Some(report.unwrap())), None);
-    assert_eq!(st.last_play(), "red: Victory after 1:15; 1 of 2 rules fired, 1 never");
-    let text = drawn_text(&mut p, &mut st);
-    let at = text.iter().find(|(t, _)| t.starts_with("Last play-test: red: Victory")).map(|(_, y)| *y).expect("the outcome is drawn");
-    let first_section = text.iter().find(|(t, _)| t.contains("Lobby listing")).map(|(_, y)| *y).expect("the section is drawn");
+    rig.state_mut().1.ended(&Ok(Some(report.unwrap())), None);
+    assert_eq!(rig.state().1.last_play(), "red: Victory after 1:15; 1 of 2 rules fired, 1 never");
+    rig.frame();
+    let text = rig.texts();
+    let at = text.iter().find(|d| d.text.starts_with("Last play-test: red: Victory")).map(|d| d.rect.min.y).expect("the outcome is drawn");
+    let first_section = text.iter().find(|d| d.text.contains("Lobby listing")).map(|d| d.rect.min.y).expect("the section is drawn");
     assert!(at < first_section && at < 60.0, "the outcome is the first thing of the section: {at} before {first_section}");
     // no report, a broken one, and a game that failed
+    let st = &mut rig.state_mut().1;
     st.ended(&Ok(None), None);
     assert!(st.last_play().contains("no rule report"), "{}", st.last_play());
     st.ended(&Err("cut".into()), Some("The game exited with code 1".into()));

@@ -1,14 +1,16 @@
 //! The rule-field widgets (T3) driven headlessly: a real egui frame per step, pointer and text events, and what the form says through
 //! its edits. Widgets are found by the ids `schema_form` documents (`field_id`, `child_id`), read back with `Context::read_response`.
 
-use bevy_egui::egui::{self, Pos2, Rect};
+mod common;
+
+use bevy_egui::egui;
 use openprocyon::authoring::check_mission;
 use openprocyon_editor::checks::Finding;
 use openprocyon_editor::edit::{self, Edit};
 use openprocyon_editor::schema_form::{self as sf, Names, Schema, Widget};
 use serde_json::{Value, json};
 
-const SCREEN: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 1400.0));
+const SCREEN: (f32, f32) = (900.0, 1400.0);
 
 fn mission() -> Value {
     json!({
@@ -40,83 +42,79 @@ fn type_with(s: &Schema, condition: bool, kind: &str) -> (String, String) {
         .unwrap_or_else(|| panic!("no {kind} field in the schema"))
 }
 
-struct Rig {
-    ctx: egui::Context,
+/// What the form is drawn from, and what it did: the item, the edits it made (also applied to the item, as the caller's `do_step` would).
+struct St {
     schema: Schema,
     names: Names,
     item: Value,
     is_cond: bool,
     problems: Vec<Finding>,
     edits: Vec<Edit>,
-    t: f64,
 }
 
-fn at(ctx: &egui::Context, id: egui::Id) -> Pos2 {
-    ctx.read_response(id).unwrap_or_else(|| panic!("no widget {id:?}")).rect.center()
+/// The form of one item in a scrolled panel, in the shared rig; `rig.item`, `rig.edits` and `rig.problems` are its state.
+struct Rig(common::Rig<'static, St>);
+
+impl std::ops::Deref for Rig {
+    type Target = St;
+    fn deref(&self) -> &St {
+        self.0.state()
+    }
+}
+
+impl std::ops::DerefMut for Rig {
+    fn deref_mut(&mut self) -> &mut St {
+        self.0.state_mut()
+    }
 }
 
 impl Rig {
     fn new(item: Value, is_cond: bool, m: &Value) -> Rig {
-        Rig { ctx: egui::Context::default(), schema: Schema::engine(), names: names_of(m), item, is_cond, problems: vec![], edits: vec![], t: 0.0 }
+        let st = St { schema: Schema::engine(), names: names_of(m), item, is_cond, problems: vec![], edits: vec![] };
+        Rig(common::Rig::new(SCREEN, st, |ui, st| {
+            let problems: Vec<&Finding> = st.problems.iter().collect();
+            let mut got = vec![];
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                got = sf::item_form_edits(ui, &st.schema, &st.names, &st.item, st.is_cond, &problems, "/item", Rig::id());
+            });
+            for e in &got {
+                let rel = e.pointer.strip_prefix("/item").unwrap_or("");
+                let mut doc = json!({"item": std::mem::take(&mut st.item)});
+                let edit = match &e.new {
+                    Some(v) => Edit::set(format!("/item{rel}"), v.clone()),
+                    None => Edit::remove(format!("/item{rel}")),
+                };
+                edit::apply(&mut doc, &edit).unwrap();
+                st.item = doc["item"].take();
+            }
+            st.edits.extend(got);
+        }))
     }
 
     fn id() -> egui::Id {
         egui::Id::new("item")
     }
 
-    /// One frame; the edits it makes are applied to the item (as the caller's `do_step` would) and collected in `self.edits`.
-    fn frame(&mut self, mut events: Vec<egui::Event>) {
-        self.t += 0.05;
-        events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-        let raw = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.t), events, ..Default::default() };
-        let (schema, names, item, is_cond) = (&self.schema, &self.names, &self.item, self.is_cond);
-        let problems: Vec<&Finding> = self.problems.iter().collect();
-        let mut got = vec![];
-        let mut full = self.ctx.run_ui(raw, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                got = sf::item_form_edits(ui, schema, names, item, is_cond, &problems, "/item", Rig::id());
-            });
-        });
-        full.textures_delta.clear();
-        for e in &got {
-            let rel = e.pointer.strip_prefix("/item").unwrap_or("");
-            let mut doc = json!({"item": std::mem::take(&mut self.item)});
-            match &e.new {
-                Some(v) => {
-                    edit::apply(&mut doc, &Edit::set(format!("/item{rel}"), v.clone())).unwrap();
-                }
-                None => {
-                    edit::apply(&mut doc, &Edit::remove(format!("/item{rel}"))).unwrap();
-                }
-            }
-            self.item = doc["item"].take();
-        }
-        self.edits.extend(got);
-    }
-
     fn settle(&mut self) {
-        for _ in 0..3 {
-            self.frame(vec![]);
-        }
+        self.0.settle();
     }
 
     fn click(&mut self, id: egui::Id) {
-        let p = at(&self.ctx, id);
-        let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        self.frame(vec![egui::Event::PointerMoved(p)]);
-        self.frame(vec![b(true)]);
-        self.frame(vec![b(false)]);
-        self.settle();
+        self.0.click(id);
     }
 
     fn type_text(&mut self, id: egui::Id, text: &str) {
-        self.click(id);
-        self.frame(vec![egui::Event::Text(text.into())]);
-        self.settle();
+        self.0.type_into(id, text);
     }
 
     fn shown(&self, id: egui::Id) -> bool {
-        self.ctx.read_response(id).is_some()
+        self.0.shown(id)
+    }
+
+    /// Select all of the focused box (Ctrl+A) and type `text` over it.
+    fn replace_text(&mut self, text: &str) {
+        self.0.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
+        self.0.type_text(text);
     }
 }
 
@@ -180,9 +178,7 @@ fn a_volume_field_is_a_typeahead_dropdown_that_writes_the_pick() {
     // Type-ahead narrows the list.
     rig.type_text(fid(&field).with("filter"), "zzz");
     assert!(!rig.shown(fid(&field).with(("opt", "Gate Area"))), "no match: the list is empty");
-    rig.frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
-    rig.frame(vec![egui::Event::Text("gate".into())]);
-    rig.settle();
+    rig.replace_text("gate");
     rig.click(fid(&field).with(("opt", "Gate Area")));
     assert_eq!(rig.item[&field], "Gate Area");
     assert_eq!(rig.edits.last().unwrap(), &Edit { pointer: format!("/item/{field}"), old: None, new: Some(json!("Gate Area")) });
@@ -223,9 +219,7 @@ fn a_flag_is_free_text_with_suggestions_and_new_names_are_allowed() {
     assert_eq!(rig.item[&field], "gate open");
     // A name nobody sets is fine: it is the author's new flag.
     rig.click(fid(&field).with("text"));
-    rig.frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
-    rig.frame(vec![egui::Event::Text("brand new".into())]);
-    rig.settle();
+    rig.replace_text("brand new");
     assert_eq!(rig.item[&field], "brand new");
 }
 
@@ -272,16 +266,11 @@ fn an_untouched_ranged_number_writes_nothing_and_booleans_default_to_strings() {
     let s = Schema::engine();
     let f = s.types.iter().flat_map(|t| &t.fields).find(|f| f.kind == "number" && f.range.is_some()).expect("a ranged number");
     assert!(f.range.is_some());
-    let mut obj = serde_json::Map::new();
-    let ctx = egui::Context::default();
-    let m = Names::default();
     let (lo, hi) = f.range.unwrap();
-    let raw = egui::RawInput { screen_rect: Some(SCREEN), ..Default::default() };
-    let mut full = ctx.run_ui(raw, |ui| {
-        sf::field_widget(ui, f, &mut obj, &m, egui::Id::new("n"));
+    let rig = common::Rig::new(SCREEN, (serde_json::Map::new(), Names::default()), |ui, (obj, m)| {
+        sf::field_widget(ui, f, obj, m, egui::Id::new("n"));
     });
-    full.textures_delta.clear();
-    assert!(obj.is_empty(), "an untouched field writes nothing (the default shows greyed)");
+    assert!(rig.state().0.is_empty(), "an untouched field writes nothing (the default shows greyed)");
     assert!(lo < hi);
     let b = s.types.iter().flat_map(|t| &t.fields).find(|f| f.kind == "bool").unwrap();
     assert!(sf::default_value(b).is_string());
