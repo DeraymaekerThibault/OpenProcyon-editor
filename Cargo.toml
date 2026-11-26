@@ -16,11 +16,11 @@ name = "procyon-editor"
 path = "src/main.rs"
 
 [dependencies]
-# OpenProcyon#654 (duplicate-id false positives, lobby error text, console win/lose in any battle) and #651 (developer console
-# in every singleplayer battle), on top of #646, #647, #649, #641, #638-#640, merged on main as f1bf09f; pinned to that
-# commit until a release tag includes it.
-openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "f1bf09f" }
-# Same version and features as the engine's game/Cargo.toml at f1bf09f; keep them equal on every engine upgrade.
+# OpenProcyon main at 5e6ad33: #666 (consolidation: one rule world builder, ActiveScript, battle-start reset), #653 (multiplayer
+# phase 1, lobby JSON setup), #668 (remaster), on top of #651, #654 and everything before (#638-#649); pinned to that commit
+# until a release tag includes it.
+openprocyon = { git = "https://github.com/DeraymaekerThibault/OpenProcyon", rev = "5e6ad33" }
+# Same version and features as the engine's game/Cargo.toml at 5e6ad33; keep them equal on every engine upgrade.
 bevy = { version = "0.20", default-features = false, features = ["default_app", "3d_bevy_render", "ui_bevy_render", "scene", "std", "bevy_winit", "default_font", "multi_threaded", "x11", "wayland", "bevy_audio", "vorbis"] }
 # bevy_egui defaults minus `picking` (map dragging uses egui's own drag sense; the engine does not build bevy_picking).
 bevy_egui = { version = "0.43", default-features = false, features = ["manage_clipboard", "open_url", "default_fonts", "render", "bevy_ui"] }
