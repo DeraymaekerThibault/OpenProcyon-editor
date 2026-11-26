@@ -290,18 +290,21 @@ pub fn side(ui: &mut egui::Ui, st: &mut State, import: Option<&Path>) {
         if rows.is_empty() {
             ui.label("The mod has no files yet.");
         }
-        for r in &rows {
-            let color = match r.kind {
-                LayerKind::Skipped => egui::Color32::LIGHT_RED,
-                LayerKind::Unsaved => egui::Color32::YELLOW,
-                _ => ui.visuals().text_color(),
-            };
-            let text = if r.note.is_empty() { format!("{}: {}", r.kind.label(), r.file) } else { format!("{}: {} ({})", r.kind.label(), r.file, r.note) };
-            let can = matches!(r.kind, LayerKind::Extends | LayerKind::Merged | LayerKind::Unsaved) && p.open_doc(&r.file).is_ok_and(|i| p.docs[i].can_revert());
-            if layer_row(ui, color, &text, can) {
-                revert = Some(r.file.clone());
+        // A large mod has many files: the list scrolls in the height left in the side panel instead of running off its bottom.
+        egui::ScrollArea::vertical().id_salt("mod-layers").auto_shrink([false, true]).show(ui, |ui| {
+            for r in &rows {
+                let color = match r.kind {
+                    LayerKind::Skipped => egui::Color32::LIGHT_RED,
+                    LayerKind::Unsaved => egui::Color32::YELLOW,
+                    _ => ui.visuals().text_color(),
+                };
+                let text = if r.note.is_empty() { format!("{}: {}", r.kind.label(), r.file) } else { format!("{}: {} ({})", r.kind.label(), r.file, r.note) };
+                let can = matches!(r.kind, LayerKind::Extends | LayerKind::Merged | LayerKind::Unsaved) && p.open_doc(&r.file).is_ok_and(|i| p.docs[i].can_revert());
+                if layer_row(ui, color, &text, can) {
+                    revert = Some(r.file.clone());
+                }
             }
-        }
+        });
     });
     if let Some(rel) = revert
         && let Err(e) = p.revert_file(&rel)
@@ -477,6 +480,34 @@ mod tests {
         assert!(empty > 0.0);
         assert_eq!(y_with("Opened a mod."), empty);
         assert_eq!(y_with(&"a long message that wraps onto several lines in a narrow panel. ".repeat(6)), empty);
+        drop(st);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_large_mods_layers_list_scrolls_inside_the_side_panel() {
+        let dir = std::env::temp_dir().join(format!("procyon-editor-layers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut st = State::default();
+        st.open(&dir.join("m"), None, true);
+        std::fs::create_dir_all(dir.join("m/data")).unwrap();
+        for i in 0..80 {
+            std::fs::write(dir.join(format!("m/data/extra_{i}.json")), "{}").unwrap();
+        }
+        st.open(&dir.join("m"), None, false);
+        assert!(st.project.as_ref().unwrap().layer_rows().len() >= 80);
+        let ctx = egui::Context::default();
+        let mut bottom = 0.0;
+        for _ in 0..2 {
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 400.0))), ..Default::default() };
+            ctx.run_ui(raw, |ui| {
+                side(ui, &mut st, None);
+                bottom = ui.min_rect().max.y;
+            })
+            .textures_delta
+            .clear();
+        }
+        assert!(bottom <= 401.0, "the side panel runs to y = {bottom} in a 400 px window");
         drop(st);
         let _ = std::fs::remove_dir_all(&dir);
     }
