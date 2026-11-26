@@ -2,7 +2,9 @@
 //! by the ids `rules_view::wid` and `schema_form::field_id` document, and the add menu (which has no ids of its own) by the text it
 //! paints. Synthetic data only, in a temp folder.
 
-use bevy_egui::egui::{self, Pos2, Rect};
+mod common;
+
+use bevy_egui::egui::{self, Pos2};
 use openprocyon_editor::mission::doc as mdoc;
 use openprocyon_editor::mission::project as mproject;
 use openprocyon_editor::mission::rules_view::{self as rv, State, wid};
@@ -11,23 +13,29 @@ use openprocyon_editor::schema_form::{self as sf, Schema};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-const SCREEN: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1000.0, 3000.0));
+const SCREEN: (f32, f32) = (1000.0, 3000.0);
 const ID: &str = "tst";
 
-struct Rig {
-    ctx: egui::Context,
+/// What the panels work on: the project, the rule list's state and the temp folder (removed on drop).
+struct St {
     project: Project,
     st: State,
     root: PathBuf,
-    t: f64,
-    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
-fn collect_text(shape: &egui::epaint::Shape, out: &mut Vec<(String, Pos2)>) {
-    match shape {
-        egui::epaint::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos)),
-        egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
-        _ => {}
+/// The rule list in a scrolled panel, in the shared rig; `r.project`, `r.st` and `r.root` are its state.
+struct Rig(common::Rig<'static, St>);
+
+impl std::ops::Deref for Rig {
+    type Target = St;
+    fn deref(&self) -> &St {
+        self.0.state()
+    }
+}
+
+impl std::ops::DerefMut for Rig {
+    fn deref_mut(&mut self) -> &mut St {
+        self.0.state_mut()
     }
 }
 
@@ -38,57 +46,44 @@ impl Rig {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("mod.json"), r#"{"id": "t", "name": "T", "format": 1}"#).unwrap();
         let project = Project::open(&root, None).unwrap();
-        Rig { ctx: egui::Context::default(), project, st: State::default(), root, t: 0.0, shapes: vec![] }
+        Rig(common::Rig::new(SCREEN, St { project, st: State::default(), root }, |ui, s| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                rv::picker_with(ui, &mut s.project, &mut s.st);
+                rv::show_with(ui, &mut s.project, &mut s.st);
+            });
+        }))
     }
 
-    fn frame(&mut self, mut events: Vec<egui::Event>) {
-        self.t += 0.05;
-        events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-        let raw = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.t), events, ..Default::default() };
-        let (project, st) = (&mut self.project, &mut self.st);
-        let mut full = self.ctx.run_ui(raw, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                rv::picker_with(ui, project, st);
-                rv::show_with(ui, project, st);
-            });
-        });
-        full.textures_delta.clear();
-        self.shapes = full.shapes;
+    fn ctx(&self) -> &egui::Context {
+        self.0.ctx()
     }
 
     fn settle(&mut self) {
-        for _ in 0..3 {
-            self.frame(vec![]);
-        }
+        self.0.settle();
     }
 
     fn click_at(&mut self, p: Pos2) {
-        let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        self.frame(vec![egui::Event::PointerMoved(p)]);
-        self.frame(vec![b(true)]);
-        self.frame(vec![b(false)]);
-        self.settle();
-    }
-
-    fn pos(&self, id: egui::Id) -> Pos2 {
-        self.ctx.read_response(id).unwrap_or_else(|| panic!("no widget {id:?}")).rect.center()
+        self.0.click_at(p);
     }
 
     fn click(&mut self, id: egui::Id) {
-        let p = self.pos(id);
-        self.click_at(p);
+        self.0.click(id);
     }
 
     fn shown(&self, id: egui::Id) -> bool {
-        self.ctx.read_response(id).is_some()
+        self.0.shown(id)
     }
 
-    /// The painted text starting with `text`, as a point inside it.
+    /// Whether a text starting with `text` was painted in the last frame (a hidden row keeps the last response of its id, so ask the text).
+    fn painted(&self, text: &str) -> bool {
+        self.0.texts().iter().any(|d| d.text.starts_with(text))
+    }
+
+    /// The painted text starting with `text` (the last such), as a point inside it.
     fn text_pos(&self, text: &str) -> Pos2 {
-        let mut all = vec![];
-        self.shapes.iter().for_each(|s| collect_text(&s.shape, &mut all));
-        let (_, p) = all.iter().rfind(|(t, _)| t.starts_with(text)).unwrap_or_else(|| panic!("no text '{text}' painted in {:?}", all.iter().map(|(t, _)| t).collect::<Vec<_>>()));
-        *p + egui::vec2(6.0, 6.0)
+        let all = self.0.texts();
+        let d = all.iter().rfind(|d| d.text.starts_with(text)).unwrap_or_else(|| panic!("no text '{text}' painted in {:?}", all.iter().map(|d| &d.text).collect::<Vec<_>>()));
+        d.rect.min + egui::vec2(6.0, 6.0)
     }
 
     fn click_text(&mut self, text: &str) {
@@ -97,16 +92,17 @@ impl Rig {
     }
 
     fn type_text(&mut self, id: egui::Id, text: &str) {
-        self.click(id);
-        self.frame(vec![egui::Event::Text(text.into())]);
-        self.settle();
+        self.0.type_into(id, text);
+    }
+
+    /// Select all of the focused box (Ctrl+A) and type `text` over it.
+    fn replace_text(&mut self, text: &str) {
+        self.0.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
+        self.0.type_text(text);
     }
 
     fn key(&mut self, key: egui::Key) {
-        let e = |pressed| egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE };
-        self.frame(vec![e(true)]);
-        self.frame(vec![e(false)]);
-        self.settle();
+        self.0.key(key);
     }
 
     fn rel(&self) -> String {
@@ -147,8 +143,7 @@ impl Rig {
     fn add_condition(&mut self, ty: &str) {
         self.click(wid(("add-menu", true)));
         self.click_text("Search types");
-        self.frame(vec![egui::Event::Text(ty.into())]);
-        self.settle();
+        self.0.type_text(ty);
         self.click_text(ty);
     }
 }
@@ -203,8 +198,7 @@ fn flags_reorder_duplicate_delete_and_rename_follow_the_rule_operations() {
     assert_eq!(names(&r)[2], "Rule 3!");
     r.click(wid(("rule", 1)));
     r.click(wid("rename"));
-    r.frame(vec![egui::Event::Key { key: egui::Key::A, physical_key: Some(egui::Key::A), pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
-    r.frame(vec![egui::Event::Text("Rule 2".into())]);
+    r.replace_text("Rule 2");
     r.key(egui::Key::Enter);
     assert_eq!(names(&r)[1], "Rule 1", "a repeated name is refused");
     assert!(r.st.status.contains("another rule"), "{}", r.st.status);
@@ -287,10 +281,10 @@ fn every_section_reads_the_pickers_mission() {
     let mut r = Rig::new("one-selection");
     r.open_mission();
     // the rig keeps its own State; the tab keeps the same one in egui memory, which the sections read
-    rv::state(&r.ctx).lock().unwrap().mission = r.st.mission.clone();
-    let (ctx, project) = (r.ctx.clone(), &mut r.project);
+    rv::state(r.ctx()).lock().unwrap().mission = r.st.mission.clone();
+    let (ctx, project) = (r.ctx().clone(), &mut r.project);
     let mut seen = vec![];
-    let mut full = ctx.run_ui(egui::RawInput { screen_rect: Some(SCREEN), ..Default::default() }, |ui| {
+    let mut full = ctx.run_ui(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(SCREEN.0, SCREEN.1))), ..Default::default() }, |ui| {
         seen.push(rv::current_mission(ui, project));
         ships::show(ui, project);
         tasks::show(ui, project);
@@ -324,10 +318,8 @@ fn the_list_filters_by_text_and_by_problems() {
     r.type_text(wid("filter"), "Rule 2");
     assert!(r.shown(wid(("rule", 1))));
     // hidden rows are not drawn: their id keeps the last frame's response, so ask the painted text
-    let mut all = vec![];
-    r.shapes.iter().for_each(|s| collect_text(&s.shape, &mut all));
-    assert!(all.iter().any(|(t, _)| t.starts_with("2. Rule 2")));
-    assert!(!all.iter().any(|(t, _)| t.starts_with("1. Rule 1") || t.starts_with("3. Rule 3")), "{all:?}");
+    assert!(r.painted("2. Rule 2"));
+    assert!(!r.painted("1. Rule 1") && !r.painted("3. Rule 3"));
 }
 
 #[test]
@@ -337,18 +329,13 @@ fn the_uses_filter_never_hides_the_selected_rule_and_goes_when_a_rule_is_added()
     for _ in 0..3 {
         r.click(wid("add-rule"));
     }
-    let painted = |r: &Rig, text: &str| {
-        let mut all = vec![];
-        r.shapes.iter().for_each(|s| collect_text(&s.shape, &mut all));
-        all.iter().any(|(t, _)| t.starts_with(text))
-    };
     // no rule names this volume, so the filter lists none: the selected rule (the last added) stays
     r.st.uses = Some(rv::Uses { label: "volume 'Nowhere'".into(), keys: vec![("volume".into(), "Nowhere".into())] });
     r.settle();
-    assert!(painted(&r, "3. Rule 3"), "the selected rule is listed");
-    assert!(!painted(&r, "1. Rule 1") && !painted(&r, "2. Rule 2"), "the others are filtered out");
+    assert!(r.painted("3. Rule 3"), "the selected rule is listed");
+    assert!(!r.painted("1. Rule 1") && !r.painted("2. Rule 2"), "the others are filtered out");
     // a new rule clears the filter and is listed with the rest
     r.click(wid("add-rule"));
     assert!(r.st.uses.is_none(), "the stale filter is gone");
-    assert!(painted(&r, "4. Rule 4") && painted(&r, "1. Rule 1"));
+    assert!(r.painted("4. Rule 4") && r.painted("1. Rule 1"));
 }

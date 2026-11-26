@@ -44,3 +44,6 @@ debug = "line-tables-only"
 
 [profile.test.package."*"]
 debug = false
+
+[dev-dependencies]
+egui_kittest = "0.36"

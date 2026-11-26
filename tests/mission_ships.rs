@@ -414,83 +414,38 @@ fn the_start_form_shows_defaults_greyed_with_a_note_until_a_value_is_typed() {
 
 // ---- the ship id box (round 4, step 13): a click selects its text ----
 
-use bevy_egui::egui::{self, Pos2, Rect};
+mod common;
 
-/// `text_edit_selecting` driven by pointer and text events: the text it holds and the rectangle of its box.
-struct IdBox {
-    ctx: egui::Context,
-    current: String,
-    rect: Rect,
-    answers: Vec<String>,
-    t: f64,
-}
+use bevy_egui::egui;
+use common::Rig;
 
-impl IdBox {
-    fn new(current: &str) -> IdBox {
-        let mut b = IdBox { ctx: egui::Context::default(), current: current.into(), rect: Rect::NOTHING, answers: vec![], t: 0.0 };
-        b.frame(vec![]);
-        b.frame(vec![]);
-        b
-    }
-    fn id() -> egui::Id {
-        egui::Id::new("ship_id_box")
-    }
-    fn frame(&mut self, mut events: Vec<egui::Event>) {
-        self.t += 0.05;
-        events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0))), time: Some(self.t), events, ..Default::default() };
-        let (current, answers) = (self.current.clone(), &mut self.answers);
-        let mut full = self.ctx.run_ui(raw, |ui| {
-            answers.extend(openprocyon_editor::mission::ships::text_edit_selecting(ui, IdBox::id(), &current, 40.0));
-        });
-        full.textures_delta.clear();
-        self.rect = self.ctx.read_response(IdBox::id()).map_or(self.rect, |r| r.rect);
-    }
-    fn click(&mut self, at: Pos2) {
-        let b = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        self.frame(vec![egui::Event::PointerMoved(at)]);
-        self.frame(vec![b(true)]);
-        self.frame(vec![b(false)]);
-        self.frame(vec![]);
-    }
+/// A text box in a small window: the answers it gave. `select` picks the ship id's helper (selects on a click) or the plain one.
+fn text_box(current: &'static str, select: bool) -> Rig<'static, Vec<String>> {
+    let id = egui::Id::new("box");
+    Rig::new((400.0, 200.0), vec![], move |ui, answers| {
+        let edit = if select { ships::text_edit_selecting } else { ships::text_edit };
+        answers.extend(edit(ui, id, current, 120.0));
+    })
 }
 
 #[test]
 fn a_click_into_the_ship_id_box_selects_its_text_so_typing_replaces_it() {
-    let mut b = IdBox::new("2");
+    let mut b = text_box("2", true);
     // the click lands on the right of the text, where a plain box would put the cursor after the 2
-    let at = Pos2::new(b.rect.max.x - 3.0, b.rect.center().y);
-    b.click(at);
-    b.frame(vec![egui::Event::Text("10".into())]);
-    b.frame(vec![]);
-    // leave the box: what was typed is the answer
-    b.click(Pos2::new(300.0, 150.0));
-    b.frame(vec![]);
-    assert_eq!(b.answers, ["10"], "typing 10 over 2 gives 10, not 210");
+    let r = b.rect(egui::Id::new("box")).unwrap();
+    b.click_at(egui::pos2(r.max.x - 3.0, r.center().y));
+    b.type_text("10");
+    b.click_at(egui::pos2(300.0, 150.0)); // leave the box: what was typed is the answer
+    assert_eq!(b.state(), &["10"], "typing 10 over 2 gives 10, not 210");
 }
 
 #[test]
 fn the_plain_text_box_still_places_the_cursor_where_clicked() {
     // names are edited, not replaced: the helper the other boxes use does not select
-    let ctx = egui::Context::default();
-    let mut answers = vec![];
-    let mut t = 0.0;
-    let mut frame = |ev: Vec<egui::Event>| {
-        t += 0.05;
-        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0))), time: Some(t), events: ev, ..Default::default() };
-        let mut full = ctx.run_ui(raw, |ui| answers.extend(openprocyon_editor::mission::ships::text_edit(ui, egui::Id::new("name"), "Dauntless", 120.0)));
-        full.textures_delta.clear();
-    };
-    frame(vec![]);
-    frame(vec![]);
-    let r = ctx.read_response(egui::Id::new("name")).unwrap().rect;
-    let at = Pos2::new(r.max.x - 3.0, r.center().y);
-    let b = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-    frame(vec![egui::Event::PointerMoved(at)]);
-    frame(vec![b(true)]);
-    frame(vec![b(false)]);
-    frame(vec![egui::Event::Text("!".into())]);
-    frame(vec![]);
-    let state = egui::TextEdit::load_state(&ctx, egui::Id::new("name")).expect("the box has a state");
-    assert_eq!(state.cursor.char_range().map(|c| c.is_empty()), Some(true), "no text is selected");
+    let mut b = text_box("Dauntless", false);
+    let r = b.rect(egui::Id::new("box")).unwrap();
+    b.click_at(egui::pos2(r.max.x - 3.0, r.center().y));
+    b.type_text("!");
+    b.click_at(egui::pos2(300.0, 150.0));
+    assert_eq!(b.state(), &["Dauntless!"], "the text typed is added where the cursor was, nothing was selected");
 }

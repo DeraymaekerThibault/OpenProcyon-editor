@@ -2,7 +2,9 @@
 //! painted gold in a real egui frame). Direction two: a pick on the plan sets the list's "uses this" filter, and the list shows only the
 //! rules (and names the tasks) that read it. Synthetic missions in a temp folder, no game content.
 
-use bevy_egui::egui::{self, Pos2, Rect};
+mod common;
+
+use bevy_egui::egui::{self, Pos2};
 use openprocyon_editor::mission::doc as mdoc;
 use openprocyon_editor::mission::geometry::{Item, Kind};
 use openprocyon_editor::mission::plan;
@@ -13,7 +15,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 const ID: &str = "m";
-const SCREEN: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1000.0, 1400.0));
+const SCREEN: (f32, f32) = (1000.0, 1400.0);
 const GOLD: egui::Color32 = egui::Color32::from_rgb(255, 205, 60);
 
 fn schema_type(role: &str, kind: &str) -> (String, String) {
@@ -58,12 +60,26 @@ fn mission() -> Value {
     })
 }
 
-struct Rig {
-    ctx: egui::Context,
+/// The project, and the temp folder it lives in (removed on drop).
+struct St {
     project: Project,
     root: PathBuf,
-    t: f64,
-    shapes: Vec<egui::epaint::ClippedShape>,
+}
+
+/// The rule list and the plan, one above the other, in the shared rig; `rig.project` is its state.
+struct Rig(common::Rig<'static, St>);
+
+impl std::ops::Deref for Rig {
+    type Target = St;
+    fn deref(&self) -> &St {
+        self.0.state()
+    }
+}
+
+impl std::ops::DerefMut for Rig {
+    fn deref_mut(&mut self) -> &mut St {
+        self.0.state_mut()
+    }
 }
 
 fn collect(shape: &egui::epaint::Shape, texts: &mut Vec<String>, gold: &mut usize) {
@@ -88,33 +104,26 @@ impl Rig {
         std::fs::write(root.join("maps/m/media.json"), r#"{"speech": {}, "messages": {}, "ship_names": {}}"#).unwrap();
         let mut project = Project::open(&root, None).unwrap();
         open_mission(&mut project, ID).unwrap();
-        let ctx = egui::Context::default();
-        rv::state(&ctx).lock().unwrap().mission = Some(ID.into());
-        Rig { ctx, project, root, t: 0.0, shapes: vec![] }
+        let rig = Rig(common::Rig::new(SCREEN, St { project, root }, |ui, s| {
+            rv::show(ui, &mut s.project);
+            plan::show(ui, &mut s.project);
+        }));
+        rv::state(rig.ctx()).lock().unwrap().mission = Some(ID.into());
+        rig
     }
 
-    /// One frame of the rule list and the plan, one above the other.
-    fn frame(&mut self) {
-        self.t += 0.05;
-        let raw = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.t), ..Default::default() };
-        let project = &mut self.project;
-        let mut full = self.ctx.run_ui(raw, |ui| {
-            rv::show(ui, project);
-            plan::show(ui, project);
-        });
-        full.textures_delta.clear();
-        self.shapes = full.shapes;
+    fn ctx(&self) -> &egui::Context {
+        self.0.ctx()
     }
 
     fn settle(&mut self) {
-        for _ in 0..3 {
-            self.frame();
-        }
+        self.0.settle();
     }
 
+    /// What the last frame painted: its texts and how many gold shapes.
     fn painted(&self) -> (Vec<String>, usize) {
         let (mut texts, mut gold) = (vec![], 0);
-        self.shapes.iter().for_each(|s| collect(&s.shape, &mut texts, &mut gold));
+        self.0.shapes().iter().for_each(|s| collect(&s.shape, &mut texts, &mut gold));
         (texts, gold)
     }
 
@@ -152,7 +161,7 @@ fn the_selected_rule_is_painted_gold_on_the_plan() {
     let (_, none_selected_gold) = rig.painted();
     // rule 1 (index 0): the volume outline, the path's segment and two ships
     assert!(none_selected_gold >= 4, "gold shapes of rule 1: {none_selected_gold}");
-    rv::state(&rig.ctx).lock().unwrap().rule = 2;
+    rv::state(rig.ctx()).lock().unwrap().rule = 2;
     rig.settle();
     let (_, gold3) = rig.painted();
     // rule 3 names only the volume Area: fewer gold shapes than rule 1
@@ -183,26 +192,15 @@ fn the_list_shows_only_the_rules_that_use_the_pick_and_its_chip_clears_it() {
     rig.settle();
     assert_eq!(rig.rules_listed(), vec!["1. r1", "2. r2", "3. r3"]);
     let uses = plan::uses_of_items(&mission(), &[Item::Vertex(mdoc::GeoTable::Volumes, "Area".into(), 0)]).unwrap();
-    rv::state(&rig.ctx).lock().unwrap().uses = Some(uses);
+    rv::state(rig.ctx()).lock().unwrap().uses = Some(uses);
     rig.settle();
     assert_eq!(rig.rules_listed(), vec!["1. r1", "3. r3"]);
     let (texts, _) = rig.painted();
     assert!(texts.iter().any(|t| t.contains("also read by the task(s): T")), "tasks named: {texts:?}");
     // the chip clears it
-    let p = rig.ctx.read_response(wid("uses-clear")).expect("the chip").rect.center();
-    let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-    for events in [vec![egui::Event::PointerMoved(p)], vec![b(true)], vec![b(false)]] {
-        rig.t += 0.05;
-        let raw = egui::RawInput { screen_rect: Some(SCREEN), time: Some(rig.t), events, ..Default::default() };
-        let project = &mut rig.project;
-        let _ = rig.ctx.run_ui(raw, |ui| {
-            rv::show(ui, project);
-            plan::show(ui, project);
-        });
-    }
-    rig.settle();
+    rig.0.click(wid("uses-clear"));
     assert_eq!(rig.rules_listed(), vec!["1. r1", "2. r2", "3. r3"]);
-    assert!(rv::state(&rig.ctx).lock().unwrap().uses.is_none());
+    assert!(rv::state(rig.ctx()).lock().unwrap().uses.is_none());
 }
 
 #[test]
@@ -211,7 +209,7 @@ fn a_click_on_the_plan_sets_the_filter() {
     rig.settle();
     // the volume's label is painted at its first corner marker
     let mut at = None;
-    for s in &rig.shapes {
+    for s in rig.0.shapes() {
         fn find(s: &egui::epaint::Shape, at: &mut Option<Pos2>) {
             match s {
                 egui::epaint::Shape::Text(t) if t.galley.text() == "Unused" => *at = Some(t.pos),
@@ -227,24 +225,15 @@ fn a_click_on_the_plan_sets_the_filter() {
     'search: for dx in [-12.0f32, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0] {
         for dy in [-14.0f32, -8.0, 0.0, 8.0, 14.0] {
             let p = marker + egui::vec2(dx, dy);
-            let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-            for events in [vec![egui::Event::PointerMoved(p)], vec![b(true)], vec![b(false)]] {
-                rig.t += 0.05;
-                let raw = egui::RawInput { screen_rect: Some(SCREEN), time: Some(rig.t), events, ..Default::default() };
-                let project = &mut rig.project;
-                let _ = rig.ctx.run_ui(raw, |ui| {
-                    rv::show(ui, project);
-                    plan::show(ui, project);
-                });
-            }
-            if rv::state(&rig.ctx).lock().unwrap().uses.is_some() {
+            rig.0.click_at(p);
+            if rv::state(rig.ctx()).lock().unwrap().uses.is_some() {
                 got = true;
                 break 'search;
             }
         }
     }
     assert!(got, "no click near the label of 'Unused' picked it");
-    let uses: Uses = rv::state(&rig.ctx).lock().unwrap().uses.clone().unwrap();
+    let uses: Uses = rv::state(rig.ctx()).lock().unwrap().uses.clone().unwrap();
     assert_eq!(uses.label, "volume 'Unused'");
     rig.settle();
     // no rule reads Unused; only the selected rule stays listed (the detail pane shows it, so the list may not hide it)
