@@ -248,6 +248,9 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
             );
         }
         Ok(_) => {}
+        Err(e) if e == launch::GAME_NOT_FOUND => {
+            ui.colored_label(ui.visuals().warn_fg_color, e);
+        }
         Err(e) => {
             ui.colored_label(ui.visuals().warn_fg_color, format!("Cannot check the game version: {e} (set PROCYON_GAME_BIN)"));
         }
@@ -257,8 +260,8 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
     }
     picker(ui, "Map", &mut st.map, maps);
     picker(ui, "Ship", &mut st.ship, ships);
-    ui.checkbox(&mut st.lobby, "Play through the skirmish lobby (--lobby)")
-        .on_hover_text("The map must be a skirmish map. The ship above is not used: the lobby assigns the fleet. The game goes straight into the battle with these settings: the lobby screen itself is skipped.");
+    ui.checkbox(&mut st.lobby, "Play through the skirmish lobby")
+        .on_hover_text("Runs the game with --lobby. The map must be a skirmish map. The ship above is not used: the lobby assigns the fleet. The game goes straight into the battle with these settings: the lobby screen itself is skipped.");
     if st.lobby {
         ui.horizontal(|ui| {
             ui.label("Computers");
@@ -270,8 +273,8 @@ pub fn show(ui: &mut egui::Ui, st: &mut State, mod_dir: Option<&Path>, unsaved: 
         });
         ui.weak("Points and limit follow the lobby's own steps and ranges; the game refuses a value it does not accept.");
     }
-    ui.checkbox(&mut st.only_mod, "Load only this mod (--only-mod)")
-        .on_hover_text("The game loads this mod and none of the other mods you have enabled, so the run is of this mod alone.");
+    ui.checkbox(&mut st.only_mod, "Load only this mod")
+        .on_hover_text("Runs the game with --only-mod. The game loads this mod and none of the other mods you have enabled, so the run is of this mod alone.");
     ui.horizontal(|ui| {
         ui.checkbox(&mut st.save_first, "Save unsaved documents before launching");
         if unsaved > 0 {

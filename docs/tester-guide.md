@@ -60,7 +60,7 @@ if you hit it, add the point again in the view instead.
 
 1. Open the Weapons tab, choose "Bullets" (the "Guns" and "Bullets" switch is at the top).
 2. Type a name in the "New bullet" box, click "New bullet from scratch". The entry opens in a form.
-3. The form does not mark required fields (PROVISIONAL, known gap). The new entry is nearly empty: read the problems panel, which
+3. The form does not mark required fields; the Problems list at the bottom names any that are missing. The new entry is nearly empty: read the problems panel, which
    names what is missing, and fill those fields. Fill them from what you know of the game's data, or look at a retail bullet in
    the same tab for the sort of values. Do not use "Duplicate selected under this name" on a retail entry: it shows a warning
    because the copy would carry the game's data.
@@ -71,7 +71,7 @@ if you hit it, add the point again in the view instead.
 ## 4. Mount the gun on the ship
 
 1. Back on the Ships tab, select your ship.
-2. In the form open `guns`. Each mount you placed is an entry (named as you typed it in the 3D tab). Set `gun` to your gun's name
+2. In the form open "Guns" (the key `guns`; form labels are the keys made readable, the key is in the hover text). Each mount you placed is an entry (named as you typed it in the 3D tab). Set `gun` to your gun's name
    (a text field) and `arc_deg` to a firing arc. A mount name you did not place in 3D can be added with "Add" and a name under
    "new entry name", but then it has no position: place it in 3D instead.
 3. Open "Show in 3D" again: each gun shows its facing and arc.
@@ -94,7 +94,7 @@ if you hit it, add the point again in the view instead.
 ## 6. Play-test and preview
 
 1. Open the "Play-test & export" tab. If it warns that the game binary has another version than the editor, note both.
-2. "Load only this mod" is ticked by default (`--only-mod`): the game leaves your other enabled mods out, so the run tests your
+2. "Load only this mod" is ticked by default (it runs the game with `--only-mod`): the game leaves your other enabled mods out, so the run tests your
    mod alone. If you untick it, the tab lists the other enabled mods the game will load too.
 3. Pick a Map and your Ship with the "pick" menus. The ship menu lists the import's ships and the open mod's own; you can
    also type an id in the box.

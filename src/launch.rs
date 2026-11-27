@@ -489,13 +489,19 @@ pub fn bundled_mods() -> Option<PathBuf> {
     bundled_mods_for(bin.as_deref(), std::env::current_dir().ok().as_deref())
 }
 
+/// What the Play-test tab says when the game binary does not exist.
+pub const GAME_NOT_FOUND: &str = "Game not found. Set PROCYON_GAME_BIN to the openprocyon binary (in .env or your environment), or put openprocyon on your PATH.";
+
 /// Runs `<game bin> --version` and returns the version it prints; compare it with `openprocyon::authoring::ENGINE_VERSION`.
 pub fn game_version() -> Result<String, String> {
     version_of(&game_bin())
 }
 
 fn version_of(bin: &Path) -> Result<String, String> {
-    let out = Command::new(bin).arg("--version").output().map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+    let out = Command::new(bin)
+        .arg("--version")
+        .output()
+        .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GAME_NOT_FOUND.to_string() } else { format!("cannot run {}: {e}", bin.display()) })?;
     if !out.status.success() {
         return Err(format!("{} --version failed: {}", bin.display(), out.status));
     }
